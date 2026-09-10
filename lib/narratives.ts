@@ -24,7 +24,7 @@ export async function narrativeFeed(db:D1Database,owner:string){const rows=await
 const PAGE=20,COST=5000,DAY_LIMIT=500000,MONTH_LIMIT=15000000;
 export async function scanXBounded(db:D1Database,owner:string,token:string,accounts:string[]){
  const now=Date.now(),lease=crypto.randomUUID();await db.prepare('INSERT INTO collector(owner,state,lock_until,lock_id) VALUES(?,?,0,?) ON CONFLICT DO NOTHING').bind(owner,'{}','').run();
- const lock=await db.prepare('UPDATE collector SET lock_until=?,lock_id=? WHERE owner=? AND lock_until<? RETURNING state').bind(now+120000,lease,owner,now).first<{state:string}>();if(!lock)throw Error('An X scan is already running.');let state:any=JSON.parse(lock.state);try{
+ const lock=await db.prepare('UPDATE collector SET lock_until=?,lock_id=? WHERE owner=? AND lock_until<? RETURNING state').bind(now+120000,lease,owner,now).first<{state:string}>();if(!lock)throw Error('An X scan is already running.');const state:any=JSON.parse(lock.state);try{
  if(state.lastRun&&now-state.lastRun<60000)throw Error('Wait one minute between scans.');
  const keys=batches([...new Set(accounts.map(a=>a.toLowerCase()))].sort()).map(b=>b.join(','));const old=state.groups??[];state.groups=keys.map(k=>old.find((g:any)=>g.key===k)??{key:k,checked:0,since:null,next:null,start:null,end:null,newest:null});const group=[...state.groups].sort((a,b)=>a.checked-b.checked)[0];if(!group)throw Error('Configure at least one X handle.');
  const day=new Date(now).toISOString().slice(0,10),month=day.slice(0,7);await db.prepare('INSERT INTO usage(owner,day,reserved) VALUES(?,?,0) ON CONFLICT DO NOTHING').bind(owner,day).run();

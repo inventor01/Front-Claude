@@ -25,10 +25,29 @@ Cloudflare D1 stores owner-scoped watchlists, paper positions and encrypted X se
 
 Schema: `db/schema.ts`; generated migrations: `drizzle/`. Runtime uses prepared D1 statements. No runtime schema creation.
 
+## Hosting configuration
+
+`.openai/hosting.json` declares which Cloudflare bindings this Site needs. It is read at
+config time by `vite.config.ts` and copied into `dist/.openai/` at build time, so it must
+stay committed:
+
+```json
+{ "d1": "DB", "r2": null }
+```
+
+`d1` is the D1 binding name the application reads (`env.DB`). `r2` is `null` because no
+object storage is used; set it to `"BUCKET"` to provision the bucket declared in
+`cloudflare-env.d.ts`. Database IDs are placeholders locally and injected by the control
+plane on deploy. This file holds binding names only — never secrets. `FRONT_SETTINGS_KEY`
+remains a Sites runtime secret.
+
 ## Verify and build
 
+- `npm run install:ci` installs from the lockfile.
 - `node tests/verify.mjs` exercises deduplication, partial provider failures, costs/invalid prices, query batching, real SQLite migrations, authentication, CSRF, owner isolation, order idempotency, encryption and disconnect using synthetic provider responses.
 - `node node_modules/typescript/bin/tsc --noEmit`
+- `npm run lint`
+- `npm run build` produces `dist/`, including `dist/.openai/hosting.json` and the generated migrations.
 - Build/deploy through the Sites plugin helper scripts. Source lives in the Site's connected repository.
 
 No real trades are executed. The product is a research and paper-trading tool, not a promise of income.
