@@ -14,6 +14,7 @@ Private web companion to [the Front scanner](https://github.com/inventor01/front
 ## Honest boundaries
 
 - Browser-driven discovery refreshes every five minutes while visible. X scanning is opt-in and browser-driven. Neither is a 24/7 scheduled job. The separately implemented Python scanner requires its own production runtime and credentials for background alerts.
+- Provider responses are validated at the boundary (`lib/schemas.ts`). Validation is lenient by design: unreadable entries are dropped and unknown fields pass through, so a provider changing its payload degrades coverage instead of breaking the desk. A response that is not recognisably the right shape is reported as a source failure, not as zero results.
 - Search is bounded by provider indexes and pagination caps; zero results never prove no related coin exists. Matching names/hashtags/links is not proof of token association, ownership, originality or future returns.
 - TikTok metrics, the historical five-factor virality score, holder concentration, mint authority and sellability checks are not implemented here. Missing data is explicitly unknown. No fabricated data or safety score.
 - Paper results do not model network fees, failed sells, MEV, price impact beyond fixed slippage or actual token sellability. Unclosed positions have no unrealized P&L estimate. The UI shows the most recent 500 positions.

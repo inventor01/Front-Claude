@@ -33,18 +33,14 @@ const eslintConfig = defineConfig([
     },
   },
   {
-    files: [
-      "lib/providers.ts",
-      "lib/narratives.ts",
-      "app/desk.tsx",
-      "app/lab/page.tsx",
-    ],
+    files: ["lib/narratives.ts", "app/desk.tsx", "app/lab/page.tsx"],
     rules: {
-      // These modules deserialize unvalidated third-party payloads (DEX Screener,
-      // GeckoTerminal, X, TikTok oEmbed) and untyped D1 row shapes. Hand-written
-      // interfaces here would assert a shape nobody checked at runtime, which is
-      // worse than an honest `any`. Kept as a visible warning until the payloads
-      // are parsed with zod (already a dependency) and narrowed from `unknown`.
+      // Third-party payloads are now parsed through lib/schemas.ts, so
+      // lib/providers.ts is held to the rule. What remains here is a different
+      // kind of debt: untyped D1 row shapes, the collector state blob this code
+      // writes itself, and browser-side `response.json()`. Those want generated
+      // row types and a typed API client, not runtime validation. Kept visible as
+      // warnings rather than silenced.
       "@typescript-eslint/no-explicit-any": "warn",
     },
   },
