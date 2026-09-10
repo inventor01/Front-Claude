@@ -45,6 +45,7 @@ remains a Sites runtime secret.
 ## Verify and build
 
 - `npm run install:ci` installs from the lockfile.
+- `npm run db:migrate:local` applies `drizzle/` to the local D1 that `npm run dev` serves. Run it once on a fresh checkout: the control plane applies migrations to the real database on deploy and the application never creates schema at runtime, so without this the desk starts with no tables. Re-running it is a no-op.
 - `node tests/verify.mjs` exercises deduplication, partial provider failures, costs/invalid prices, query batching, real SQLite migrations, authentication, CSRF, owner isolation, order idempotency, encryption and disconnect using synthetic provider responses.
 - `node node_modules/typescript/bin/tsc --noEmit`
 - `npm run lint`

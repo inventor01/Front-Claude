@@ -40,6 +40,12 @@ jobs:
       - name: Test
         run: node tests/verify.mjs
 
+      # verify.mjs replays the migrations through node:sqlite. This proves they
+      # also apply through wrangler to a real D1, which is stricter (0002 uses
+      # PRAGMA statements), and that the local dev database can be built at all.
+      - name: Migrations apply to a local D1
+        run: npm run db:migrate:local
+
       - name: Typecheck
         run: node node_modules/typescript/bin/tsc --noEmit
 
