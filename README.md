@@ -51,4 +51,6 @@ remains a Sites runtime secret.
 - `npm run build` produces `dist/`, including `dist/.openai/hosting.json` and the generated migrations.
 - Build/deploy through the Sites plugin helper scripts. Source lives in the Site's connected repository.
 
+`.github/workflows/ci.yml` runs all of the above on every push and pull request, and additionally fails if `db/schema.ts` was changed without a generated migration.
+
 No real trades are executed. The product is a research and paper-trading tool, not a promise of income.
