@@ -1,0 +1,9 @@
+export type Coin={mint:string;name:string;symbol:string;price:number|null;liquidity:number|null;volume:number|null;change:number|null;created:number|null;url:string;sources:string[];socials:string[]};
+export type Signal={id:string;title:string;source:string;detail:string;url:string;query:string;evidence?:{url:string;text:string;author:string;views:number|null}[]};
+export const validMint=(s:string)=>/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
+export const num=(v:unknown):number|null=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v))?Number(v):null;
+export function safeUrl(s:unknown){try{const u=new URL(String(s));return u.protocol==='https:'?u.href:'';}catch{return '';}}
+export function mergeCoins(rows:Coin[]){const m=new Map<string,Coin>();for(const c of rows){if(!validMint(c.mint))continue;const old=m.get(c.mint);if(!old){m.set(c.mint,c);continue;}const best=(c.liquidity??-1)>(old.liquidity??-1)?c:old;m.set(c.mint,{...best,sources:[...new Set([...old.sources,...c.sources])],socials:[...new Set([...old.socials,...c.socials])]});}return [...m.values()].sort((a,b)=>(b.liquidity??-1)-(a.liquidity??-1));}
+export function openFill(amount:number,price:number){if(!Number.isFinite(amount)||amount<1||amount>10000||!Number.isFinite(price)||price<=0)throw Error('Enter $1–$10,000 and use an available positive quote.');const entry=price*1.01;return {entry,quantity:amount*.997/entry};}
+export function closeFill(quantity:number,price:number){if(!Number.isFinite(price)||price<=0)throw Error('A current positive quote is required.');const exit=price*.99;return {exit,proceeds:quantity*exit*.997};}
+export function batches(accounts:string[]){const out:string[][]=[];let b:string[]=[];for(const a of accounts){if([...b,a].map(x=>'from:'+x).join(' OR ').length>450){out.push(b);b=[];}b.push(a);}if(b.length)out.push(b);return out;}
