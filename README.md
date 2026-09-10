@@ -21,7 +21,7 @@ Private web companion to [the Front scanner](https://github.com/inventor01/front
 
 ## Persistence and security
 
-Cloudflare D1 stores owner-scoped watchlists, paper positions and encrypted X settings. Production identity comes only from Sites ChatGPT authentication. Every API checks identity; every mutation checks same-origin requests. Paper entry IDs deduplicate retries; closes are conditional on an open position. Provider requests have 12-second timeouts. Public data is cached for 1–5 minutes; X results for 15 minutes per owner. The `FRONT_SETTINGS_KEY` secret (32 random bytes, base64) is managed as a Sites runtime secret and encrypts X tokens using AES-GCM. It must be preserved to decrypt stored settings. Disconnect deletes the credential and cached X results.
+Cloudflare D1 stores owner-scoped watchlists, paper positions and encrypted X settings. Production identity comes only from Sites ChatGPT authentication. Every API checks identity; every mutation checks same-origin requests. Paper entry IDs deduplicate retries per owner (`trades` is keyed on `(owner, id)`, so one owner's client-supplied ID cannot suppress another's); closes are conditional on an open position. Provider requests have 12-second timeouts. Public data is cached for 1–5 minutes; X results for 15 minutes per owner. The `FRONT_SETTINGS_KEY` secret (32 random bytes, base64) is managed as a Sites runtime secret and encrypts X tokens using AES-GCM. It must be preserved to decrypt stored settings. Disconnect deletes the credential and cached X results.
 
 Schema: `db/schema.ts`; generated migrations: `drizzle/`. Runtime uses prepared D1 statements. No runtime schema creation.
 
