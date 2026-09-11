@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
-import { dedupeEvidence, extractTikTokItemsFromJson, metricFromAria, normalizeConfig, sanitizeTopic, stableId } from './core.mjs';
+import { dedupeEvidence, extractHashtags, extractTikTokItemsFromJson, metricFromAria, normalizeConfig, sanitizeTopic, stableId, xTrendLabel } from './core.mjs';
 import { findSystemChrome, frontCdpUrl, frontLoginProfileDir, openRegularChromeForLogin, stopExistingFrontChrome, waitForCdp } from './system-browser.mjs';
 
 const HOST = '127.0.0.1';
@@ -92,8 +92,14 @@ async function ensureBrowser() {
 async function newPage(url) {
   const browser = await ensureBrowser();
   const page = await browser.newPage();
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-  return page;
+  try {
+    await page.goto(url, { waitUntil: 'commit', timeout: 20000 });
+    await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+    return page;
+  } catch (error) {
+    await page.close().catch(() => {});
+    throw error;
+  }
 }
 
 async function collectXQuery(query, limit) {
@@ -101,7 +107,7 @@ async function collectXQuery(query, limit) {
   if (!q) return [];
   const page = await newPage(`https://x.com/search?q=${encodeURIComponent(q)}&src=typed_query&f=live`);
   try {
-    await page.waitForTimeout(2200);
+    await page.waitForTimeout(2600);
     const articles = page.locator('article[data-testid="tweet"]');
     const count = Math.min(await articles.count(), limit);
     const out = [];
@@ -127,6 +133,7 @@ async function collectXQuery(query, limit) {
         provenance: `Local Chrome browser · X Latest search · query: ${q}`,
       });
     }
+    if (!out.length) throw new Error(`X returned no posts for “${q}”. Confirm the Front Chrome session is signed in and the search page is accessible.`);
     return out;
   } finally { await page.close(); }
 }
@@ -134,18 +141,29 @@ async function collectXQuery(query, limit) {
 async function collectXExplore(limit) {
   const page = await newPage('https://x.com/explore/tabs/trending');
   try {
-    await page.waitForTimeout(2200);
-    const links = page.locator('a[href*="/search?q="]');
-    const count = Math.min(await links.count(), limit);
+    await page.waitForTimeout(3000);
+    const candidates = page.locator('a[href*="/search?q="], [data-testid="trend"]');
+    const count = Math.min(await candidates.count(), Math.max(limit * 3, limit));
     const out = [];
-    for (let i = 0; i < count; i++) {
-      const link = links.nth(i);
-      const text = (await link.innerText().catch(() => '')).replace(/\n+/g, ' · ').trim();
-      const href = await link.getAttribute('href').catch(() => null);
-      if (!text || !href) continue;
-      const url = href.startsWith('http') ? href : `https://x.com${href}`;
+    for (let i = 0; i < count && out.length < limit; i++) {
+      const item = candidates.nth(i);
+      const raw = (await item.innerText().catch(() => '')).trim();
+      const text = xTrendLabel(raw);
+      if (!text) continue;
+      const href = await item.getAttribute('href').catch(() => null);
+      const url = href
+        ? (href.startsWith('http') ? href : `https://x.com${href}`)
+        : `https://x.com/search?q=${encodeURIComponent(text)}&src=trend_click&f=live`;
       out.push({ id: stableId('X', url, text), platform: 'X', author: 'X Explore', url, content: text, published: null, views: null, likes: null, provenance: 'Local Chrome browser · X Explore trending' });
     }
+    if (!out.length) {
+      const body = await page.locator('body').innerText().catch(() => '');
+      for (const tag of extractHashtags(body, limit)) {
+        const url = `https://x.com/search?q=${encodeURIComponent('#' + tag)}&src=trend_click&f=live`;
+        out.push({ id: stableId('X', url, tag), platform: 'X', author: 'X Explore', url, content: `#${tag}`, published: null, views: null, likes: null, provenance: 'Local Chrome browser · X Explore hashtag fallback' });
+      }
+    }
+    if (!out.length) throw new Error('X Explore loaded but no trend evidence was extractable. Confirm the Front Chrome session is signed in and Explore is available.');
     return out;
   } finally { await page.close(); }
 }
@@ -155,44 +173,94 @@ async function collectTikTokSearch(topic, limit) {
   if (!q) return [];
   const page = await newPage(`https://www.tiktok.com/search?q=${encodeURIComponent(q)}`);
   try {
-    await page.waitForTimeout(2600);
+    await page.waitForTimeout(3200);
     const extracted = await page.evaluate(() => {
       const scripts = Array.from(document.scripts).map((s) => s.textContent || '').filter(Boolean);
       const json = [];
       for (const text of scripts) {
-        if (!text.trim().startsWith('{')) continue;
-        try { json.push(JSON.parse(text)); } catch {}
+        const value = text.trim();
+        if (!value.startsWith('{') && !value.startsWith('[')) continue;
+        try { json.push(JSON.parse(value)); } catch {}
       }
       return json;
     });
     const items = [];
     for (const value of extracted) items.push(...extractTikTokItemsFromJson(value));
     const unique = new Map(items.map((item) => [item.id, item]));
-    return [...unique.values()].slice(0, limit).map((item) => {
+    const out = [...unique.values()].slice(0, limit).map((item) => {
       const author = item.author || 'TikTok';
       const url = author !== 'TikTok' ? `https://www.tiktok.com/@${author}/video/${item.id}` : `https://www.tiktok.com/video/${item.id}`;
       return { id: `tiktok:browser:${item.id}`, platform: 'TikTok', author, url, content: item.content, published: item.published, views: item.views, likes: item.likes, provenance: `Local Chrome browser · TikTok search · query: ${q}` };
     });
+    if (!out.length) throw new Error(`TikTok returned no extractable videos for “${q}”. The page may require verification or TikTok may have changed its page data.`);
+    return out;
+  } finally { await page.close(); }
+}
+
+async function collectTikTokExplore(limit) {
+  const page = await newPage('https://www.tiktok.com/explore');
+  try {
+    await page.waitForTimeout(3500);
+    const extracted = await page.evaluate(() => {
+      const json = [];
+      for (const script of Array.from(document.scripts)) {
+        const value = (script.textContent || '').trim();
+        if (!value.startsWith('{') && !value.startsWith('[')) continue;
+        try { json.push(JSON.parse(value)); } catch {}
+      }
+      return json;
+    });
+    const items = [];
+    for (const value of extracted) items.push(...extractTikTokItemsFromJson(value));
+    const unique = new Map(items.map((item) => [item.id, item]));
+    const out = [...unique.values()].slice(0, limit).map((item) => {
+      const author = item.author || 'TikTok';
+      const url = author !== 'TikTok' ? `https://www.tiktok.com/@${author}/video/${item.id}` : `https://www.tiktok.com/video/${item.id}`;
+      return { id: `tiktok:browser:${item.id}`, platform: 'TikTok', author, url, content: item.content, published: item.published, views: item.views, likes: item.likes, provenance: 'Local Chrome browser · TikTok Explore fallback' };
+    });
+    if (!out.length) throw new Error('TikTok Explore loaded but no extractable videos were found.');
+    return out;
   } finally { await page.close(); }
 }
 
 async function collectTikTokTrends(limit) {
-  const page = await newPage('https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/en');
+  let creativeError = null;
   try {
-    await page.waitForTimeout(2500);
-    const rows = page.locator('a[href*="/hashtag/"]');
-    const count = Math.min(await rows.count(), limit);
-    const out = [];
-    for (let i = 0; i < count; i++) {
-      const row = rows.nth(i);
-      const text = (await row.innerText().catch(() => '')).replace(/\n+/g, ' · ').trim();
-      const href = await row.getAttribute('href').catch(() => null);
-      if (!text || !href) continue;
-      const url = href.startsWith('http') ? href : `https://ads.tiktok.com${href}`;
-      out.push({ id: stableId('TikTok', url, text), platform: 'TikTok', author: 'TikTok Creative Center', url, content: text, published: null, views: null, likes: null, provenance: 'Local Chrome browser · TikTok Creative Center trends' });
-    }
-    return out;
-  } finally { await page.close(); }
+    const page = await newPage('https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/en');
+    try {
+      await page.waitForTimeout(3500);
+      const rows = page.locator('a[href*="/hashtag/"], a[href*="/trends/"]');
+      const count = Math.min(await rows.count(), Math.max(limit * 3, limit));
+      const out = [];
+      for (let i = 0; i < count && out.length < limit; i++) {
+        const row = rows.nth(i);
+        const text = (await row.innerText().catch(() => '')).replace(/\n+/g, ' · ').trim();
+        const href = await row.getAttribute('href').catch(() => null);
+        if (!text || !href) continue;
+        const url = href.startsWith('http') ? href : `https://ads.tiktok.com${href}`;
+        out.push({ id: stableId('TikTok', url, text), platform: 'TikTok', author: 'TikTok Creative Center', url, content: text, published: null, views: null, likes: null, provenance: 'Local Chrome browser · TikTok Creative Center trends' });
+      }
+      if (!out.length) {
+        const body = await page.locator('body').innerText().catch(() => '');
+        for (const tag of extractHashtags(body, limit)) {
+          const url = `https://www.tiktok.com/search?q=${encodeURIComponent(tag)}`;
+          out.push({ id: stableId('TikTok', url, tag), platform: 'TikTok', author: 'TikTok Creative Center', url, content: `#${tag}`, published: null, views: null, likes: null, provenance: 'Local Chrome browser · TikTok Creative Center hashtag fallback' });
+        }
+      }
+      if (out.length) return out;
+      creativeError = new Error('Creative Center loaded but no trend evidence was extractable.');
+    } finally { await page.close(); }
+  } catch (error) {
+    creativeError = error;
+  }
+
+  try {
+    return await collectTikTokExplore(limit);
+  } catch (fallbackError) {
+    const primary = creativeError instanceof Error ? creativeError.message : String(creativeError || 'unknown Creative Center failure');
+    const fallback = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+    throw new Error(`Creative Center unavailable (${primary}); TikTok Explore fallback also failed (${fallback}).`);
+  }
 }
 
 async function collectAll(input = {}) {
@@ -237,7 +305,7 @@ function status() {
   return {
     ok: true,
     service: 'front-browser-bridge',
-    version: 4,
+    version: 5,
     running,
     lastRun,
     lastCount,
@@ -273,11 +341,6 @@ const server = http.createServer(async (req, res) => {
       if (browserConnection?.isConnected?.()) await browserConnection.close().catch(() => {});
       browserConnection = undefined;
       context = undefined;
-
-      // A previous Front Chrome can keep this dedicated profile alive without the
-      // DevTools flag. Chrome then routes a new launch into that stale process and
-      // silently ignores the requested debugging port. Restart only Front's private
-      // profile so every login launch is guaranteed to own the CDP endpoint.
       stopExistingFrontChrome({ dataDir });
       await new Promise((resolve) => setTimeout(resolve, 700));
       const opened = openRegularChromeForLogin({ dataDir, chromeExecutable: systemChrome, debuggingPort: cdpPort });
