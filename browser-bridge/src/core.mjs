@@ -4,7 +4,12 @@ export const DEFAULT_CONFIG = Object.freeze({
   enabled: true,
   intervalMinutes: 15,
   scanXExplore: true,
+  scanXHome: true,
   scanTikTokTrends: true,
+  scanTikTokExplore: true,
+  scrollPasses: 4,
+  maxFeedItems: 40,
+  inferredTopicSearches: 4,
   maxTrendQueries: 3,
   resultsPerQuery: 6,
   xAccounts: [],
@@ -13,6 +18,7 @@ export const DEFAULT_CONFIG = Object.freeze({
 
 const asList = (value) => (Array.isArray(value) ? value : []);
 const cleanText = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+const clampInt = (value, fallback, min, max) => Math.max(min, Math.min(max, Math.trunc(Number(value) || fallback)));
 
 export function normalizeConfig(input = {}) {
   const xAccounts = [...new Set(asList(input.xAccounts)
@@ -23,16 +29,18 @@ export function normalizeConfig(input = {}) {
     .map((value) => cleanText(value, 100))
     .filter((value) => value.length >= 2))]
     .slice(0, 50);
-  const intervalMinutes = Math.max(10, Math.min(240, Number(input.intervalMinutes) || DEFAULT_CONFIG.intervalMinutes));
-  const maxTrendQueries = Math.max(0, Math.min(10, Number(input.maxTrendQueries) || DEFAULT_CONFIG.maxTrendQueries));
-  const resultsPerQuery = Math.max(2, Math.min(20, Number(input.resultsPerQuery) || DEFAULT_CONFIG.resultsPerQuery));
   return {
     enabled: input.enabled !== false,
-    intervalMinutes,
+    intervalMinutes: clampInt(input.intervalMinutes, DEFAULT_CONFIG.intervalMinutes, 10, 240),
     scanXExplore: input.scanXExplore !== false,
+    scanXHome: input.scanXHome !== false,
     scanTikTokTrends: input.scanTikTokTrends !== false,
-    maxTrendQueries,
-    resultsPerQuery,
+    scanTikTokExplore: input.scanTikTokExplore !== false,
+    scrollPasses: clampInt(input.scrollPasses, DEFAULT_CONFIG.scrollPasses, 1, 10),
+    maxFeedItems: clampInt(input.maxFeedItems, DEFAULT_CONFIG.maxFeedItems, 10, 120),
+    inferredTopicSearches: clampInt(input.inferredTopicSearches, DEFAULT_CONFIG.inferredTopicSearches, 0, 10),
+    maxTrendQueries: clampInt(input.maxTrendQueries, DEFAULT_CONFIG.maxTrendQueries, 0, 10),
+    resultsPerQuery: clampInt(input.resultsPerQuery, DEFAULT_CONFIG.resultsPerQuery, 2, 20),
     xAccounts,
     keywords,
   };
@@ -64,13 +72,98 @@ export function metricFromAria(label, metricName) {
   return reverse ? parseCompactNumber(reverse[1]) : null;
 }
 
+export function extractHashtags(value, limit = 30) {
+  const out = [];
+  const seen = new Set();
+  for (const match of String(value ?? '').matchAll(/#([\p{L}\p{N}_]{2,80})/gu)) {
+    const tag = match[1];
+    const key = tag.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export function xTrendLabel(value) {
+  const lines = String(value ?? '').split(/\n+/).map((line) => cleanText(line, 160)).filter(Boolean);
+  const noise = /^(trending|show more|what(?:'|’)s happening|for you|news|sports|entertainment|[\d,.]+\s*(?:posts?|post))$/i;
+  const candidates = lines.filter((line) => !noise.test(line) && !/^trending in\b/i.test(line));
+  return candidates.find((line) => line.startsWith('#')) || candidates.find((line) => !/\bposts?\b/i.test(line)) || '';
+}
+
+const STOP = new Set(('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i you your we our they their he she his her not no yes just very really new now today tonight yesterday tomorrow have has had do does did can could would should will may might about into over under after before more most some any all one two via amp rt https http com www video watch post posts people thing things time day get got like know think make made going go went see saw says said say look looks looking why how what when where who which there here').split(' '));
+const normalizeTopic = (value) => cleanText(value, 100).replace(/^#/, '').replace(/[’']/g, '').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+function candidatePhrases(content) {
+  const out = new Map();
+  const add = (label, weight) => {
+    const clean = cleanText(label, 100).replace(/^#/, '').trim();
+    const key = normalizeTopic(clean);
+    if (key.length < 3 || key.length > 80 || STOP.has(key)) return;
+    const words = key.split(' ').filter(Boolean);
+    if (!words.length || words.every((word) => STOP.has(word) || /^\d+$/.test(word))) return;
+    const old = out.get(key);
+    if (!old || weight > old.weight) out.set(key, { key, label: clean, weight });
+  };
+  for (const tag of extractHashtags(content, 12)) add(tag, 3);
+  for (const match of String(content).matchAll(/\b[A-Z][\p{L}\p{N}'’_-]{2,30}(?:\s+[A-Z][\p{L}\p{N}'’_-]{2,30}){0,2}\b/gu)) add(match[0], 2.2);
+  const words = normalizeTopic(content).split(' ').filter((word) => word.length >= 3 && !STOP.has(word) && !/^\d+$/.test(word)).slice(0, 80);
+  for (let size = 2; size <= 3; size++) {
+    for (let i = 0; i <= words.length - size; i++) add(words.slice(i, i + size).join(' '), size === 3 ? 1.25 : 1);
+  }
+  return [...out.values()];
+}
+
+export function inferTopics(events, now = Date.now(), limit = 10) {
+  const normalized = dedupeEvidence(events);
+  const topics = new Map();
+  for (const event of normalized) {
+    const ageHours = event.published ? Math.max(0, (now - event.published) / 3600000) : 6;
+    const recency = Math.max(0.15, 1 / (1 + ageHours / 3));
+    const engagement = Math.log10(1 + (event.views || 0)) + 0.35 * Math.log10(1 + (event.likes || 0));
+    for (const phrase of candidatePhrases(event.content)) {
+      const row = topics.get(phrase.key) || { topic: phrase.label, key: phrase.key, evidence: [], authors: new Set(), platforms: new Set(), phraseWeight: 0, recency: 0, engagement: 0 };
+      row.evidence.push(event);
+      row.authors.add(`${event.platform}:${event.author.toLocaleLowerCase()}`);
+      row.platforms.add(event.platform);
+      row.phraseWeight += phrase.weight;
+      row.recency += recency;
+      row.engagement += engagement;
+      topics.set(phrase.key, row);
+    }
+  }
+  return [...topics.values()]
+    .map((row) => {
+      const evidenceCount = row.evidence.length;
+      const authorCount = row.authors.size;
+      const platformCount = row.platforms.size;
+      const corroborated = evidenceCount >= 2 && authorCount >= 2;
+      const score = row.phraseWeight + authorCount * 2.5 + platformCount * 2 + row.recency * 1.5 + Math.min(8, row.engagement * 0.45);
+      const dated = row.evidence.map((event) => event.published).filter((value) => Number.isFinite(value));
+      return {
+        topic: row.topic,
+        key: row.key,
+        evidenceCount,
+        authorCount,
+        platforms: [...row.platforms],
+        oldestPublished: dated.length ? Math.min(...dated) : null,
+        newestPublished: dated.length ? Math.max(...dated) : null,
+        engagementEvidence: row.evidence.reduce((sum, event) => sum + (event.views || 0) + (event.likes || 0), 0),
+        score: Number(score.toFixed(2)),
+        corroborated,
+        evidenceIds: row.evidence.slice(0, 8).map((event) => event.id),
+      };
+    })
+    .filter((row) => row.corroborated)
+    .sort((a, b) => b.score - a.score || b.authorCount - a.authorCount || b.evidenceCount - a.evidenceCount)
+    .slice(0, Math.max(0, limit));
+}
+
 function allowedUrl(platform, rawUrl) {
   let url;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return null;
-  }
+  try { url = new URL(rawUrl); } catch { return null; }
   if (!['https:', 'http:'].includes(url.protocol)) return null;
   const host = url.hostname.toLowerCase();
   if (platform === 'X' && !['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com'].includes(host)) return null;
@@ -118,9 +211,7 @@ export function extractTikTokItemsFromJson(value) {
       const id = typeof node.id === 'string' && /^\d{10,25}$/.test(node.id) ? node.id : null;
       const desc = typeof node.desc === 'string' ? node.desc : typeof node.title === 'string' ? node.title : '';
       if (id && desc) {
-        const author = typeof node.author === 'object' && node.author
-          ? (node.author.uniqueId || node.author.nickname || '')
-          : (node.authorName || node.author || '');
+        const author = typeof node.author === 'object' && node.author ? (node.author.uniqueId || node.author.nickname || '') : (node.authorName || node.author || '');
         const stats = typeof node.stats === 'object' && node.stats ? node.stats : {};
         const createTime = Number(node.createTime || node.create_time || 0);
         out.set(id, {

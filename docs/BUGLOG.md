@@ -1,5 +1,13 @@
 # Front bug / change log
 
+## 2026-09-11 — TikTok timed out and browser narratives did not surface in Narrative Radar
+
+**Root cause:** The browser bridge waited for full `domcontentloaded` on TikTok Creative Center, which can stall for analytics/region resources and exhaust the 45-second navigation timeout even when useful page content is already available. X Explore could also return zero without raising a warning. Separately, saved browser evidence created stored narratives, but Discover still rendered only the separate public-signal feed, so successful browser discoveries were not guaranteed to appear in the main Narrative Radar.
+
+**Permanent fix:** Browser navigation now waits only for the initial document commit, then gives DOM readiness a bounded best-effort wait. TikTok Creative Center extraction now falls back to page hashtags and then to TikTok Explore video data if Creative Center is unavailable. X Explore uses broader trend selectors plus hashtag fallback and reports a clear warning if nothing can be extracted. Saved browser evidence automatically promotes fresh narratives, attempts bounded coin matching for the freshest narratives, and Discover now merges stored browser narratives ahead of public signals. A successful browser scan reloads the desk so the Narrative Radar immediately reflects the newly stored evidence.
+
+**Regression protection:** Added deterministic tests for hashtag fallback and X trend-label extraction. Existing bridge launch, health, origin, unit, typecheck, lint, build, migration, and bundle checks remain in CI.
+
 ## 2026-09-11 — Scan could not attach to Front Chrome (`ECONNREFUSED 127.0.0.1:43982`)
 
 **Root cause:** An older dedicated Front Chrome process could remain alive from a previous login launch that did not include the remote-debugging flags. When Front later launched Chrome with `--remote-debugging-port=43982`, Chrome reused the already-running process for that profile and silently ignored the new startup flags. The tabs opened, but no DevTools endpoint listened on 127.0.0.1:43982, so every scan failed before collection with `ECONNREFUSED`.

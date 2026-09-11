@@ -1,18 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dedupeEvidence, extractTikTokItemsFromJson, metricFromAria, normalizeConfig, parseCompactNumber, sanitizeTopic, stableId } from '../src/core.mjs';
+import { dedupeEvidence, extractHashtags, extractTikTokItemsFromJson, inferTopics, metricFromAria, normalizeConfig, parseCompactNumber, sanitizeTopic, stableId, xTrendLabel } from '../src/core.mjs';
 
 test('normalizes and caps bridge config', () => {
   const cfg = normalizeConfig({
     intervalMinutes: 1,
     maxTrendQueries: 99,
+    inferredTopicSearches: 99,
+    scrollPasses: 99,
+    maxFeedItems: 999,
     resultsPerQuery: 100,
     xAccounts: ['@abc', 'abc', 'bad handle'],
     keywords: [' Dejon Love ', '', 'x'],
   });
   assert.equal(cfg.intervalMinutes, 10);
   assert.equal(cfg.maxTrendQueries, 10);
+  assert.equal(cfg.inferredTopicSearches, 10);
+  assert.equal(cfg.scrollPasses, 10);
+  assert.equal(cfg.maxFeedItems, 120);
   assert.equal(cfg.resultsPerQuery, 20);
+  assert.equal(cfg.scanXHome, true);
+  assert.equal(cfg.scanTikTokExplore, true);
   assert.deepEqual(cfg.xAccounts, ['abc']);
   assert.deepEqual(cfg.keywords, ['Dejon Love']);
 });
@@ -45,6 +53,31 @@ test('extracts TikTok items from nested JSON safely', () => {
   assert.equal(items.length, 1);
   assert.equal(items[0].author, 'creator');
   assert.equal(items[0].views, 4000);
+});
+
+test('extracts unique hashtag fallbacks', () => {
+  assert.deepEqual(extractHashtags('Now #DejonLove then #viral and #DejonLove again', 5), ['DejonLove', 'viral']);
+});
+
+test('extracts an X trend label without metadata noise', () => {
+  assert.equal(xTrendLabel('Trending in United States\n#DejonLove\n12.5K posts'), '#DejonLove');
+});
+
+test('infers only corroborated topics from multiple authors', () => {
+  const now = 1789100000000;
+  const rows = [
+    {platform:'X',author:'alice',url:'https://x.com/alice/status/1',content:'Everybody is posting #DejonLove after that reaction',published:now-60000,views:50000,likes:2000},
+    {platform:'X',author:'bob',url:'https://x.com/bob/status/2',content:'The #DejonLove reaction keeps showing up everywhere',published:now-120000,views:90000,likes:4000},
+    {platform:'TikTok',author:'carol',url:'https://www.tiktok.com/@carol/video/1234567890123456789',content:'This #DejonLove meme is spreading fast',published:now-180000,views:400000,likes:30000},
+    {platform:'X',author:'solo',url:'https://x.com/solo/status/3',content:'#OneOffThing',published:now-10000,views:900000,likes:50000},
+  ];
+  const topics = inferTopics(rows, now, 10);
+  const hit = topics.find((row) => row.key === 'dejonlove');
+  assert(hit);
+  assert.equal(hit.authorCount, 3);
+  assert.equal(hit.evidenceCount, 3);
+  assert.deepEqual(new Set(hit.platforms), new Set(['X','TikTok']));
+  assert(!topics.some((row) => row.key === 'oneoffthing'));
 });
 
 test('sanitizes topics', () => {
