@@ -96,6 +96,7 @@ export function xTrendLabel(value) {
 const STOP = new Set(('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i you your we our they their he she his her not no yes just very really new now today tonight yesterday tomorrow have has had do does did can could would should will may might about into over under after before more most some any all one two via amp rt https http com www video watch post posts people thing things time day get got like know think make made going go went see saw says said say look looks looking why how what when where who which there here').split(' '));
 const GENERIC_TOPIC = new Set(('meme memes viral virality reaction reactions reacts reacted clip clips trend trends trending story stories update updates breaking news funny wild crazy internet tiktok twitter tweet tweets x social media creator creators account accounts').split(' '));
 const BROAD_TOPIC = new Set(('crypto cryptocurrency bitcoin btc ethereum eth solana market markets stocks stock politics political election elections sports football basketball baseball soccer music entertainment technology tech ai artificial intelligence gaming games celebrity celebrities world national local economy economic finance financial').split(' '));
+const CONTEXT_NOISE = new Set(('everybody everyone somebody anyone nobody guy guys girl girls man woman person fan fans team teams player players user users page feed timeline comment comments').split(' '));
 const NICHE_CUE = /\b(meme|reaction|clip|sound|audio|dance|challenge|edit|template|joke|nickname|quote|face|caught|moment|remix|duet|stitch|trend|viral|brainrot|copypasta|slang|mascot|character)\b/i;
 
 function splitCamel(value) {
@@ -130,9 +131,6 @@ function candidatePhrases(content) {
     const tokens = topicTokens(clean);
     if (!tokens.length || broadOnly(tokens)) return;
     const aliases = new Set([key]);
-    // Named entities and hashtags may be described differently across posts.
-    // A distinctive leading token lets “Dejon Love”, “Dejon reaction” and
-    // “#DejonLove” corroborate without needing a paid semantic-model call.
     if (kind === 'name' || kind === 'hashtag') {
       const distinctive = tokens.filter((token) => !BROAD_TOPIC.has(token));
       if (distinctive[0]?.length >= 4) aliases.add(distinctive[0]);
@@ -147,6 +145,25 @@ function candidatePhrases(content) {
   for (let size = 2; size <= 3; size++) {
     for (let i = 0; i <= words.length - size; i++) add(words.slice(i, i + size).join(' '), size === 3 ? 1.25 : 1, 'phrase');
   }
+  return [...out.values()];
+}
+
+function contextTerms(content) {
+  const out = new Map();
+  const add = (label, weight, kind) => {
+    const clean = cleanText(splitCamel(label), 80).replace(/^#/, '').trim();
+    const key = normalizeTopic(clean);
+    if (key.length < 2 || key.length > 60 || STOP.has(key) || GENERIC_TOPIC.has(key) || CONTEXT_NOISE.has(key)) return;
+    const tokens = key.split(' ').filter((token) => token.length >= 2 && !STOP.has(token) && !GENERIC_TOPIC.has(token) && !CONTEXT_NOISE.has(token));
+    if (!tokens.length) return;
+    if (tokens.every((token) => GENERIC_TOPIC.has(token) || CONTEXT_NOISE.has(token))) return;
+    const old = out.get(key);
+    if (!old || weight > old.weight) out.set(key, { key, label: clean, weight, kind });
+  };
+  for (const tag of extractHashtags(content, 12)) add(tag, 3.2, 'hashtag');
+  for (const match of String(content).matchAll(/\b[A-Z][\p{L}\p{N}'’_-]{2,30}(?:\s+[A-Z][\p{L}\p{N}'’_-]{2,30}){0,2}\b/gu)) add(match[0], 2.5, 'name');
+  for (const match of String(content).matchAll(/\b(?:[A-Z][\p{L}'’_-]{1,24}\s+){0,2}(?=[A-Za-z0-9]{3,20}\b)(?=[A-Za-z0-9]*[A-Za-z])(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{3,20}\b/gu)) add(match[0], 2.8, 'entity');
+  for (const match of String(content).matchAll(/\b[A-Z]{2,8}\b/g)) add(match[0], 2.1, 'acronym');
   return [...out.values()];
 }
 
@@ -176,6 +193,48 @@ function evidenceAnchor(event) {
     views: event.views,
     likes: event.likes,
   };
+}
+
+function relatedContextsFor(row, topicLabel) {
+  const topicTokenSet = new Set([...topicTokens(topicLabel), ...topicTokens(row.key)]);
+  const related = new Map();
+  for (const event of row.evidence.values()) {
+    const authorKey = `${event.platform}:${event.author.toLocaleLowerCase()}`;
+    for (const term of contextTerms(event.content)) {
+      const contextTokens = topicTokens(term.label);
+      if (!contextTokens.length) continue;
+      if (contextTokens.some((token) => topicTokenSet.has(token))) continue;
+      const item = related.get(term.key) || { key: term.key, labels: new Map(), evidence: new Set(), authors: new Set(), platforms: new Set(), weight: 0 };
+      item.evidence.add(event.id);
+      item.authors.add(authorKey);
+      item.platforms.add(event.platform);
+      item.weight += term.weight;
+      item.labels.set(term.label, (item.labels.get(term.label) || 0) + term.weight);
+      related.set(term.key, item);
+    }
+  }
+  return [...related.values()]
+    .map((item) => {
+      const evidenceIds = [...item.evidence];
+      const evidenceCount = evidenceIds.length;
+      const authorCount = item.authors.size;
+      const platformCount = item.platforms.size;
+      const title = [...item.labels.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)[0]?.[0] || item.key;
+      const score = item.weight + evidenceCount * 2 + authorCount * 2.5 + platformCount * 1.5;
+      return {
+        key: item.key,
+        title,
+        relation: 'repeated-cooccurrence',
+        evidenceCount,
+        authorCount,
+        platforms: [...item.platforms],
+        score: Number(score.toFixed(2)),
+        evidenceIds: evidenceIds.slice(0, 8),
+      };
+    })
+    .filter((item) => item.evidenceCount >= 2 && item.authorCount >= 2)
+    .sort((a, b) => b.score - a.score || b.authorCount - a.authorCount || b.evidenceCount - a.evidenceCount)
+    .slice(0, 5);
 }
 
 export function inferTopics(events, now = Date.now(), limit = 10) {
@@ -244,13 +303,12 @@ export function inferTopics(events, now = Date.now(), limit = 10) {
         corroborated,
         evidenceIds: evidence.slice(0, 8).map((event) => event.id),
         anchors,
+        relatedContexts: relatedContextsFor(row, label),
       };
     })
     .filter((row) => row.corroborated && row.niche)
     .sort((a, b) => b.score - a.score || b.specificityScore - a.specificityScore || b.authorCount - a.authorCount || b.evidenceCount - a.evidenceCount);
 
-  // Alias buckets can point at the same evidence set. Prefer the more specific
-  // candidate when two rows explain essentially the same posts/videos.
   const selected = [];
   for (const row of ranked) {
     const evidenceSet = new Set(row.evidenceIds);
@@ -292,8 +350,10 @@ export function normalizeEvidence(raw) {
   const author = cleanText(raw.author || (platform === 'X' ? 'X' : 'TikTok'), 120) || platform;
   const publishedNumber = Number(raw.published);
   const published = Number.isFinite(publishedNumber) && publishedNumber > 0 ? Math.trunc(publishedNumber) : null;
-  const views = Number.isFinite(Number(raw.views)) && Number(raw.views) >= 0 ? Math.trunc(Number(raw.views)) : null;
-  const likes = Number.isFinite(Number(raw.likes)) && Number(raw.likes) >= 0 ? Math.trunc(Number(raw.likes)) : null;
+  const viewsNumber = raw.views === null || raw.views === undefined || raw.views === '' ? null : Number(raw.views);
+  const likesNumber = raw.likes === null || raw.likes === undefined || raw.likes === '' ? null : Number(raw.likes);
+  const views = viewsNumber !== null && Number.isFinite(viewsNumber) && viewsNumber >= 0 ? Math.trunc(viewsNumber) : null;
+  const likes = likesNumber !== null && Number.isFinite(likesNumber) && likesNumber >= 0 ? Math.trunc(likesNumber) : null;
   const provenance = cleanText(raw.provenance || `${platform} browser session`, 300);
   const id = cleanText(raw.id, 180) || stableId(platform, url, content);
   return { id, platform, author, url, content, published, views, likes, provenance };
