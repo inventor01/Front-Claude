@@ -22,6 +22,23 @@ const migrate = spawnSync(
 if (migrate.error) throw migrate.error;
 if ((migrate.status ?? 1) !== 0) process.exit(migrate.status ?? 1);
 
+if (process.env.FRONT_STANDALONE_USER_ID) {
+  const cleanup = spawnSync(
+    process.execPath,
+    [path.join(projectRoot, "scripts/cleanup-intelligence.mjs")],
+    {
+      cwd: projectRoot,
+      stdio: "inherit",
+      env: { ...process.env, FRONT_PERSIST_DIR: persistDir },
+    },
+  );
+  if (cleanup.error) throw cleanup.error;
+  if ((cleanup.status ?? 1) !== 0) {
+    console.error(`[front] intelligence cleanup failed with status ${cleanup.status ?? 1}`);
+    process.exit(cleanup.status ?? 1);
+  }
+}
+
 const wrangler = path.join(projectRoot, "node_modules/wrangler/bin/wrangler.js");
 const args = [
   "--import",
