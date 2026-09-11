@@ -19,13 +19,12 @@ function lowValueSocialTopic(value:string){const clean=normalizeLoose(value);if(
 function obviousJunk(content:string,author:string){const clean=content.replace(/\s+/g,' ').trim();if(!clean||SOCIAL_NOTIFICATION.test(clean)||JUNK_LABEL.test(clean)||NUMERIC_ONLY.test(clean))return true;const normalized=normalizeLoose(clean),authorNormalized=normalizeLoose(author);if(authorNormalized&&(normalized===authorNormalized||normalized===`${authorNormalized} ${authorNormalized}`))return true;if(/^@?[A-Za-z0-9_.]{2,40}$/.test(clean)&&authorNormalized&&normalizeLoose(clean)===authorNormalized)return true;return false;}
 function evidenceFrom(value:unknown):Evidence|null{if(!value||typeof value!=='object')return null;const row=value as Record<string,unknown>;const platform=row.platform==='X'||row.platform==='TikTok'?row.platform:null;if(!platform)return null;const url=safeUrl(platform,row.url);const content=typeof row.content==='string'?row.content.replace(/\s+/g,' ').trim().slice(0,8000):'';const author=typeof row.author==='string'?row.author.trim().slice(0,120):'';const id=typeof row.id==='string'?row.id.trim().slice(0,180):'';if(!url||!content||!author||!id||obviousJunk(content,author))return null;const provenanceRaw=typeof row.provenance==='string'?row.provenance.trim():'';return{id,platform,author,url,content,published:asTimestamp(row.published),views:asMetric(row.views),likes:asMetric(row.likes),provenance:(provenanceRaw||`${platform} local browser bridge`).slice(0,300)};}
 function normalizedNarrativeId(value:string){return normalizeNarrativeText(value);}
-function narrativeKey(value:unknown,authorCount=0){
+function narrativeKey(value:unknown,authorCount=0,tier:'pre-breakout'|'candidate'='candidate'){
  if(typeof value!=='string')return null;const clean=value.replace(/^#/,'').replace(/\s+/g,' ').trim().slice(0,80);const normalized=normalizedNarrativeId(clean);if(normalized.length<2||JUNK_LABEL.test(clean)||NUMERIC_ONLY.test(clean)||lowValueSocialTopic(clean)||isBroadNarrativeTitle(clean)||isNarrativeLabelJunk(clean))return null;
  const words=normalized.split(' ').filter(Boolean),specific=specificNarrativeTerms(clean);if(!specific.length)return null;
- // A one-word event is the exception, not the default. It must be distinctive
- // and independently repeated; this keeps Astra/Doge-like names possible while
- // rejecting ordinary words such as "ever", "solo", "created" and translations.
- if(words.length===1&&(authorCount<3||specific[0].length<4))return null;
+ // Two independent creators can remain in private pre-breakout learning, but a
+ // one-word topic needs three independent creators before it can be promoted.
+ if(words.length===1&&((tier==='candidate'&&authorCount<3)||authorCount<2||specific[0].length<4))return null;
  return clean;
 }
 
@@ -38,10 +37,10 @@ function inferredTopics(value:unknown){
  if(!Array.isArray(value))return[];const out:InferredTopic[]=[];
  for(const raw of value.slice(0,50)){
   if(!raw||typeof raw!=='object')continue;const row=raw as InferredTopicInput;const evidenceCount=Math.trunc(Number(row.evidenceCount)),authorCount=Math.trunc(Number(row.authorCount));if(evidenceCount<2||authorCount<2)continue;
-  const key=narrativeKey(row.topic,authorCount);if(!key)continue;const tier=row.tier==='pre-breakout'?'pre-breakout':'candidate';if(tier==='candidate'&&row.corroborated!==true)continue;
+  const tier=row.tier==='pre-breakout'?'pre-breakout':'candidate';const key=narrativeKey(row.topic,authorCount,tier);if(!key)continue;if(tier==='candidate'&&row.corroborated!==true)continue;
   const related:InferredTopic['related']=[];
   if(Array.isArray(row.relatedContexts))for(const entry of row.relatedContexts.slice(0,8)){
-   if(!entry||typeof entry!=='object')continue;const r=entry as RelatedContextInput;const rawTitle=typeof r.title==='string'?r.title.replace(/^#/,'').replace(/\s+/g,' ').trim().slice(0,80):'';const rc=Math.trunc(Number(r.evidenceCount)),ac=Math.trunc(Number(r.authorCount)),score=Number(r.score);const title=narrativeKey(rawTitle,ac);const relatedKey=typeof r.key==='string'?normalizedNarrativeId(r.key).slice(0,80):title?normalizedNarrativeId(title):'';const platforms=Array.isArray(r.platforms)?r.platforms.filter((x):x is string=>x==='X'||x==='TikTok').slice(0,2):[];const evidenceIds=Array.isArray(r.evidenceIds)?r.evidenceIds.filter((x):x is string=>typeof x==='string'&&x.length<=180).slice(0,8):[];
+   if(!entry||typeof entry!=='object')continue;const r=entry as RelatedContextInput;const rawTitle=typeof r.title==='string'?r.title.replace(/^#/,'').replace(/\s+/g,' ').trim().slice(0,80):'';const rc=Math.trunc(Number(r.evidenceCount)),ac=Math.trunc(Number(r.authorCount)),score=Number(r.score);const title=narrativeKey(rawTitle,ac,'candidate');const relatedKey=typeof r.key==='string'?normalizedNarrativeId(r.key).slice(0,80):title?normalizedNarrativeId(title):'';const platforms=Array.isArray(r.platforms)?r.platforms.filter((x):x is string=>x==='X'||x==='TikTok').slice(0,2):[];const evidenceIds=Array.isArray(r.evidenceIds)?r.evidenceIds.filter((x):x is string=>typeof x==='string'&&x.length<=180).slice(0,8):[];
    if(!title||!relatedKey||rc<2||ac<2||!Number.isFinite(score)||relatedKey===normalizedNarrativeId(key))continue;related.push({key:relatedKey,title,relation:typeof r.relation==='string'?r.relation.slice(0,50):'repeated-cooccurrence',score,evidenceCount:rc,authorCount:ac,platforms,evidenceIds});
   }
   const aliases=Array.isArray(row.aliases)?row.aliases.filter((x):x is string=>typeof x==='string').map((x)=>x.trim()).filter((x)=>Boolean(x)&&!lowValueSocialTopic(x)&&!isNarrativeLabelJunk(x)).slice(0,12):[key];
