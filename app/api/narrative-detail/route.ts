@@ -39,9 +39,10 @@ export async function GET(request:Request){
 
   const initialAliases=unique([requestedTopic,narrative?.title||'',...safeAliases(narrative?.aliases)]).filter(Boolean);
   const seedKeys=new Set(initialAliases.map(normalize).filter(Boolean));
-  const allSnapshots=await db().prepare('SELECT topic_key,topic_title,observed,tier,score,momentum,creators,evidence_count,platforms,origin_url,origin_published,aliases FROM topic_snapshots WHERE owner=? AND observed>? ORDER BY observed ASC LIMIT 4000').bind(user.userId,Date.now()-14*86400000).all<SnapshotRow>();
-  let snapshots=allSnapshots.results.filter(row=>snapshotMatches(row,seedKeys));
-  if(!snapshots.length&&requestedTopic){const key=normalize(requestedTopic);snapshots=allSnapshots.results.filter(row=>normalize(row.topic_key)===key||normalize(row.topic_title)===key);}
+  const recentSnapshots=await db().prepare('SELECT topic_key,topic_title,observed,tier,score,momentum,creators,evidence_count,platforms,origin_url,origin_published,aliases FROM topic_snapshots WHERE owner=? AND observed>? ORDER BY observed DESC LIMIT 4000').bind(user.userId,Date.now()-14*86400000).all<SnapshotRow>();
+  const snapshotRows=[...recentSnapshots.results].reverse();
+  let snapshots=snapshotRows.filter(row=>snapshotMatches(row,seedKeys));
+  if(!snapshots.length&&requestedTopic){const key=normalize(requestedTopic);snapshots=snapshotRows.filter(row=>normalize(row.topic_key)===key||normalize(row.topic_title)===key);}
   const latest=snapshots.at(-1)||null;
   const aliases=unique([narrative?.title||'',...safeAliases(narrative?.aliases),latest?.topic_title||'',...safeAliases(latest?.aliases),requestedTopic]).filter(Boolean);
   const matchAliases=aliases.filter(alias=>words(alias).length>0).slice(0,24);
@@ -64,19 +65,18 @@ export async function GET(request:Request){
 
   let relationships:RelationshipRow[]=[];
   let coins:CoinRow[]=[];
+  let launches:LaunchRow[]=[];
   if(narrative){
    try{relationships=(await db().prepare('SELECT related_key,related_title,relation,score,evidence_count,author_count,platforms,observed FROM narrative_relationships WHERE owner=? AND narrative=? ORDER BY score DESC,observed DESC LIMIT 20').bind(user.userId,narrative.id).all<RelationshipRow>()).results;}catch{relationships=[];}
    coins=(await db().prepare('SELECT narrative,mint,data,observed FROM narrative_coins WHERE owner=? AND narrative=? ORDER BY observed DESC LIMIT 50').bind(user.userId,narrative.id).all<CoinRow>()).results;
+   launches=(await db().prepare('SELECT mint,name,symbol,seen,narrative,match_type,data FROM launch_events WHERE owner=? AND narrative=? ORDER BY seen ASC LIMIT 100').bind(user.userId,narrative.id).all<LaunchRow>()).results;
   }
 
-  const launchRows=(await db().prepare('SELECT mint,name,symbol,seen,narrative,match_type,data FROM launch_events WHERE owner=? ORDER BY seen ASC LIMIT 250').bind(user.userId).all<LaunchRow>()).results;
-  const titleKeys=new Set(aliases.map(normalize));
-  const launches=launchRows.filter(row=>row.narrative===narrative?.id||titleKeys.has(normalize(parseJson<{narrativeTitle?:string}>(row.data,{}).narrativeTitle||'')));
   const detectedCandidates=[narrative?.created||null,...snapshots.map(row=>row.observed)].filter((v):v is number=>typeof v==='number'&&v>0);
   const detectedAt=detectedCandidates.length?Math.min(...detectedCandidates):null;
   const evidenceTimes=evidence.map(row=>row.published||row.first_seen).filter((v):v is number=>Number.isFinite(v)&&v>0);
   const earliestEvidenceAt=evidenceTimes.length?Math.min(...evidenceTimes):latest?.origin_published||null;
-  const firstLaunchAt=launches.length?Math.min(...launches.map(row=>row.seen)):null;
+  const firstLaunchAt=launches.length?launches[0].seen:null;
   const leadMs=detectedAt&&firstLaunchAt?firstLaunchAt-detectedAt:null;
 
   return json({
