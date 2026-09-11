@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
 import { dedupeEvidence, extractTikTokItemsFromJson, metricFromAria, normalizeConfig, sanitizeTopic, stableId } from './core.mjs';
-import { findSystemChrome, frontCdpUrl, frontLoginProfileDir, openRegularChromeForLogin } from './system-browser.mjs';
+import { findSystemChrome, frontCdpUrl, frontLoginProfileDir, openRegularChromeForLogin, stopExistingFrontChrome, waitForCdp } from './system-browser.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
@@ -12,7 +12,8 @@ const dataDir = process.env.FRONT_BRIDGE_DATA || path.join(os.homedir(), '.front
 const profileDir = frontLoginProfileDir(dataDir);
 const configPath = path.join(dataDir, 'config.json');
 const systemChrome = findSystemChrome();
-const cdpUrl = frontCdpUrl(Number(process.env.FRONT_BRIDGE_CDP_PORT || 43982));
+const cdpPort = Number(process.env.FRONT_BRIDGE_CDP_PORT || 43982);
+const cdpUrl = frontCdpUrl(cdpPort);
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://believable-inspiration-production-a68b.up.railway.app',
   'https://front-narrative-desk.austinrock2000.chatgpt.site',
@@ -236,7 +237,7 @@ function status() {
   return {
     ok: true,
     service: 'front-browser-bridge',
-    version: 3,
+    version: 4,
     running,
     lastRun,
     lastCount,
@@ -244,6 +245,7 @@ function status() {
     config,
     loginBrowser: systemChrome ? 'system-chrome' : 'unavailable',
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome',
+    cdpUrl,
   };
 }
 
@@ -267,12 +269,26 @@ const server = http.createServer(async (req, res) => {
       return json(req, res, 200, await collectAll(JSON.parse(body || '{}')));
     }
     if (req.method === 'POST' && url.pathname === '/open-login') {
-      const opened = openRegularChromeForLogin({ dataDir, chromeExecutable: systemChrome });
+      if (!systemChrome) throw new Error('Google Chrome is required for authenticated X/TikTok scans. Install Chrome, then restart the Front browser bridge.');
+      if (browserConnection?.isConnected?.()) await browserConnection.close().catch(() => {});
       browserConnection = undefined;
       context = undefined;
+
+      // A previous Front Chrome can keep this dedicated profile alive without the
+      // DevTools flag. Chrome then routes a new launch into that stale process and
+      // silently ignores the requested debugging port. Restart only Front's private
+      // profile so every login launch is guaranteed to own the CDP endpoint.
+      stopExistingFrontChrome({ dataDir });
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      const opened = openRegularChromeForLogin({ dataDir, chromeExecutable: systemChrome, debuggingPort: cdpPort });
+      try {
+        await waitForCdp(opened.cdpUrl, { timeoutMs: 12000 });
+      } catch (error) {
+        throw new Error(`Front Chrome opened, but its local scan connection did not start. Close the Front Chrome window and click Open X + TikTok login once more. ${(error instanceof Error ? error.message : String(error))}`);
+      }
       return json(req, res, 200, {
         ok: true,
-        message: 'Opened X and TikTok in regular Google Chrome using Front’s private local Chrome profile. Sign in normally and LEAVE this Front Chrome window open; Front now attaches to that exact logged-in session for scans.',
+        message: 'Front Chrome is ready for scanning. Sign in to X and TikTok, LEAVE this Front Chrome window open (it can be minimized), then click Run browser scan.',
         profileDir: opened.profileDir,
         cdpUrl: opened.cdpUrl,
       });
