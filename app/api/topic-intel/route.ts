@@ -12,7 +12,8 @@ export async function GET(){
  const user=await getChatGPTUser();if(!user)return json({error:'Please sign in.'},401);
  try{
   const now=Date.now();
-  const snapshots=await db().prepare(`SELECT s.topic_key,s.topic_title,s.observed,s.tier,s.score,s.momentum,s.creators,s.evidence_count,s.platforms,s.origin_url,s.origin_published,s.aliases FROM topic_snapshots s JOIN (SELECT topic_key,MAX(observed) AS observed FROM topic_snapshots WHERE owner=? AND observed>? GROUP BY topic_key) latest ON latest.topic_key=s.topic_key AND latest.observed=s.observed WHERE s.owner=? ORDER BY s.score DESC LIMIT 100`).bind(user.userId,now-7*86400000,user.userId).all<SnapshotRow>();
+  const activeSince=now-48*3600000;
+  const snapshots=await db().prepare(`SELECT s.topic_key,s.topic_title,s.observed,s.tier,s.score,s.momentum,s.creators,s.evidence_count,s.platforms,s.origin_url,s.origin_published,s.aliases FROM topic_snapshots s JOIN (SELECT topic_key,MAX(observed) AS observed FROM topic_snapshots WHERE owner=? AND observed>? GROUP BY topic_key) latest ON latest.topic_key=s.topic_key AND latest.observed=s.observed WHERE s.owner=? ORDER BY s.observed DESC,s.score DESC LIMIT 100`).bind(user.userId,activeSince,user.userId).all<SnapshotRow>();
   const launches=await db().prepare('SELECT mint,name,symbol,seen,narrative,match_type,data FROM launch_events WHERE owner=? ORDER BY seen DESC LIMIT 50').bind(user.userId).all<LaunchRow>();
   const queue=await db().prepare('SELECT status,COUNT(*) AS count FROM coin_match_queue WHERE owner=? GROUP BY status').bind(user.userId).all<{status:string;count:number}>();
   return json({
