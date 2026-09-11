@@ -1,5 +1,13 @@
 # Front bug / change log
 
+## 2026-09-11 — X/TikTok trends were invisible or mixed into Narrative Radar
+
+**Root cause:** Front stored browser-derived X/TikTok evidence and separately fetched Google Trends/DEX market themes, but the Discover endpoint mixed those sources together with corroborated narratives. Raw browser trends were therefore not presented as a first-class feed, broad topics competed with niche narratives for the same visible slots, and the user could not clearly distinguish “Front noticed this” from “Front promoted this as a corroborated narrative.”
+
+**Permanent fix:** Added a dedicated Public Signals feed and API. X Trending, X Feed, X Search, TikTok Trending, TikTok Explore, TikTok Search, Google Trends and market themes now appear as raw discovery signals with source, age, metrics when available, and promotion status. Narrative Radar is now reserved for corroborated/stored narratives and no longer mixes in public-provider rows. Public Signals has source filters, search and 50-per-page pagination. Radar Manager keeps full radar pagination, lifecycle, cleanup, dedupe, merge/delete controls, and now displays stored coin candidates with direct Pump.fun/Axiom links.
+
+**Regression protection:** Full CI covers core app tests, browser bridge tests, migrations, local D1 migration, typecheck, lint and production build. Raw broad observations can remain visible in Public Signals without bypassing the stricter narrative-promotion gate.
+
 ## 2026-09-11 — TikTok timed out and browser narratives did not surface in Narrative Radar
 
 **Root cause:** The browser bridge waited for full `domcontentloaded` on TikTok Creative Center, which can stall for analytics/region resources and exhaust the 45-second navigation timeout even when useful page content is already available. X Explore could also return zero without raising a warning. Separately, saved browser evidence created stored narratives, but Discover still rendered only the separate public-signal feed, so successful browser discoveries were not guaranteed to appear in the main Narrative Radar.
