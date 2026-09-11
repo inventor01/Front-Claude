@@ -32,7 +32,11 @@ export function sameTopicKey(a, b) {
   if (!left || !right) return false;
   if (left === right) return true;
   if (Math.min(left.length, right.length) < 5) return false;
-  return editDistance(left, right) <= 1;
+  if (editDistance(left, right) <= 1) return true;
+  const lt = new Set(tokens(a)), rt = new Set(tokens(b));
+  if (!lt.size || !rt.size) return false;
+  const overlap = [...lt].filter((token) => rt.has(token)).length;
+  return overlap >= 2 && overlap / Math.min(lt.size, rt.size) >= 0.8;
 }
 
 function validLabel(label) {
@@ -58,6 +62,21 @@ function candidatesFor(event) {
   return [...out.values()];
 }
 
+function originCandidate(evidence, now) {
+  const dated = evidence.filter((item) => Number.isFinite(item.published) && item.published > 0).sort((a, b) => a.published - b.published);
+  const first = dated[0];
+  if (!first) return null;
+  return {
+    url: first.url,
+    published: first.published,
+    author: first.author,
+    platform: first.platform,
+    ageMinutes: Math.max(0, Math.round((now - first.published) / 60000)),
+    confidence: dated.length >= 4 ? 'high' : dated.length >= 2 ? 'medium' : 'low',
+    method: `Earliest dated evidence found in ${dated.length} sampled supporting post${dated.length === 1 ? '' : 's'}; not guaranteed absolute internet origin.`,
+  };
+}
+
 function supplementalTopics(events, now) {
   const buckets = new Map();
   for (const event of dedupeEvidence(events)) {
@@ -76,8 +95,10 @@ function supplementalTopics(events, now) {
   return [...buckets.values()].flatMap((row) => {
     const evidence = [...row.evidence.values()], authorCount = row.authors.size, platformCount = row.platforms.size;
     const structured = row.kinds.has('hashtag') || row.kinds.has('name');
-    const enough = structured ? authorCount >= 2 : authorCount >= 3 || (platformCount >= 2 && authorCount >= 2);
-    if (!enough) return [];
+    const candidateEnough = structured ? authorCount >= 2 : authorCount >= 3 || (platformCount >= 2 && authorCount >= 2);
+    const preBreakoutEnough = authorCount >= 2 && evidence.length >= 2;
+    if (!candidateEnough && !preBreakoutEnough) return [];
+    const tier = candidateEnough ? 'candidate' : 'pre-breakout';
     const label = [...row.labels.entries()].sort((a, b) => b[1] - a[1] || tokens(b[0]).length - tokens(a[0]).length || a[0].length - b[0].length)[0]?.[0] || row.key;
     if (!validLabel(label)) return [];
     const dated = evidence.map((item) => item.published).filter((value) => Number.isFinite(value));
@@ -86,45 +107,87 @@ function supplementalTopics(events, now) {
     const specificityScore = Math.min(10, tokens(label).length * 1.4 + (structured ? 1.6 : 0) + (platformCount > 1 ? .8 : 0) + Math.min(2, authorCount * .4));
     const score = row.weights + authorCount * 3.2 + platformCount * 2.5 + recency * 1.4 + Math.min(8, engagement * .35) + specificityScore;
     const anchors = [...evidence].sort((a, b) => ((b.views || 0) + 4 * (b.likes || 0)) - ((a.views || 0) + 4 * (a.likes || 0)) || (b.published || 0) - (a.published || 0)).slice(0, 3).map((item) => ({ id: item.id, platform: item.platform, author: item.author, url: item.url, content: String(item.content).slice(0, 260), published: item.published, views: item.views, likes: item.likes }));
-    return [{ topic: label, key: row.key, evidenceCount: evidence.length, authorCount, platforms: [...row.platforms], oldestPublished: dated.length ? Math.min(...dated) : null, newestPublished: dated.length ? Math.max(...dated) : null, engagementEvidence: evidence.reduce((sum, item) => sum + (item.views || 0) + (item.likes || 0), 0), score: Number(score.toFixed(2)), specificityScore: Number(specificityScore.toFixed(2)), niche: true, nicheEvidenceCount: 0, corroborated: true, evidenceIds: evidence.slice(0, 8).map((item) => item.id), anchors, relatedContexts: [], detector: structured ? 'structured-repeat' : 'repeat-cluster' }];
+    const aliases = [...new Set([label, ...row.labels.keys()])].slice(0, 12);
+    return [{ topic: label, key: row.key, aliases, tier, evidenceCount: evidence.length, authorCount, platforms: [...row.platforms], oldestPublished: dated.length ? Math.min(...dated) : null, newestPublished: dated.length ? Math.max(...dated) : null, engagementEvidence: evidence.reduce((sum, item) => sum + (item.views || 0) + (item.likes || 0), 0), score: Number(score.toFixed(2)), specificityScore: Number(specificityScore.toFixed(2)), niche: true, nicheEvidenceCount: 0, corroborated: candidateEnough, evidenceIds: evidence.slice(0, 8).map((item) => item.id), anchors, originCandidate: originCandidate(evidence, now), relatedContexts: [], detector: structured ? 'structured-repeat' : 'repeat-cluster' }];
   });
 }
 
-export function detectTopics(events, now = Date.now(), limit = 10) {
-  const base = inferTopics(events, now, Math.max(limit * 2, 20)).filter((topic) => validLabel(topic.topic) && validLabel(topic.key)).map((topic) => ({ ...topic, detector: 'niche-inference' }));
-  const extra = supplementalTopics(events, now);
+export function detectTopics(events, now = Date.now(), limit = 15) {
+  const evidence = dedupeEvidence(events);
+  const base = inferTopics(evidence, now, Math.max(limit * 2, 20)).filter((topic) => validLabel(topic.topic) && validLabel(topic.key)).map((topic) => {
+    const supporting = evidence.filter((item) => topic.evidenceIds?.includes(item.id));
+    return { ...topic, tier: 'candidate', aliases: [topic.topic], originCandidate: originCandidate(supporting, now), detector: 'niche-inference' };
+  });
+  const extra = supplementalTopics(evidence, now);
   const merged = [];
   for (const topic of [...base, ...extra].sort((a, b) => b.score - a.score)) {
     const index = merged.findIndex((existing) => sameTopicKey(existing.key || existing.topic, topic.key || topic.topic));
     if (index < 0) { merged.push(topic); continue; }
     const existing = merged[index];
-    const prefer = (topic.specificityScore || 0) > (existing.specificityScore || 0) || ((topic.specificityScore || 0) === (existing.specificityScore || 0) && topic.authorCount > existing.authorCount);
+    const prefer = (topic.tier === 'candidate' && existing.tier !== 'candidate') || (topic.specificityScore || 0) > (existing.specificityScore || 0) || ((topic.specificityScore || 0) === (existing.specificityScore || 0) && topic.authorCount > existing.authorCount);
     const primary = prefer ? topic : existing, secondary = prefer ? existing : topic;
     primary.evidenceIds = [...new Set([...(primary.evidenceIds || []), ...(secondary.evidenceIds || [])])].slice(0, 8);
     primary.authorCount = Math.max(primary.authorCount || 0, secondary.authorCount || 0, primary.evidenceIds.length);
     primary.evidenceCount = Math.max(primary.evidenceCount || 0, secondary.evidenceCount || 0, primary.evidenceIds.length);
     primary.platforms = [...new Set([...(primary.platforms || []), ...(secondary.platforms || [])])];
+    primary.aliases = [...new Set([...(primary.aliases || []), ...(secondary.aliases || []), secondary.topic])].slice(0, 12);
     primary.relatedContexts = primary.relatedContexts?.length ? primary.relatedContexts : (secondary.relatedContexts || []);
+    primary.originCandidate = primary.originCandidate || secondary.originCandidate || null;
+    if (secondary.tier === 'candidate') primary.tier = 'candidate';
+    primary.corroborated = primary.tier === 'candidate';
     merged[index] = primary;
   }
-  return merged.filter((topic) => validLabel(topic.topic)).sort((a, b) => b.score - a.score || b.authorCount - a.authorCount).slice(0, Math.max(0, limit));
+  return merged.filter((topic) => validLabel(topic.topic)).sort((a, b) => (a.tier === b.tier ? 0 : a.tier === 'candidate' ? -1 : 1) || b.score - a.score || b.authorCount - a.authorCount).slice(0, Math.max(0, limit));
+}
+
+function snapshotAt(history, target, topic) {
+  const eligible = history.filter((snapshot) => snapshot && snapshot.at <= target && Array.isArray(snapshot.topics)).sort((a, b) => b.at - a.at);
+  for (const snapshot of eligible) {
+    const found = snapshot.topics.find((item) => sameTopicKey(item.key || item.topic, topic.key || topic.topic));
+    if (found) return { snapshot, topic: found };
+  }
+  return null;
+}
+
+function windowDelta(topic, history, now, minutes) {
+  const found = snapshotAt(history, now - minutes * 60000, topic);
+  if (!found) return null;
+  const creators = Number(found.topic.authorCount || 0), evidence = Number(found.topic.evidenceCount || 0), platforms = Number(found.topic.platformCount || found.topic.platforms?.length || 0);
+  return {
+    minutes,
+    comparedAt: found.snapshot.at,
+    creatorDelta: topic.authorCount - creators,
+    evidenceDelta: topic.evidenceCount - evidence,
+    platformDelta: topic.platforms.length - platforms,
+    creatorGrowthPct: creators > 0 ? Math.round(100 * (topic.authorCount - creators) / creators) : null,
+  };
 }
 
 export function enrichMomentum(topics, history = [], now = Date.now()) {
-  const prior = [...history].filter((snapshot) => snapshot && snapshot.at < now && Array.isArray(snapshot.topics)).sort((a, b) => b.at - a.at)[0];
+  const immediate = [...history].filter((snapshot) => snapshot && snapshot.at < now && Array.isArray(snapshot.topics)).sort((a, b) => b.at - a.at)[0];
   return topics.map((topic) => {
-    const previous = prior?.topics?.find((item) => sameTopicKey(item.key || item.topic, topic.key || topic.topic));
+    const previous = immediate?.topics?.find((item) => sameTopicKey(item.key || item.topic, topic.key || topic.topic));
     const creatorDelta = previous ? topic.authorCount - Number(previous.authorCount || 0) : topic.authorCount;
     const evidenceDelta = previous ? topic.evidenceCount - Number(previous.evidenceCount || 0) : topic.evidenceCount;
     const platformDelta = previous ? topic.platforms.length - Number(previous.platformCount || previous.platforms?.length || 0) : topic.platforms.length;
     const creatorGrowthPct = previous && previous.authorCount > 0 ? Math.round(100 * creatorDelta / previous.authorCount) : null;
+    const windows = [15, 60, 360, 1440].map((minutes) => windowDelta(topic, history, now, minutes)).filter(Boolean);
+    const byMinutes = Object.fromEntries(windows.map((window) => [String(window.minutes), window]));
+    const weighted = windows.reduce((sum, window) => {
+      const weight = window.minutes === 15 ? 1.4 : window.minutes === 60 ? 1 : window.minutes === 360 ? .55 : .25;
+      return sum + weight * (Math.max(0, window.creatorDelta) * 4 + Math.max(0, window.evidenceDelta) * 1.2 + Math.max(0, window.platformDelta) * 3);
+    }, 0);
     const newTopic = !previous;
-    const momentumScore = Math.max(0, creatorDelta) * 4 + Math.max(0, evidenceDelta) * 1.5 + Math.max(0, platformDelta) * 3 + (topic.platforms.length > 1 ? 2 : 0) + (newTopic ? 1 : 0);
-    const label = newTopic ? 'New' : creatorDelta >= 2 || (creatorGrowthPct != null && creatorGrowthPct >= 75) ? 'Accelerating' : creatorDelta > 0 || evidenceDelta >= 2 ? 'Rising' : creatorDelta < 0 ? 'Cooling' : 'Steady';
-    return { ...topic, momentum: { label, score: Number(momentumScore.toFixed(2)), creatorDelta, evidenceDelta, platformDelta, creatorGrowthPct, newTopic, comparedAt: prior?.at ?? null } };
-  }).sort((a, b) => (b.momentum?.score || 0) - (a.momentum?.score || 0) || b.score - a.score);
+    const crossPlatformBonus = topic.platforms.length > 1 ? 3 : 0;
+    const tierBonus = topic.tier === 'candidate' ? 2 : 0;
+    const momentumScore = weighted + Math.max(0, creatorDelta) * 2 + crossPlatformBonus + tierBonus + (newTopic ? 1 : 0);
+    const hour = byMinutes['60'];
+    const fastGrowth = (hour?.creatorDelta || 0) >= 3 || (hour?.creatorGrowthPct != null && hour.creatorGrowthPct >= 100) || creatorDelta >= 2;
+    const label = newTopic ? 'New' : fastGrowth ? 'Accelerating' : creatorDelta > 0 || evidenceDelta >= 2 ? 'Rising' : creatorDelta < 0 ? 'Cooling' : 'Steady';
+    return { ...topic, momentum: { label, score: Number(momentumScore.toFixed(2)), creatorDelta, evidenceDelta, platformDelta, creatorGrowthPct, newTopic, comparedAt: immediate?.at ?? null, windows: byMinutes } };
+  }).sort((a, b) => (b.momentum?.score || 0) - (a.momentum?.score || 0) || (a.tier === b.tier ? 0 : a.tier === 'candidate' ? -1 : 1) || b.score - a.score);
 }
 
 export function topicSnapshot(topics, at = Date.now()) {
-  return { at, topics: topics.slice(0, 30).map((topic) => ({ key: topic.key, topic: topic.topic, authorCount: topic.authorCount, evidenceCount: topic.evidenceCount, platformCount: topic.platforms?.length || 0, platforms: topic.platforms || [], momentum: topic.momentum || null })) };
+  return { at, topics: topics.slice(0, 50).map((topic) => ({ key: topic.key, topic: topic.topic, aliases: topic.aliases || [topic.topic], tier: topic.tier || 'candidate', authorCount: topic.authorCount, evidenceCount: topic.evidenceCount, platformCount: topic.platforms?.length || 0, platforms: topic.platforms || [], score: topic.score || 0, originCandidate: topic.originCandidate || null, momentum: topic.momentum || null })) };
 }
