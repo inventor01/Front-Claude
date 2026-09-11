@@ -53,6 +53,17 @@ function phraseInBody(body, phrase) {
 function seedProvenance(value) {
   return /(?:X Explore|TikTok Creative Center)/i.test(String(value || ''));
 }
+function removeNarrativeState(ownerSql, idSql, keys) {
+  // Wrangler's local D1 runtime rejects explicit SQL BEGIN/COMMIT statements.
+  // Use idempotent deletes instead: a retry can safely continue after any partial run.
+  execute(`DELETE FROM narrative_coins WHERE owner=${ownerSql} AND narrative=${idSql}`);
+  execute(`DELETE FROM evidence_links WHERE owner=${ownerSql} AND narrative=${idSql}`);
+  execute(`DELETE FROM narrative_relationships WHERE owner=${ownerSql} AND narrative=${idSql}`);
+  execute(`DELETE FROM coin_match_queue WHERE owner=${ownerSql} AND narrative=${idSql}`);
+  execute(`DELETE FROM launch_events WHERE owner=${ownerSql} AND narrative=${idSql}`);
+  if (keys.length) execute(`DELETE FROM topic_snapshots WHERE owner=${ownerSql} AND topic_key IN (${keys.map(sqlString).join(',')})`);
+  execute(`DELETE FROM narratives WHERE owner=${ownerSql} AND id=${idSql}`);
+}
 
 try {
   const ownerSql = sqlString(owner);
@@ -76,8 +87,7 @@ try {
     if (!lowQualityIntelligenceLabel(title) && hasEnoughNaturalSupport(title, naturalCreators, naturalEvidence)) continue;
     const idSql = sqlString(row.id);
     const keys = [...new Set(labels.map(normalizeIntelligenceLabel).filter(Boolean))];
-    const snapshotDelete = keys.length ? `DELETE FROM topic_snapshots WHERE owner=${ownerSql} AND topic_key IN (${keys.map(sqlString).join(',')});` : '';
-    execute(`BEGIN;DELETE FROM narrative_coins WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM evidence_links WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM narrative_relationships WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM coin_match_queue WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM launch_events WHERE owner=${ownerSql} AND narrative=${idSql};${snapshotDelete}DELETE FROM narratives WHERE owner=${ownerSql} AND id=${idSql};COMMIT;`);
+    removeNarrativeState(ownerSql, idSql, keys);
     removedNarratives++;
     removedTitles.push(`${title} (${naturalCreators} natural creators)`);
   }
@@ -87,7 +97,10 @@ try {
   for (const row of invalidSnapshots) execute(`DELETE FROM topic_snapshots WHERE owner=${ownerSql} AND topic_key=${sqlString(row.topic_key)}`);
 
   const preModel = query(`SELECT COUNT(*) AS count FROM topic_snapshots WHERE owner=${ownerSql} AND observed<${MODEL_EPOCH}`)[0]?.count || 0;
-  execute(`DELETE FROM topic_snapshots WHERE owner=${ownerSql} AND observed<${MODEL_EPOCH};DELETE FROM coin_match_queue WHERE owner=${ownerSql} AND narrative NOT IN (SELECT id FROM narratives WHERE owner=${ownerSql});DELETE FROM narrative_coins WHERE owner=${ownerSql} AND narrative NOT IN (SELECT id FROM narratives WHERE owner=${ownerSql});DELETE FROM launch_events WHERE owner=${ownerSql} AND narrative IS NOT NULL AND narrative NOT IN (SELECT id FROM narratives WHERE owner=${ownerSql});`);
+  execute(`DELETE FROM topic_snapshots WHERE owner=${ownerSql} AND observed<${MODEL_EPOCH}`);
+  execute(`DELETE FROM coin_match_queue WHERE owner=${ownerSql} AND narrative NOT IN (SELECT id FROM narratives WHERE owner=${ownerSql})`);
+  execute(`DELETE FROM narrative_coins WHERE owner=${ownerSql} AND narrative NOT IN (SELECT id FROM narratives WHERE owner=${ownerSql})`);
+  execute(`DELETE FROM launch_events WHERE owner=${ownerSql} AND narrative IS NOT NULL AND narrative NOT IN (SELECT id FROM narratives WHERE owner=${ownerSql})`);
 
   console.log(`[front-cleanup] complete · removed ${removedNarratives} unsupported auto narrative(s), ${invalidSnapshots.length} invalid topic key(s), ${preModel} pre-v4 snapshot row(s). Raw X/TikTok evidence was preserved.`);
   if (removedTitles.length) console.log(`[front-cleanup] removed titles: ${removedTitles.slice(0, 40).join(' | ')}${removedTitles.length > 40 ? ' | …' : ''}`);
