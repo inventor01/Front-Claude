@@ -1,5 +1,13 @@
 # Front bug / change log
 
+## 2026-09-11 — Browser evidence save failed with “Invalid request origin” on Railway
+
+**Root cause:** The browser correctly sent Front's public HTTPS `Origin`, but the server-side request URL can reflect Railway's internal proxied HTTP host. The evidence endpoint compared those two raw origins directly, so a legitimate same-site request was rejected after a successful local X/TikTok scan.
+
+**Permanent fix:** Added proxy-aware same-origin validation. Front still accepts direct same-origin requests, but when running behind a reverse proxy it reconstructs the public origin from `x-forwarded-host` / `x-forwarded-proto` (falling back to `Host`) before comparing it to the browser `Origin`. Cross-site origins remain rejected.
+
+**Regression protection:** Added tests for direct same-origin, Railway-style forwarded HTTPS origin, forged cross-site origin, and missing-Origin rejection.
+
 ## 2026-09-11 — X/TikTok rejected sign-in inside Playwright Chromium
 
 **Root cause:** Front opened the sign-in pages inside Playwright's bundled Chromium. Both X and TikTok can treat an automation-controlled Chromium session as higher-risk and refuse or temporarily limit authentication even when the credentials are correct. Repeated retries can make the platform-side restriction worse.
