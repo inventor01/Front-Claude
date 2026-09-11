@@ -1,10 +1,11 @@
 import { dedupeEvidence, extractHashtags, inferTopics } from './core.mjs';
 
 const STOP = new Set(('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i you your we our they their he she his her not no yes just very really new now today tonight yesterday tomorrow have has had do does did can could would should will may might about into over under after before more most some any all one two via amp rt https http com www video watch post posts people thing things time day get got like know think make made going go went see saw says said say look looks looking why how what when where who which there here want wants wanted gonna gotta lol omg yeah yep okay ok good great best bad big small still even much many another first last every literally actually').split(' '));
-const GENERIC = new Set(('meme memes viral virality reaction reactions reacts reacted clip clips trend trends trending story stories update updates breaking news funny wild crazy internet tiktok twitter tweet tweets social media creator creators account accounts hashtag hashtags caption video videos photo photos sound user username profile').split(' '));
+const GENERIC = new Set(('meme memes viral virality reaction reactions reacts reacted clip clips trend trends trending story stories update updates breaking news funny wild crazy internet tiktok twitter tweet tweets x social media creator creators account accounts hashtag hashtags caption video videos photo photos sound user username profile').split(' '));
 const BROAD = new Set(('crypto cryptocurrency bitcoin btc ethereum eth solana market markets stocks stock politics political election elections sports football basketball baseball soccer music entertainment technology tech ai artificial intelligence gaming games celebrity celebrities world national local economy economic finance financial').split(' '));
-const UI = /^(?:show|show more|more|view|view more|read more|explore|home|for you|trending|trend|hashtag|caption|video|profile|user|username|quote|reply|repost|like|likes|share|views?)$/i;
+const UI = /^(?:show|show more|more|view|view more|read more|explore|home|for you|trending|trend|hashtag|hashtags|caption|video|videos|photo|photos|sound|original sound|profile|user|username|creator|account|quote|reply|replies|repost|reposts|like|likes|share|shares|views?)$/i;
 const METRIC = /^\s*[+$-]?\d+(?:[.,]\d+)?\s*(?:K|M|B|T|%|x)?(?:\s+(?:views?|likes?|posts?|shares?|comments?|replies?|reposts?))?\s*$/i;
+const SOCIAL_NOTIFICATION = /\b(?:and\s+\d[\d,.]*\s+others?\s+)?(?:liked|likes|reposted|reposts|quoted|quotes|followed|follows|mentioned|mentions|shared|shares)\s+(?:your|a|this)\s+(?:video|post|tweet|photo|comment|reply)\b/i;
 
 const clean = (value) => String(value ?? '').replace(/([a-z\d])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^#/, '').replace(/\s+/g, ' ').trim().slice(0, 100);
 const normalize = (value) => clean(value).normalize('NFKC').toLocaleLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -36,11 +37,12 @@ export function sameTopicKey(a, b) {
 
 function validLabel(label) {
   const value = clean(label);
-  if (!value || value.length < 3 || UI.test(value) || METRIC.test(value)) return false;
+  if (!value || value.length < 3 || UI.test(value) || METRIC.test(value) || SOCIAL_NOTIFICATION.test(value)) return false;
   return tokens(value).length > 0;
 }
 
 function candidatesFor(event) {
+  if (SOCIAL_NOTIFICATION.test(String(event.content || ''))) return [];
   const out = new Map();
   const add = (raw, kind, weight) => {
     const label = clean(raw), key = normalize(label);
@@ -52,9 +54,7 @@ function candidatesFor(event) {
   for (const match of String(event.content).matchAll(/\b[A-Z][\p{L}\p{N}'’_-]{2,30}(?:\s+[A-Z][\p{L}\p{N}'’_-]{2,30}){0,2}\b/gu)) add(match[0], 'name', 2.8);
   const words = normalize(event.content).split(' ').filter((word) => word.length >= 4 && word.length <= 30 && !STOP.has(word) && !GENERIC.has(word) && !BROAD.has(word) && !/\d/.test(word)).slice(0, 70);
   for (const word of words) add(word, 'token', 0.75);
-  for (let size = 2; size <= 3; size++) {
-    for (let i = 0; i <= words.length - size; i++) add(words.slice(i, i + size).join(' '), 'phrase', size === 3 ? 1.2 : 1);
-  }
+  for (let size = 2; size <= 3; size++) for (let i = 0; i <= words.length - size; i++) add(words.slice(i, i + size).join(' '), 'phrase', size === 3 ? 1.2 : 1);
   return [...out.values()];
 }
 
@@ -62,14 +62,15 @@ function supplementalTopics(events, now) {
   const buckets = new Map();
   for (const event of dedupeEvidence(events)) {
     for (const candidate of candidatesFor(event)) {
-      const row = buckets.get(candidate.key) || { key: candidate.key, labels: new Map(), evidence: new Map(), authors: new Set(), platforms: new Set(), kinds: new Set(), weights: 0 };
+      const canonicalKey = [...buckets.keys()].find((key) => sameTopicKey(key, candidate.key)) || candidate.key;
+      const row = buckets.get(canonicalKey) || { key: canonicalKey, labels: new Map(), evidence: new Map(), authors: new Set(), platforms: new Set(), kinds: new Set(), weights: 0 };
       row.evidence.set(event.id, event);
       row.authors.add(`${event.platform}:${String(event.author).toLocaleLowerCase()}`);
       row.platforms.add(event.platform);
       row.kinds.add(candidate.kind);
       row.weights += candidate.weight;
       row.labels.set(candidate.label, (row.labels.get(candidate.label) || 0) + candidate.weight);
-      buckets.set(candidate.key, row);
+      buckets.set(canonicalKey, row);
     }
   }
   return [...buckets.values()].flatMap((row) => {
@@ -81,10 +82,7 @@ function supplementalTopics(events, now) {
     if (!validLabel(label)) return [];
     const dated = evidence.map((item) => item.published).filter((value) => Number.isFinite(value));
     const engagement = evidence.reduce((sum, item) => sum + Math.log10(1 + (item.views || 0)) + .35 * Math.log10(1 + (item.likes || 0)), 0);
-    const recency = evidence.reduce((sum, item) => {
-      const ageHours = item.published ? Math.max(0, (now - item.published) / 3600000) : 6;
-      return sum + Math.max(.15, 1 / (1 + ageHours / 3));
-    }, 0);
+    const recency = evidence.reduce((sum, item) => { const ageHours = item.published ? Math.max(0, (now - item.published) / 3600000) : 6; return sum + Math.max(.15, 1 / (1 + ageHours / 3)); }, 0);
     const specificityScore = Math.min(10, tokens(label).length * 1.4 + (structured ? 1.6 : 0) + (platformCount > 1 ? .8 : 0) + Math.min(2, authorCount * .4));
     const score = row.weights + authorCount * 3.2 + platformCount * 2.5 + recency * 1.4 + Math.min(8, engagement * .35) + specificityScore;
     const anchors = [...evidence].sort((a, b) => ((b.views || 0) + 4 * (b.likes || 0)) - ((a.views || 0) + 4 * (a.likes || 0)) || (b.published || 0) - (a.published || 0)).slice(0, 3).map((item) => ({ id: item.id, platform: item.platform, author: item.author, url: item.url, content: String(item.content).slice(0, 260), published: item.published, views: item.views, likes: item.likes }));
@@ -92,29 +90,24 @@ function supplementalTopics(events, now) {
   });
 }
 
-function overlap(a, b) {
-  const right = new Set(b.evidenceIds || []);
-  return (a.evidenceIds || []).filter((id) => right.has(id)).length;
-}
-
 export function detectTopics(events, now = Date.now(), limit = 10) {
-  const base = inferTopics(events, now, Math.max(limit * 2, 20)).map((topic) => ({ ...topic, detector: 'niche-inference' }));
+  const base = inferTopics(events, now, Math.max(limit * 2, 20)).filter((topic) => validLabel(topic.topic) && validLabel(topic.key)).map((topic) => ({ ...topic, detector: 'niche-inference' }));
   const extra = supplementalTopics(events, now);
   const merged = [];
   for (const topic of [...base, ...extra].sort((a, b) => b.score - a.score)) {
-    const index = merged.findIndex((existing) => sameTopicKey(existing.key || existing.topic, topic.key || topic.topic) && (compact(existing.key) === compact(topic.key) || overlap(existing, topic) > 0));
+    const index = merged.findIndex((existing) => sameTopicKey(existing.key || existing.topic, topic.key || topic.topic));
     if (index < 0) { merged.push(topic); continue; }
     const existing = merged[index];
     const prefer = (topic.specificityScore || 0) > (existing.specificityScore || 0) || ((topic.specificityScore || 0) === (existing.specificityScore || 0) && topic.authorCount > existing.authorCount);
     const primary = prefer ? topic : existing, secondary = prefer ? existing : topic;
     primary.evidenceIds = [...new Set([...(primary.evidenceIds || []), ...(secondary.evidenceIds || [])])].slice(0, 8);
-    primary.authorCount = Math.max(primary.authorCount || 0, secondary.authorCount || 0);
+    primary.authorCount = Math.max(primary.authorCount || 0, secondary.authorCount || 0, primary.evidenceIds.length);
     primary.evidenceCount = Math.max(primary.evidenceCount || 0, secondary.evidenceCount || 0, primary.evidenceIds.length);
     primary.platforms = [...new Set([...(primary.platforms || []), ...(secondary.platforms || [])])];
     primary.relatedContexts = primary.relatedContexts?.length ? primary.relatedContexts : (secondary.relatedContexts || []);
     merged[index] = primary;
   }
-  return merged.sort((a, b) => b.score - a.score || b.authorCount - a.authorCount).slice(0, Math.max(0, limit));
+  return merged.filter((topic) => validLabel(topic.topic)).sort((a, b) => b.score - a.score || b.authorCount - a.authorCount).slice(0, Math.max(0, limit));
 }
 
 export function enrichMomentum(topics, history = [], now = Date.now()) {
