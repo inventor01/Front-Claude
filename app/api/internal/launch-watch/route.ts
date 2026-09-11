@@ -8,7 +8,8 @@ async function internalToken(){const secret=envValue('FRONT_SETTINGS_KEY');if(!s
 async function authorized(request:Request){const expected=await internalToken();const supplied=request.headers.get('x-front-internal-key')||'';if(!expected||supplied.length!==expected.length)return false;let diff=0;for(let i=0;i<expected.length;i++)diff|=expected.charCodeAt(i)^supplied.charCodeAt(i);return diff===0;}
 function safeAliases(raw:string){try{const value=JSON.parse(raw);return Array.isArray(value)?value.filter((x):x is string=>typeof x==='string'&&x.trim().length>1).slice(0,24):[];}catch{return[];}}
 async function activeNarratives(owner:string){
- const rows=await db().prepare(`SELECT n.id,n.title,n.aliases,MAX(e.last_seen) AS last_seen FROM narratives n LEFT JOIN evidence_links l ON l.owner=n.owner AND l.narrative=n.id LEFT JOIN evidence e ON e.owner=l.owner AND e.id=l.evidence WHERE n.owner=? GROUP BY n.id,n.title,n.aliases ORDER BY COALESCE(MAX(e.last_seen),n.created) DESC LIMIT 1000`).bind(owner).all<{id:string;title:string;aliases:string;last_seen:number|null}>();
+ const cutoff=Date.now()-48*3600000;
+ const rows=await db().prepare(`SELECT n.id,n.title,n.aliases,MAX(e.last_seen) AS last_seen FROM narratives n LEFT JOIN evidence_links l ON l.owner=n.owner AND l.narrative=n.id LEFT JOIN evidence e ON e.owner=l.owner AND e.id=l.evidence WHERE n.owner=? GROUP BY n.id,n.title,n.aliases HAVING n.id NOT LIKE 'auto:%' OR COALESCE(MAX(e.last_seen),n.created)>? ORDER BY COALESCE(MAX(e.last_seen),n.created) DESC LIMIT 1000`).bind(owner,cutoff).all<{id:string;title:string;aliases:string;last_seen:number|null}>();
  return rows.results.map((row)=>({id:row.id,title:row.title,aliases:[...new Set([row.title,...safeAliases(row.aliases)])],lastSeen:row.last_seen}));
 }
 
