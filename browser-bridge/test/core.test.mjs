@@ -72,12 +72,38 @@ test('infers only corroborated topics from multiple authors', () => {
     {platform:'X',author:'solo',url:'https://x.com/solo/status/3',content:'#OneOffThing',published:now-10000,views:900000,likes:50000},
   ];
   const topics = inferTopics(rows, now, 10);
-  const hit = topics.find((row) => row.key === 'dejonlove');
+  const hit = topics.find((row) => row.key === 'dejon love' || row.key === 'dejonlove' || row.topic.toLowerCase().includes('dejon'));
   assert(hit);
   assert.equal(hit.authorCount, 3);
   assert.equal(hit.evidenceCount, 3);
   assert.deepEqual(new Set(hit.platforms), new Set(['X','TikTok']));
   assert(!topics.some((row) => row.key === 'oneoffthing'));
+});
+
+test('clusters narrative wording variants across creators and platforms', () => {
+  const now = 1789100000000;
+  const rows = [
+    {platform:'X',author:'alice',url:'https://x.com/alice/status/11',content:'Dejon Love reaction is taking over my feed',published:now-30000,views:12000,likes:900},
+    {platform:'TikTok',author:'bob',url:'https://www.tiktok.com/@bob/video/2234567890123456789',content:'that Dejon reaction has me crying #DejonLove',published:now-60000,views:180000,likes:14000},
+    {platform:'X',author:'carol',url:'https://x.com/carol/status/12',content:'Everyone keeps reposting the Dejon clip',published:now-90000,views:44000,likes:2500},
+  ];
+  const topics = inferTopics(rows, now, 10);
+  const hit = topics.find((row) => row.topic.toLowerCase().includes('dejon') || row.key.includes('dejon'));
+  assert(hit, 'expected Dejon variants to cluster into one corroborated topic');
+  assert.equal(hit.authorCount, 3);
+  assert.equal(hit.evidenceCount, 3);
+  assert.deepEqual(new Set(hit.platforms), new Set(['X','TikTok']));
+  assert.equal(topics.filter((row) => row.topic.toLowerCase().includes('dejon') || row.key.includes('dejon')).length, 1, 'variant aliases should dedupe to one radar topic');
+});
+
+test('does not promote generic viral words by themselves', () => {
+  const now = 1789100000000;
+  const rows = [
+    {platform:'X',author:'alice',url:'https://x.com/alice/status/21',content:'This viral meme is funny',published:now-10000,views:1000,likes:100},
+    {platform:'TikTok',author:'bob',url:'https://www.tiktok.com/@bob/video/3234567890123456789',content:'another viral meme trend',published:now-20000,views:2000,likes:200},
+  ];
+  const topics = inferTopics(rows, now, 10);
+  assert(!topics.some((row) => ['viral','meme','trend','reaction'].includes(row.key)));
 });
 
 test('sanitizes topics', () => {
