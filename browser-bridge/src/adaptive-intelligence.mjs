@@ -16,7 +16,6 @@ export const ADAPTIVE_DEFAULTS = Object.freeze({
   sentinelAccountsPerScout: 6,
   sentinelAccountsPerDeep: 10,
   maxSentinelAccounts: 30,
-  sourceReputationWeight: 0.65,
 });
 
 export function normalizeAdaptiveConfig(base = {}, input = {}) {
@@ -56,10 +55,11 @@ export function mergeRichEvidence(rows = []) {
     const score = (row) => [row.views, row.likes, row.comments, row.reposts, row.shares].filter(Number.isFinite).reduce((a, b) => a + b, 0);
     const primary = score(raw) >= score(previous) ? raw : previous;
     const secondary = primary === raw ? previous : raw;
+    const observed = [primary.firstObserved, secondary.firstObserved].filter(Number.isFinite);
     map.set(key, {
       ...secondary,
       ...primary,
-      firstObserved: Math.min(primary.firstObserved || Infinity, secondary.firstObserved || Infinity),
+      ...(observed.length ? { firstObserved: Math.min(...observed) } : {}),
       hashtags: [...new Set([...(secondary.hashtags || []), ...(primary.hashtags || [])])].slice(0, 30),
     });
   }
@@ -70,7 +70,8 @@ export function chooseSentinelAccounts(accounts = [], reputation = {}, cursor = 
   const unique = [...new Set(accounts.map((x) => clean(x, 32).replace(/^@/, '')).filter(Boolean))];
   if (!unique.length || count <= 0) return { accounts: [], nextCursor: 0 };
   const cappedCount = Math.min(unique.length, count);
-  const ranked = [...unique].sort((a, b) => (Number(reputation[b]?.score) || 0) - (Number(reputation[a]?.score) || 0));
+  const scoreFor = (account) => Number(reputation[String(account).toLowerCase()]?.score) || 0;
+  const ranked = [...unique].sort((a, b) => scoreFor(b) - scoreFor(a));
   const trustedCount = Math.min(Math.floor(cappedCount / 2), ranked.length);
   const selected = ranked.slice(0, trustedCount);
   let offset = Math.max(0, Math.trunc(cursor)) % unique.length;
@@ -147,8 +148,14 @@ export function aliasSimilarity(a, b) {
 export function consolidateTopicAliases(topics = []) {
   const groups = [];
   for (const topic of topics) {
-    const existing = groups.find((group) => aliasSimilarity(group.topic, topic.topic) >= 0.72 ||
-      (group.soundIds?.length && topic.soundIds?.some((id) => group.soundIds.includes(id))));
+    const existing = groups.find((group) => {
+      const similarity = aliasSimilarity(group.topic, topic.topic);
+      if (similarity >= 0.72) return true;
+      const sharedSound = group.soundIds?.some((id) => topic.soundIds?.includes(id));
+      const groupStrongSound = group.soundSignals?.some((signal) => signal.creators >= 3 && topic.soundIds?.includes(signal.soundId));
+      const topicStrongSound = topic.soundSignals?.some((signal) => signal.creators >= 3 && group.soundIds?.includes(signal.soundId));
+      return Boolean(sharedSound && (groupStrongSound || topicStrongSound) && similarity >= 0.35);
+    });
     if (!existing) {
       groups.push({ ...topic, aliases: [...new Set([topic.topic, ...(topic.aliases || [])])], soundIds: [...new Set(topic.soundIds || [])] });
       continue;
@@ -159,6 +166,8 @@ export function consolidateTopicAliases(topics = []) {
     existing.evidenceIds = [...new Set([...(existing.evidenceIds || []), ...(topic.evidenceIds || [])])];
     existing.platforms = [...new Set([...(existing.platforms || []), ...(topic.platforms || [])])];
     existing.soundIds = [...new Set([...(existing.soundIds || []), ...(topic.soundIds || [])])].slice(0, 12);
+    existing.soundSignals = [...(existing.soundSignals || []), ...(topic.soundSignals || [])]
+      .sort((a, b) => (b.creators || 0) - (a.creators || 0)).slice(0, 5);
     existing.evidenceCount = existing.evidenceIds.length || Math.max(existing.evidenceCount || 0, topic.evidenceCount || 0);
     existing.authorCount = Math.max(existing.authorCount || 0, topic.authorCount || 0);
     existing.score = Math.max(existing.score || 0, topic.score || 0);
