@@ -1,5 +1,15 @@
 # Front bug / change log
 
+## 2026-09-11 — X/TikTok rejected sign-in inside Playwright Chromium
+
+**Root cause:** Front opened the sign-in pages inside Playwright's bundled Chromium. Both X and TikTok can treat an automation-controlled Chromium session as higher-risk and refuse or temporarily limit authentication even when the credentials are correct. Repeated retries can make the platform-side restriction worse.
+
+**Permanent fix:** The bridge now opens sign-in pages in the user's installed regular Google Chrome process with a dedicated Front-only local profile (`~/.front-browser-bridge/chrome-profile`). After the user signs in and fully quits that Front Chrome window, Front reuses the same profile for authenticated scans. Cookies still remain local and are never sent to Front's server.
+
+**Safety:** Front does not bypass login challenges, CAPTCHA, platform anti-abuse systems, or temporary account restrictions. If a platform itself has temporarily limited an account, the user must wait for or complete the platform's normal recovery flow.
+
+**Regression protection:** Added unit coverage for the system-Chrome launcher and dedicated profile arguments. Existing browser-launch, bridge-health, app tests, typecheck, lint, and build checks remain in CI.
+
 ## 2026-09-11 — Browser login returned HTTP 500 on Macs with an existing Playwright cache
 
 **Root cause:** `browser-bridge/start.command` treated the presence of `~/Library/Caches/ms-playwright` as proof that Front's required Chromium revision was installed. Another project (including Python Playwright) can create that shared cache while using a different browser revision. Front therefore skipped `npx playwright install chromium`, the bridge itself started normally, but the first browser launch from `/open-login` failed with HTTP 500 because the exact Chromium executable required by Front's Node Playwright package was absent.

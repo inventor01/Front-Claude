@@ -4,12 +4,14 @@ import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
 import { dedupeEvidence, extractTikTokItemsFromJson, metricFromAria, normalizeConfig, sanitizeTopic, stableId } from './core.mjs';
+import { findSystemChrome, frontLoginProfileDir, openRegularChromeForLogin } from './system-browser.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
 const dataDir = process.env.FRONT_BRIDGE_DATA || path.join(os.homedir(), '.front-browser-bridge');
-const profileDir = path.join(dataDir, 'profile');
+const profileDir = frontLoginProfileDir(dataDir);
 const configPath = path.join(dataDir, 'config.json');
+const systemChrome = findSystemChrome();
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://believable-inspiration-production-a68b.up.railway.app',
   'https://front-narrative-desk.austinrock2000.chatgpt.site',
@@ -65,11 +67,21 @@ function json(req, res, status, body) {
 }
 async function ensureBrowser() {
   if (context) return context;
-  context = await chromium.launchPersistentContext(profileDir, {
-    headless: process.env.FRONT_BRIDGE_HEADLESS === '1',
-    viewport: { width: 1440, height: 1000 },
-    locale: 'en-US',
-  });
+  if (!systemChrome) throw new Error('Google Chrome is required for authenticated X/TikTok scans. Install Chrome, then restart the Front browser bridge.');
+  try {
+    context = await chromium.launchPersistentContext(profileDir, {
+      executablePath: systemChrome,
+      headless: process.env.FRONT_BRIDGE_HEADLESS === '1',
+      viewport: { width: 1440, height: 1000 },
+      locale: 'en-US',
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/profile|singleton|already in use|user data directory/i.test(message)) {
+      throw new Error('Front login Chrome is still open. Finish signing in, fully quit that Front Chrome window, then run the scan again.');
+    }
+    throw error;
+  }
   context.on('close', () => { context = undefined; });
   return context;
 }
@@ -108,7 +120,7 @@ async function collectXQuery(query, limit) {
       out.push({
         id: stableId('X', url, text), platform: 'X', author, url, content: text,
         published, views, likes,
-        provenance: `Local Playwright browser · X Latest search · query: ${q}`,
+        provenance: `Local Chrome browser · X Latest search · query: ${q}`,
       });
     }
     return out;
@@ -128,7 +140,7 @@ async function collectXExplore(limit) {
       const href = await link.getAttribute('href').catch(() => null);
       if (!text || !href) continue;
       const url = href.startsWith('http') ? href : `https://x.com${href}`;
-      out.push({ id: stableId('X', url, text), platform: 'X', author: 'X Explore', url, content: text, published: null, views: null, likes: null, provenance: 'Local Playwright browser · X Explore trending' });
+      out.push({ id: stableId('X', url, text), platform: 'X', author: 'X Explore', url, content: text, published: null, views: null, likes: null, provenance: 'Local Chrome browser · X Explore trending' });
     }
     return out;
   } finally { await page.close(); }
@@ -155,7 +167,7 @@ async function collectTikTokSearch(topic, limit) {
     return [...unique.values()].slice(0, limit).map((item) => {
       const author = item.author || 'TikTok';
       const url = author !== 'TikTok' ? `https://www.tiktok.com/@${author}/video/${item.id}` : `https://www.tiktok.com/video/${item.id}`;
-      return { id: `tiktok:browser:${item.id}`, platform: 'TikTok', author, url, content: item.content, published: item.published, views: item.views, likes: item.likes, provenance: `Local Playwright browser · TikTok search · query: ${q}` };
+      return { id: `tiktok:browser:${item.id}`, platform: 'TikTok', author, url, content: item.content, published: item.published, views: item.views, likes: item.likes, provenance: `Local Chrome browser · TikTok search · query: ${q}` };
     });
   } finally { await page.close(); }
 }
@@ -173,7 +185,7 @@ async function collectTikTokTrends(limit) {
       const href = await row.getAttribute('href').catch(() => null);
       if (!text || !href) continue;
       const url = href.startsWith('http') ? href : `https://ads.tiktok.com${href}`;
-      out.push({ id: stableId('TikTok', url, text), platform: 'TikTok', author: 'TikTok Creative Center', url, content: text, published: null, views: null, likes: null, provenance: 'Local Playwright browser · TikTok Creative Center trends' });
+      out.push({ id: stableId('TikTok', url, text), platform: 'TikTok', author: 'TikTok Creative Center', url, content: text, published: null, views: null, likes: null, provenance: 'Local Chrome browser · TikTok Creative Center trends' });
     }
     return out;
   } finally { await page.close(); }
@@ -218,7 +230,7 @@ async function collectAll(input = {}) {
 }
 
 function status() {
-  return { ok: true, service: 'front-browser-bridge', version: 1, running, lastRun, lastCount, lastError, config };
+  return { ok: true, service: 'front-browser-bridge', version: 2, running, lastRun, lastCount, lastError, config, loginBrowser: systemChrome ? 'system-chrome' : 'unavailable' };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -241,12 +253,16 @@ const server = http.createServer(async (req, res) => {
       return json(req, res, 200, await collectAll(JSON.parse(body || '{}')));
     }
     if (req.method === 'POST' && url.pathname === '/open-login') {
-      const browser = await ensureBrowser();
-      const x = await browser.newPage();
-      await x.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 45000 });
-      const tiktok = await browser.newPage();
-      await tiktok.goto('https://www.tiktok.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
-      return json(req, res, 200, { ok: true, message: 'X and TikTok opened in the local persistent browser profile. Sign in there once, then run a scan.' });
+      if (context) {
+        await context.close();
+        context = undefined;
+      }
+      const opened = openRegularChromeForLogin({ dataDir, chromeExecutable: systemChrome });
+      return json(req, res, 200, {
+        ok: true,
+        message: 'Opened X and TikTok in regular Google Chrome using Front’s private local Chrome profile. Sign in normally, then fully quit that Front Chrome window before running a scan.',
+        profileDir: opened.profileDir,
+      });
     }
     return json(req, res, 404, { error: 'Not found' });
   } catch (error) {
@@ -258,5 +274,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[front-bridge] listening on http://${HOST}:${PORT}`);
   console.log(`[front-bridge] browser profile: ${profileDir}`);
+  console.log(`[front-bridge] login browser: ${systemChrome || 'Google Chrome not found'}`);
   console.log(`[front-bridge] allowed origins: ${[...allowedOrigins].join(', ')}`);
 });
