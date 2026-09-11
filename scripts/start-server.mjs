@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { projectRoot } from "./sites-env.mjs";
@@ -10,8 +10,6 @@ const persistDir = process.env.FRONT_PERSIST_DIR
   : path.join(projectRoot, ".wrangler/state");
 mkdirSync(persistDir, { recursive: true });
 
-// Railway/standalone containers do not get the ChatGPT Sites control-plane
-// migration step, so make the same persistent D1 schema ready before serving.
 const migrate = spawnSync(
   process.execPath,
   [path.join(projectRoot, "scripts/migrate-local.mjs")],
@@ -43,11 +41,6 @@ const args = [
   "0",
 ];
 
-// Wrangler dev does not automatically expose the parent Node process environment
-// to Worker code. Railway variables exist in process.env, but without explicit
-// Worker bindings code that reads `cloudflare:workers` env sees only bindings
-// declared in wrangler.json (for example DB). Forward only the variables Front's
-// Worker runtime actually needs; never print their values.
 const workerVariableNames = [
   "FRONT_SETTINGS_KEY",
   "FRONT_STANDALONE_USER_ID",
@@ -76,10 +69,40 @@ if (forwardedWorkerVariableNames.length) {
 }
 console.log(`[front] D1 persistence directory: ${persistDir}`);
 
-const server = spawnSync(process.execPath, args, {
+const server = spawn(process.execPath, args, {
   cwd: projectRoot,
   stdio: "inherit",
   env: process.env,
 });
-if (server.error) throw server.error;
-process.exit(server.status ?? 1);
+
+let watcher;
+if (process.env.FRONT_SETTINGS_KEY && process.env.FRONT_STANDALONE_USER_ID) {
+  watcher = spawn(process.execPath, [path.join(projectRoot, "scripts/pumpportal-watcher.mjs")], {
+    cwd: projectRoot,
+    stdio: "inherit",
+    env: process.env,
+  });
+  watcher.on("exit", (code, signal) => {
+    if (code && !signal) console.warn(`[front] launch watcher exited with code ${code}`);
+  });
+} else {
+  console.log('[front] background PumpPortal watcher disabled outside configured standalone runtime.');
+}
+
+let stopping = false;
+function stop(signal = "SIGTERM") {
+  if (stopping) return;
+  stopping = true;
+  try { watcher?.kill(signal); } catch {}
+  try { server.kill(signal); } catch {}
+  setTimeout(() => process.exit(0), 2000).unref();
+}
+process.on("SIGTERM", () => stop("SIGTERM"));
+process.on("SIGINT", () => stop("SIGINT"));
+server.on("error", (error) => { console.error(error); stop(); });
+server.on("exit", (code, signal) => {
+  if (!stopping) {
+    try { watcher?.kill("SIGTERM"); } catch {}
+    process.exit(code ?? (signal ? 1 : 0));
+  }
+});
