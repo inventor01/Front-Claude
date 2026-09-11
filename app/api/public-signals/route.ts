@@ -5,6 +5,8 @@ import { publicSignals } from '@/lib/providers';
 const db = () => { if (!env.DB) throw new Error('Database unavailable'); return env.DB; };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const UI_NOISE = /^(show|show more|more|see more|view|view more|read more|explore|home|for you|trending|trend|news|sports|entertainment|posts?|replies?|likes?|views?|share|bookmark|follow|following)$/i;
+const SOURCE_ORDER = ['x-trending','tiktok-trending','tiktok-explore','x-feed','x-search','tiktok-search','google-trends','market-theme','x-browser','tiktok-browser'];
 
 type BrowserRow = {
   id:string; platform:string; author:string; url:string; content:string; published:number|null;
@@ -28,19 +30,60 @@ function sourceFor(row: BrowserRow) {
   return row.platform === 'X' ? { source: 'X Browser', key: 'x-browser' } : { source: 'TikTok Browser', key: 'tiktok-browser' };
 }
 
+function cleanCandidate(value: string) {
+  return value.replace(/^#/, '').replace(/^[-·•\s]+|[-·•\s]+$/g, '').replace(/\s+/g, ' ').trim();
+}
+
 function titleFor(row: BrowserRow) {
-  const first = row.content.split(/\n| · /)[0]?.replace(/^#/, '').trim() || row.content.trim();
-  return first.slice(0, 140);
+  const content = row.content.trim();
+  const chunks = content.split(/\s+·\s+|\n+/).map(cleanCandidate).filter(Boolean);
+  const meaningful = chunks.find((part) => !UI_NOISE.test(part) && !/^trending in\b/i.test(part) && !/^[\d,.]+\s*(?:posts?|views?|likes?)$/i.test(part));
+  const candidate = meaningful || cleanCandidate(content);
+  if (UI_NOISE.test(candidate) || candidate.length < 2) return '';
+  return candidate.slice(0, 180);
+}
+
+function signalQuality(item: PublicItem) {
+  const title = item.title.trim();
+  if (!title || UI_NOISE.test(title)) return false;
+  const normalized = normalize(title);
+  if (!normalized || normalized.length < 2) return false;
+  if (/^(show|more|view|explore|home|trending)$/.test(normalized)) return false;
+  return true;
 }
 
 function dedupe(items: PublicItem[]) {
   const out = new Map<string, PublicItem>();
   for (const item of items) {
+    if (!signalQuality(item)) continue;
     const key = `${item.sourceKey}:${normalize(item.title) || item.id}`;
     const old = out.get(key);
     if (!old || item.observed > old.observed || item.status === 'Promoted') out.set(key, item);
   }
   return [...out.values()];
+}
+
+function balanced(items: PublicItem[]) {
+  const buckets = new Map<string, PublicItem[]>();
+  for (const item of items) {
+    const list = buckets.get(item.sourceKey) ?? [];
+    list.push(item);
+    buckets.set(item.sourceKey, list);
+  }
+  for (const list of buckets.values()) list.sort((a,b) => (b.status === 'Promoted' ? 1 : 0) - (a.status === 'Promoted' ? 1 : 0) || b.observed - a.observed);
+  const orderedKeys = [...SOURCE_ORDER.filter((key) => buckets.has(key)), ...[...buckets.keys()].filter((key) => !SOURCE_ORDER.includes(key))];
+  const result: PublicItem[] = [];
+  let added = true;
+  while (added) {
+    added = false;
+    for (const key of orderedKeys) {
+      const item = buckets.get(key)?.shift();
+      if (!item) continue;
+      result.push(item);
+      added = true;
+    }
+  }
+  return result;
 }
 
 export async function GET(request: Request) {
@@ -57,19 +100,20 @@ export async function GET(request: Request) {
     const browser = await db().prepare(`SELECT e.id,e.platform,e.author,e.url,e.content,e.published,e.first_seen,e.last_seen,e.provenance,
       (SELECT o.views FROM observations o WHERE o.owner=e.owner AND o.id=e.id ORDER BY o.observed DESC LIMIT 1) AS views,
       (SELECT o.likes FROM observations o WHERE o.owner=e.owner AND o.id=e.id ORDER BY o.observed DESC LIMIT 1) AS likes
-      FROM evidence e WHERE e.owner=? AND e.last_seen>? ORDER BY e.last_seen DESC LIMIT 2500`).bind(user.userId, now - 7 * 86400000).all<BrowserRow>();
-    const links = await db().prepare(`SELECT l.evidence,l.narrative,n.title FROM evidence_links l JOIN narratives n ON n.owner=l.owner AND n.id=l.narrative WHERE l.owner=? ORDER BY n.created DESC LIMIT 5000`).bind(user.userId).all<LinkRow>();
+      FROM evidence e WHERE e.owner=? AND e.last_seen>? ORDER BY e.last_seen DESC LIMIT 4000`).bind(user.userId, now - 14 * 86400000).all<BrowserRow>();
+    const links = await db().prepare(`SELECT l.evidence,l.narrative,n.title FROM evidence_links l JOIN narratives n ON n.owner=l.owner AND n.id=l.narrative WHERE l.owner=? ORDER BY n.created DESC LIMIT 8000`).bind(user.userId).all<LinkRow>();
     const linkByEvidence = new Map<string, LinkRow>();
     for (const row of links.results) if (!linkByEvidence.has(row.evidence)) linkByEvidence.set(row.evidence, row);
 
-    const browserItems: PublicItem[] = browser.results.map((row) => {
+    const browserItems: PublicItem[] = browser.results.flatMap((row) => {
       const meta = sourceFor(row); const linked = linkByEvidence.get(row.id); const title = titleFor(row);
-      return {
+      if (!title) return [];
+      return [{
         id: `browser:${row.id}`, source: meta.source, sourceKey: meta.key, title, query: title, url: row.url,
         observed: row.last_seen, published: row.published, views: row.views, likes: row.likes,
         status: linked ? 'Promoted' : 'Raw signal', narrative: linked ? { id: linked.narrative, title: linked.title } : null,
         detail: linked ? `Promoted to ${linked.title}` : `${row.author} · observed from ${meta.source}`,
-      };
+      }];
     });
 
     let external: Awaited<ReturnType<typeof publicSignals>> = { signals: [], coverage: [], at: now };
@@ -80,13 +124,12 @@ export async function GET(request: Request) {
       status: 'Raw signal', narrative: null, detail: signal.detail,
     }));
 
-    let items = dedupe([...browserItems, ...externalItems]);
-    if (source !== 'all') items = items.filter((item) => item.sourceKey === source);
-    if (q) items = items.filter((item) => normalize(`${item.title} ${item.detail} ${item.narrative?.title || ''}`).includes(q));
-    items.sort((a, b) => (b.status === 'Promoted' ? 1 : 0) - (a.status === 'Promoted' ? 1 : 0) || b.observed - a.observed);
+    const allItems = dedupe([...browserItems, ...externalItems]);
+    const counts: Record<string, number> = { all: allItems.length };
+    for (const item of allItems) counts[item.sourceKey] = (counts[item.sourceKey] || 0) + 1;
 
-    const counts: Record<string, number> = {};
-    for (const item of dedupe([...browserItems, ...externalItems])) counts[item.sourceKey] = (counts[item.sourceKey] || 0) + 1;
+    let items = source === 'all' ? balanced(allItems) : allItems.filter((item) => item.sourceKey === source).sort((a,b) => b.observed - a.observed);
+    if (q) items = items.filter((item) => normalize(`${item.title} ${item.detail} ${item.narrative?.title || ''}`).includes(q));
     const total = items.length;
     return json({
       items: items.slice(offset, offset + limit),
@@ -94,7 +137,7 @@ export async function GET(request: Request) {
       counts,
       coverage: external.coverage,
       at: now,
-      note: 'Public Signals shows raw X/TikTok/browser trends immediately. Narrative Radar remains a stricter corroborated niche layer.',
+      note: 'Public Signals balances X/TikTok trend, feed, search and public-provider sources instead of letting one source crowd out the others. Low-value UI labels are discarded.',
     });
   } catch (error) {
     return json({ error: (error as Error).message }, 500);
