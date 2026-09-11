@@ -1,5 +1,6 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { saveEvidence, type Evidence } from '@/lib/narratives';
+import { samePublicOrigin } from '@/lib/request-origin';
 import { env } from 'cloudflare:workers';
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -59,7 +60,7 @@ function evidenceFrom(value: unknown): Evidence | null {
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return json({ error: 'Please sign in to save browser evidence.' }, 401);
-  if (request.headers.get('origin') !== new URL(request.url).origin) return json({ error: 'Invalid request origin.' }, 403);
+  if (!samePublicOrigin(request)) return json({ error: 'Invalid request origin.' }, 403);
   try {
     const body = await request.json() as { evidence?: unknown[] };
     if (!Array.isArray(body.evidence)) return json({ error: 'Evidence must be an array.' }, 400);
