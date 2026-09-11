@@ -76,8 +76,8 @@ try {
     if (!lowQualityIntelligenceLabel(title) && hasEnoughNaturalSupport(title, naturalCreators, naturalEvidence)) continue;
     const idSql = sqlString(row.id);
     const keys = [...new Set(labels.map(normalizeIntelligenceLabel).filter(Boolean))];
-    const keyClause = keys.length ? ` AND topic_key IN (${keys.map(sqlString).join(',')})` : '';
-    execute(`BEGIN;DELETE FROM narrative_coins WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM evidence_links WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM narrative_relationships WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM coin_match_queue WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM launch_events WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM topic_snapshots WHERE owner=${ownerSql}${keyClause};DELETE FROM narratives WHERE owner=${ownerSql} AND id=${idSql};COMMIT;`);
+    const snapshotDelete = keys.length ? `DELETE FROM topic_snapshots WHERE owner=${ownerSql} AND topic_key IN (${keys.map(sqlString).join(',')});` : '';
+    execute(`BEGIN;DELETE FROM narrative_coins WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM evidence_links WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM narrative_relationships WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM coin_match_queue WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM launch_events WHERE owner=${ownerSql} AND narrative=${idSql};${snapshotDelete}DELETE FROM narratives WHERE owner=${ownerSql} AND id=${idSql};COMMIT;`);
     removedNarratives++;
     removedTitles.push(`${title} (${naturalCreators} natural creators)`);
   }
