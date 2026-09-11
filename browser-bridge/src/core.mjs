@@ -94,71 +94,140 @@ export function xTrendLabel(value) {
 }
 
 const STOP = new Set(('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i you your we our they their he she his her not no yes just very really new now today tonight yesterday tomorrow have has had do does did can could would should will may might about into over under after before more most some any all one two via amp rt https http com www video watch post posts people thing things time day get got like know think make made going go went see saw says said say look looks looking why how what when where who which there here').split(' '));
-const normalizeTopic = (value) => cleanText(value, 100).replace(/^#/, '').replace(/[’']/g, '').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const GENERIC_TOPIC = new Set(('meme memes viral virality reaction reactions reacts reacted clip clips trend trends trending story stories update updates breaking news funny wild crazy internet tiktok twitter tweet tweets x social media creator creators account accounts').split(' '));
+
+function splitCamel(value) {
+  return String(value ?? '')
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ');
+}
+
+const normalizeTopic = (value) => cleanText(splitCamel(value), 100)
+  .replace(/^#/, '')
+  .replace(/[’']/g, '')
+  .toLocaleLowerCase()
+  .replace(/[^\p{L}\p{N}]+/gu, ' ')
+  .trim();
+
+function topicTokens(value) {
+  return normalizeTopic(value)
+    .split(' ')
+    .filter((word) => word.length >= 3 && !STOP.has(word) && !GENERIC_TOPIC.has(word) && !/^\d+$/.test(word));
+}
 
 function candidatePhrases(content) {
   const out = new Map();
-  const add = (label, weight) => {
-    const clean = cleanText(label, 100).replace(/^#/, '').trim();
+  const add = (label, weight, kind = 'phrase') => {
+    const clean = cleanText(splitCamel(label), 100).replace(/^#/, '').trim();
     const key = normalizeTopic(clean);
     if (key.length < 3 || key.length > 80 || STOP.has(key)) return;
-    const words = key.split(' ').filter(Boolean);
-    if (!words.length || words.every((word) => STOP.has(word) || /^\d+$/.test(word))) return;
+    const tokens = topicTokens(clean);
+    if (!tokens.length) return;
+    const aliases = new Set([key]);
+    // Named entities and hashtags may be described differently across posts.
+    // A distinctive name token lets “Dejon Love”, “Dejon reaction” and
+    // “#DejonLove” corroborate each other without requiring an LLM call.
+    if (kind === 'name' || kind === 'hashtag') {
+      for (const token of tokens) if (token.length >= 4) aliases.add(token);
+      if (tokens.length >= 2) aliases.add(tokens.join(' '));
+    }
     const old = out.get(key);
-    if (!old || weight > old.weight) out.set(key, { key, label: clean, weight });
+    if (!old || weight > old.weight) out.set(key, { key, label: clean, weight, kind, aliases: [...aliases], tokenCount: tokens.length });
   };
-  for (const tag of extractHashtags(content, 12)) add(tag, 3);
-  for (const match of String(content).matchAll(/\b[A-Z][\p{L}\p{N}'’_-]{2,30}(?:\s+[A-Z][\p{L}\p{N}'’_-]{2,30}){0,2}\b/gu)) add(match[0], 2.2);
+  for (const tag of extractHashtags(content, 12)) add(tag, 3.2, 'hashtag');
+  for (const match of String(content).matchAll(/\b[A-Z][\p{L}\p{N}'’_-]{2,30}(?:\s+[A-Z][\p{L}\p{N}'’_-]{2,30}){0,2}\b/gu)) add(match[0], 2.6, 'name');
   const words = normalizeTopic(content).split(' ').filter((word) => word.length >= 3 && !STOP.has(word) && !/^\d+$/.test(word)).slice(0, 80);
   for (let size = 2; size <= 3; size++) {
-    for (let i = 0; i <= words.length - size; i++) add(words.slice(i, i + size).join(' '), size === 3 ? 1.25 : 1);
+    for (let i = 0; i <= words.length - size; i++) add(words.slice(i, i + size).join(' '), size === 3 ? 1.25 : 1, 'phrase');
   }
   return [...out.values()];
 }
 
+function addObservation(row, event, phrase, recency, engagement) {
+  const existing = row.evidence.get(event.id);
+  if (!existing) row.evidence.set(event.id, event);
+  row.authors.add(`${event.platform}:${event.author.toLocaleLowerCase()}`);
+  row.platforms.add(event.platform);
+  const previous = row.eventWeight.get(event.id) || 0;
+  if (phrase.weight > previous) row.eventWeight.set(event.id, phrase.weight);
+  row.recencyByEvent.set(event.id, Math.max(row.recencyByEvent.get(event.id) || 0, recency));
+  row.engagementByEvent.set(event.id, Math.max(row.engagementByEvent.get(event.id) || 0, engagement));
+  const specificity = phrase.weight + Math.min(2, phrase.tokenCount * 0.45) + (phrase.kind === 'hashtag' ? 0.3 : 0);
+  const oldLabel = row.labels.get(phrase.label) || 0;
+  row.labels.set(phrase.label, oldLabel + specificity);
+}
+
 export function inferTopics(events, now = Date.now(), limit = 10) {
   const normalized = dedupeEvidence(events);
-  const topics = new Map();
+  const buckets = new Map();
   for (const event of normalized) {
     const ageHours = event.published ? Math.max(0, (now - event.published) / 3600000) : 6;
     const recency = Math.max(0.15, 1 / (1 + ageHours / 3));
     const engagement = Math.log10(1 + (event.views || 0)) + 0.35 * Math.log10(1 + (event.likes || 0));
     for (const phrase of candidatePhrases(event.content)) {
-      const row = topics.get(phrase.key) || { topic: phrase.label, key: phrase.key, evidence: [], authors: new Set(), platforms: new Set(), phraseWeight: 0, recency: 0, engagement: 0 };
-      row.evidence.push(event);
-      row.authors.add(`${event.platform}:${event.author.toLocaleLowerCase()}`);
-      row.platforms.add(event.platform);
-      row.phraseWeight += phrase.weight;
-      row.recency += recency;
-      row.engagement += engagement;
-      topics.set(phrase.key, row);
+      for (const alias of phrase.aliases) {
+        if (!alias || GENERIC_TOPIC.has(alias) || STOP.has(alias)) continue;
+        const row = buckets.get(alias) || {
+          key: alias,
+          evidence: new Map(),
+          authors: new Set(),
+          platforms: new Set(),
+          eventWeight: new Map(),
+          recencyByEvent: new Map(),
+          engagementByEvent: new Map(),
+          labels: new Map(),
+        };
+        addObservation(row, event, phrase, recency, engagement);
+        buckets.set(alias, row);
+      }
     }
   }
-  return [...topics.values()]
+
+  const ranked = [...buckets.values()]
     .map((row) => {
-      const evidenceCount = row.evidence.length;
+      const evidence = [...row.evidence.values()];
+      const evidenceCount = evidence.length;
       const authorCount = row.authors.size;
       const platformCount = row.platforms.size;
       const corroborated = evidenceCount >= 2 && authorCount >= 2;
-      const score = row.phraseWeight + authorCount * 2.5 + platformCount * 2 + row.recency * 1.5 + Math.min(8, row.engagement * 0.45);
-      const dated = row.evidence.map((event) => event.published).filter((value) => Number.isFinite(value));
+      const phraseWeight = [...row.eventWeight.values()].reduce((sum, value) => sum + value, 0);
+      const recency = [...row.recencyByEvent.values()].reduce((sum, value) => sum + value, 0);
+      const engagement = [...row.engagementByEvent.values()].reduce((sum, value) => sum + value, 0);
+      const label = [...row.labels.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)[0]?.[0] || row.key;
+      const score = phraseWeight + authorCount * 2.8 + platformCount * 2.2 + recency * 1.5 + Math.min(8, engagement * 0.45);
+      const dated = evidence.map((event) => event.published).filter((value) => Number.isFinite(value));
       return {
-        topic: row.topic,
+        topic: label,
         key: row.key,
         evidenceCount,
         authorCount,
         platforms: [...row.platforms],
         oldestPublished: dated.length ? Math.min(...dated) : null,
         newestPublished: dated.length ? Math.max(...dated) : null,
-        engagementEvidence: row.evidence.reduce((sum, event) => sum + (event.views || 0) + (event.likes || 0), 0),
+        engagementEvidence: evidence.reduce((sum, event) => sum + (event.views || 0) + (event.likes || 0), 0),
         score: Number(score.toFixed(2)),
         corroborated,
-        evidenceIds: row.evidence.slice(0, 8).map((event) => event.id),
+        evidenceIds: evidence.slice(0, 8).map((event) => event.id),
       };
     })
     .filter((row) => row.corroborated)
-    .sort((a, b) => b.score - a.score || b.authorCount - a.authorCount || b.evidenceCount - a.evidenceCount)
-    .slice(0, Math.max(0, limit));
+    .sort((a, b) => b.score - a.score || b.authorCount - a.authorCount || b.evidenceCount - a.evidenceCount);
+
+  // Alias buckets can point at the same evidence set (for example “dejon” and
+  // “dejon love”). Keep the strongest/richest representative instead of
+  // flooding the radar with near-duplicates.
+  const selected = [];
+  for (const row of ranked) {
+    const evidenceSet = new Set(row.evidenceIds);
+    const duplicate = selected.some((existing) => {
+      const overlap = existing.evidenceIds.filter((id) => evidenceSet.has(id)).length;
+      return overlap >= 2 && overlap / Math.min(existing.evidenceIds.length, row.evidenceIds.length) >= 0.66;
+    });
+    if (duplicate) continue;
+    selected.push(row);
+    if (selected.length >= Math.max(0, limit)) break;
+  }
+  return selected;
 }
 
 function allowedUrl(platform, rawUrl) {
