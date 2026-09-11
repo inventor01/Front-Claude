@@ -77,6 +77,10 @@ export function narrativeLabelContains(a:string,b:string){
 export function coinAliasEligible(alias:string,narrativeTitle:string){
   if(isNarrativeLabelJunk(alias))return false;
   const aliasTerms=specificNarrativeTerms(alias),titleTerms=specificNarrativeTerms(narrativeTitle);if(!aliasTerms.length)return false;
-  if(titleTerms.length>=2&&aliasTerms.length===1&&titleTerms.includes(aliasTerms[0])&&normalizeNarrativeText(alias)!==normalizeNarrativeText(narrativeTitle))return false;
-  return aliasTerms.length>=2||aliasTerms[0].length>=4;
+  const aliasWords=narrativeWords(alias),titleWords=narrativeWords(narrativeTitle);
+  // A single first/last/name fragment cannot stand in for a multi-word event,
+  // but a meaningful multi-word proper name such as "Daejon Love" remains
+  // eligible even when one surname is also a common English word.
+  if(titleWords.length>=2&&aliasWords.length===1&&titleTerms.includes(aliasTerms[0])&&normalizeNarrativeText(alias)!==normalizeNarrativeText(narrativeTitle))return false;
+  return aliasWords.length>=2||aliasTerms[0].length>=4;
 }
