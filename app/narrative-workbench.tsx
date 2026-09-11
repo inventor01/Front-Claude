@@ -31,6 +31,7 @@ type Props={narrativeId?:string|null;topic:string};
 
 const age=(ts:number|null|undefined)=>{if(!ts)return'unknown';const mins=Math.max(0,Math.round((Date.now()-ts)/60000));if(mins<60)return`${mins}m ago`;const h=mins/60;if(h<48)return`${h.toFixed(h<10?1:0)}h ago`;return`${Math.round(h/24)}d ago`;};
 const compact=(n:number|null|undefined)=>n==null?'—':new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1}).format(n);
+const metric=(n:number|null|undefined,label:string)=>n==null?'':`${label} ${compact(n)}`;
 const dollars=(n:number|null|undefined)=>n==null?'—':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:n>=1?2:8}).format(n);
 const duration=(ms:number|null)=>{if(ms==null)return'unknown';const abs=Math.abs(ms);const mins=Math.round(abs/60000);if(mins<60)return`${mins}m`;const hours=mins/60;if(hours<48)return`${hours.toFixed(hours<10?1:0)}h`;return`${(hours/24).toFixed(1)}d`;};
 const pump=(mint:string)=>`https://pump.fun/coin/${encodeURIComponent(mint)}`;
