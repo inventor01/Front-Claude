@@ -1,5 +1,24 @@
 # Front Bug / Fix Log
 
+## 2026-09-11 — Narrative rows lacked the full decision context
+
+### Root cause
+The unified dashboard restored the old Desk workflows, but the primary narrative row still acted mostly like a summary. To understand one narrative, the user still had to mentally combine momentum, evidence, related context, stored coin candidates, launch matches and timing from separate parts of the dashboard. That made the most important question — whether Front found a narrative early enough to create a trading edge — harder to answer than it should have been.
+
+### Permanent fix
+- Make the expanded Overview narrative row the primary Front workbench.
+- Add a bounded `/api/narrative-detail` endpoint that lazily fetches heavy detail only for the narrative the user opens.
+- Show Front's first stored detection time separately from the earliest sampled social evidence so detection time is not confused with an absolute internet-origin claim.
+- Show 15m, 1h, 6h and 24h creator/evidence momentum plus recent snapshot history.
+- Show the actual supporting X/TikTok evidence with creator, age, views, likes and direct source links.
+- Show corroborated related context as repeated co-occurrence only, not a causal claim.
+- Show stored related coins with price, liquidity, volume, market cap, Pump.fun and Axiom links.
+- Show matching PumpPortal creation events inside the same narrative workbench.
+- Compare Front's earliest stored detection timestamp with the first matching stored launch and label the result as before-launch, after-launch or still waiting.
+
+### Regression / release gate
+The release must pass the existing detection quality suite, browser bridge tests, migrations, mounted D1 persistence, typecheck, lint and production build before merge.
+
 ## 2026-09-11 — Unified dashboard lost old Desk usability
 
 ### Root cause
