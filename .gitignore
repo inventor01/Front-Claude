@@ -1,0 +1,25 @@
+# Dependencies
+/node_modules
+
+# Framework and bundler output
+/.next
+/dist
+/out
+*.tsbuildinfo
+next-env.d.ts.timestamp-*
+
+# Wrangler / Miniflare local state (see vite.config.ts and scripts/sites-env.mjs)
+/.wrangler
+/.sites-runtime
+
+# Local environment. Application secrets belong here, never in tracked source.
+.env
+.env.*
+!.env.example
+
+# Editor and OS noise
+.DS_Store
+*.log
+npm-debug.log*
+.idea
+.vscode

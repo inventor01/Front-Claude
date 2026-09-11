@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A superseded run tells you nothing useful; let the newest push win.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # package.json requires >=22.13.0. tests/verify.mjs also needs node:sqlite.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm run install:ci
+
+      - name: Migrations match db/schema.ts
+        run: |
+          npm run db:generate
+          if [ -n "$(git status --porcelain drizzle/)" ]; then
+            echo "::error::db/schema.ts changed without a generated migration. Run 'npm run db:generate' and commit drizzle/."
+            git status --porcelain drizzle/
+            exit 1
+          fi
+
+      - name: Test
+        run: node tests/verify.mjs
+
+      # verify.mjs replays the migrations through node:sqlite. This proves they
+      # also apply through wrangler to a real D1, which is stricter (0002 uses
+      # PRAGMA statements), and that the local dev database can be built at all.
+      - name: Migrations apply to a local D1
+        run: npm run db:migrate:local
+
+      - name: Typecheck
+        run: node node_modules/typescript/bin/tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      # The reason this workflow exists: .openai/hosting.json was missing and every
+      # one of these steps failed on a clean clone.
+      - name: Build
+        run: npm run build
+
+      - name: Deploy bundle contains hosting config and migrations
+        run: |
+          test -f dist/.openai/hosting.json
+          test -d dist/.openai/drizzle
