@@ -28,6 +28,9 @@ jobs:
       - name: Install
         run: npm run install:ci
 
+      - name: Install browser bridge dependencies
+        run: npm install --prefix browser-bridge --no-audit --no-fund
+
       - name: Migrations match db/schema.ts
         run: |
           npm run db:generate
@@ -39,6 +42,20 @@ jobs:
 
       - name: Test
         run: node tests/verify.mjs
+
+      - name: Browser bridge unit tests
+        run: npm test --prefix browser-bridge
+
+      - name: Browser bridge health smoke test
+        run: |
+          node browser-bridge/src/server.mjs > /tmp/front-bridge.log 2>&1 &
+          BRIDGE_PID=$!
+          trap 'kill $BRIDGE_PID || true' EXIT
+          for i in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:43981/health > /tmp/front-bridge-health.json; then break; fi
+            sleep 0.25
+          done
+          node -e "const d=require('/tmp/front-bridge-health.json');if(!d.ok||d.service!=='front-browser-bridge')process.exit(1)"
 
       # verify.mjs replays the migrations through node:sqlite. This proves they
       # also apply through wrangler to a real D1, which is stricter (0002 uses
