@@ -64,6 +64,27 @@ export function metricFromAria(label, metricName) {
   return reverse ? parseCompactNumber(reverse[1]) : null;
 }
 
+export function extractHashtags(value, limit = 30) {
+  const out = [];
+  const seen = new Set();
+  for (const match of String(value ?? '').matchAll(/#([\p{L}\p{N}_]{2,80})/gu)) {
+    const tag = match[1];
+    const key = tag.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export function xTrendLabel(value) {
+  const lines = String(value ?? '').split(/\n+/).map((line) => cleanText(line, 160)).filter(Boolean);
+  const noise = /^(trending|show more|what(?:'|’)s happening|for you|news|sports|entertainment|[\d,.]+\s*(?:posts?|post))$/i;
+  const candidates = lines.filter((line) => !noise.test(line) && !/^trending in\b/i.test(line));
+  return candidates.find((line) => line.startsWith('#')) || candidates.find((line) => !/\bposts?\b/i.test(line)) || '';
+}
+
 function allowedUrl(platform, rawUrl) {
   let url;
   try {
