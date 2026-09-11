@@ -80,6 +80,13 @@ jobs:
       - name: Migrations apply to a local D1
         run: npm run db:migrate:local
 
+      - name: Mounted D1 persistence path works
+        run: |
+          rm -rf /tmp/front-persist-test
+          FRONT_PERSIST_DIR=/tmp/front-persist-test npm run db:migrate:local
+          test -d /tmp/front-persist-test
+          test -n "$(find /tmp/front-persist-test -type f -print -quit)"
+
       - name: Typecheck
         run: node node_modules/typescript/bin/tsc --noEmit
 
