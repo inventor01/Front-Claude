@@ -1,5 +1,20 @@
 # Front Bug / Fix Log
 
+## 2026-09-11 — Plain-word early-candidate leak
+
+### Root cause
+The high-recall lowercase recovery path treated every non-stopword token as a possible topic. That was useful for recovering emerging names such as `astra`, but common conversational words that were not in the original stoplist could still become Early Candidates when two or three independent posts happened to reuse them. Proper-Case extraction also made sentence-level words such as `Blue` or `Trade` look more entity-like than they really were.
+
+### Permanent fix
+- Add a dedicated common single-word topic filter shared conceptually by the browser detector and server Early Candidate builder.
+- Reject generic standalone conversational, color, action, commerce, UI and social words before they enter candidate buckets.
+- Do not treat a one-word Proper-Case match as structured evidence merely because it is capitalized.
+- Keep specific multi-word names/phrases eligible even when they contain a common word, so a narrative such as `Blue Smurf Cat` can still surface while bare `Blue` cannot.
+- Preserve high-recall recovery for distinctive lowercase terms such as `astra`.
+
+### Regression gate
+Detection tests now explicitly replay repeated `never`, `Blue`, `Trade`, and `someone` across multiple independent creators and require all four to stay out of the topic stream while a repeated specific phrase still surfaces.
+
 ## 2026-09-11 — Detection Engine v3 + single dashboard
 
 ### Root cause
