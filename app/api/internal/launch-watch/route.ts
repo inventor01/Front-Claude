@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { normalizeLaunchName } from '@/lib/live';
 import { matchNarrative } from '@/lib/narratives';
-import { coinAliasEligible, isNarrativeLabelJunk, normalizeNarrativeText, specificNarrativeTerms } from '@/lib/narrative-quality';
+import { coinAliasEligible, isNarrativeLabelJunk, normalizeNarrativeText, narrativeWords, specificNarrativeTerms } from '@/lib/narrative-quality';
 
 const db=()=>{if(!env.DB)throw new Error('Database unavailable');return env.DB;};
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
@@ -15,12 +15,13 @@ const words=(value:string)=>norm(value).split(' ').filter((word)=>word.length>=3
 function overlapScore(a:string,b:string){const left=new Set(words(a)),right=new Set(words(b));if(!left.size||!right.size)return 0;const overlap=[...left].filter((word)=>right.has(word)).length;return overlap/Math.max(1,Math.min(left.size,right.size));}
 function classifyAlias(name:string,symbol:string|null,alias:string,narrativeTitle:string){
  if(!coinAliasEligible(alias,narrativeTitle))return null;const target=norm(name),ticker=norm(symbol||''),candidate=norm(alias);if(!target||!candidate)return null;
- const aliasSpecific=specificNarrativeTerms(alias),titleSpecific=specificNarrativeTerms(narrativeTitle),tokenSpecific=specificNarrativeTerms(`${name} ${symbol||''}`);if(!aliasSpecific.length||!tokenSpecific.length)return null;
+ const aliasSpecific=specificNarrativeTerms(alias),tokenSpecific=specificNarrativeTerms(`${name} ${symbol||''}`),aliasWordCount=narrativeWords(alias).length,titleWordCount=narrativeWords(narrativeTitle).length;if(!aliasSpecific.length||!tokenSpecific.length)return null;
  // Exact means the coin explicitly names the validated narrative/alias. A
- // generic stem or a person's first/last-name fragment cannot create an exact hit.
- if(target===candidate||ticker===candidate){if(titleSpecific.length>=2&&aliasSpecific.length<2)return null;return{type:'exact',score:1,reason:`exact normalized ${target===candidate?'name':'symbol'} match to validated narrative phrase`};}
+ // single first/last-name fragment cannot create an Exact hit, but a complete
+ // multi-word proper name remains valid even if a surname is a common word.
+ if(target===candidate||ticker===candidate){if(titleWordCount>=2&&aliasWordCount===1)return null;return{type:'exact',score:1,reason:`exact normalized ${target===candidate?'name':'symbol'} match to validated narrative phrase`};}
  const overlap=overlapScore(`${name} ${symbol||''}`,alias),containment=candidate.length>=5&&(target.includes(candidate)||candidate.includes(target));
- if(containment&&aliasSpecific.length>=2)return{type:'strong',score:.92,reason:'full distinctive narrative phrase contained in token name'};
+ if(containment&&aliasWordCount>=2&&aliasSpecific.length>=1)return{type:'strong',score:.92,reason:'full distinctive narrative phrase contained in token name'};
  if(aliasSpecific.length>=2&&overlap>=.66)return{type:'strong',score:Number((.8+Math.min(.12,overlap*.12)).toFixed(2)),reason:'multiple distinctive narrative words match token name/symbol'};
  if(aliasSpecific.length>=1&&tokenSpecific.length>=1&&overlap>=.5&&candidate.length>=5)return{type:'possible',score:Number((.52+Math.min(.12,overlap*.12)).toFixed(2)),reason:'partial distinctive narrative wording match'};
  return null;
@@ -29,13 +30,11 @@ type ActiveNarrative={id:string;title:string;aliases:string[];lastSeen:number|nu
 async function activeNarratives(owner:string):Promise<ActiveNarrative[]>{
  const cutoff=Date.now()-48*3600000;
  const rows=await db().prepare(`SELECT n.id,n.title,n.aliases,MAX(e.last_seen) AS last_seen,MIN(e.first_seen) AS first_seen,COUNT(DISTINCT e.platform || ':' || LOWER(e.author)) AS creator_count,COUNT(DISTINCT e.id) AS evidence_count FROM narratives n LEFT JOIN evidence_links l ON l.owner=n.owner AND l.narrative=n.id LEFT JOIN evidence e ON e.owner=l.owner AND e.id=l.evidence WHERE n.owner=? GROUP BY n.id,n.title,n.aliases HAVING (n.id NOT LIKE 'auto:%' OR COALESCE(MAX(e.last_seen),n.created)>?) AND (n.id NOT LIKE 'auto:%' OR COUNT(DISTINCT e.platform || ':' || LOWER(e.author))>=2) ORDER BY COALESCE(MAX(e.last_seen),n.created) DESC LIMIT 1000`).bind(owner,cutoff).all<{id:string;title:string;aliases:string;last_seen:number|null;first_seen:number|null;creator_count:number;evidence_count:number}>();
- return rows.results.flatMap((row)=>{if(isNarrativeLabelJunk(row.title))return[];const words=normalizeNarrativeText(row.title).split(' ').filter(Boolean);if(row.id.startsWith('auto:')&&words.length===1&&Number(row.creator_count)<3)return[];const aliases=[...new Set([row.title,...safeAliases(row.aliases)])].filter((alias)=>coinAliasEligible(alias,row.title));return aliases.length?[{id:row.id,title:row.title,aliases,lastSeen:row.last_seen,firstSeen:row.first_seen,creatorCount:Number(row.creator_count||0),evidenceCount:Number(row.evidence_count||0)}]:[];});
+ return rows.results.flatMap((row)=>{if(isNarrativeLabelJunk(row.title))return[];const titleWords=normalizeNarrativeText(row.title).split(' ').filter(Boolean);if(row.id.startsWith('auto:')&&titleWords.length===1&&Number(row.creator_count)<3)return[];const aliases=[...new Set([row.title,...safeAliases(row.aliases)])].filter((alias)=>coinAliasEligible(alias,row.title));return aliases.length?[{id:row.id,title:row.title,aliases,lastSeen:row.last_seen,firstSeen:row.first_seen,creatorCount:Number(row.creator_count||0),evidenceCount:Number(row.evidence_count||0)}]:[];});
 }
 function bestNarrativeMatch(name:string,symbol:string|null,narratives:ActiveNarrative[],seen:number){
  let best:(ActiveNarrative&{matchType:string;matchScore:number;matchReason:string;matchedAlias:string})|null=null;const rank:Record<string,number>={exact:3,strong:2,possible:1};
  for(const narrative of narratives){
-  // Meme coins launched long before a sampled narrative can be inspected as a
-  // possible historical relation, but must not receive Exact/Strong priority.
   const tooEarly=narrative.firstSeen!=null&&seen<narrative.firstSeen-72*3600000;
   for(const alias of narrative.aliases){const hit=classifyAlias(name,symbol,alias,narrative.title);if(!hit)continue;const adjusted=tooEarly&&hit.type!=='possible'?{type:'possible',score:Math.min(.58,hit.score),reason:'wording matches but token predates current narrative evidence'}:hit;if(!best||rank[adjusted.type]>rank[best.matchType]||(rank[adjusted.type]===rank[best.matchType]&&adjusted.score>best.matchScore))best={...narrative,matchType:adjusted.type,matchScore:adjusted.score,matchReason:adjusted.reason,matchedAlias:alias};}
  }
