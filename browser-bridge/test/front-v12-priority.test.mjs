@@ -62,7 +62,7 @@ test('100K fast post plus cross-post evidence becomes highest priority and trigg
   t('third','1234567890123456792','people keep reposting the Daejon Love sideline reaction',70,95000,{shares:4000,soundId:sound}),
  ];
  const base=detectTopics(rows,NOW,20);
- const enriched=attachVisualSignals(base,rows);
+ const enriched=attachVisualSignals(base,rows,NOW);
  const hit=enriched.find((row)=>/daejon love/i.test(row.topic));
  assert(hit,'specific narrative should surface');
  assert(hit.hotPosts?.some((post)=>post.hot),'fast post should be analyzed as hot');
