@@ -93,6 +93,30 @@ export function xTrendLabel(value) {
   return candidates.find((line) => line.startsWith('#')) || candidates.find((line) => !/\bposts?\b/i.test(line)) || '';
 }
 
+const SOCIAL_NOTIFICATION = /\b(?:and\s+\d[\d,.]*\s+others?\s+)?(?:liked|likes|reposted|reposts|quoted|quotes|followed|follows|mentioned|mentions|shared|shares)\s+(?:your|a|this)\s+(?:video|post|tweet|photo|comment|reply)\b/i;
+const SOCIAL_UI_LINE = /^(?:quote|reply|replies|repost|reposts|retweet|retweets|like|likes|bookmark|bookmarks|share|shares|view|views|show|show more|more|see more|read more|follow|following|for you|explore|home|sound|original sound)$/i;
+const SOCIAL_METRIC_LINE = /^(?:[\d,.]+(?:\.\d+)?\s*[KMB]?|[\d,.]+(?:\.\d+)?\s*[KMB]?\s+(?:likes?|views?|replies?|reposts?|shares?|comments?))$/i;
+const SOCIAL_TIME_LINE = /^(?:\d+\s*(?:s|m|h|d|w|y)|\d{1,2}:\d{2}(?:\s*[AP]M)?|yesterday|today)$/i;
+
+export function cleanEvidenceContent(platform, value, author = '') {
+  const raw = String(value ?? '').replace(/\r/g, '').trim();
+  if (!raw || SOCIAL_NOTIFICATION.test(raw)) return '';
+  const authorKey = String(author ?? '').trim().replace(/^@/, '').toLocaleLowerCase();
+  const lines = raw.split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const kept = lines.filter((line) => {
+    const plain = line.replace(/^@/, '').toLocaleLowerCase();
+    if (SOCIAL_NOTIFICATION.test(line) || SOCIAL_UI_LINE.test(line) || SOCIAL_METRIC_LINE.test(line) || SOCIAL_TIME_LINE.test(line)) return false;
+    if (/^[·•|]+$/.test(line)) return false;
+    if (/^@[A-Za-z0-9_.]{1,40}$/.test(line)) return false;
+    if (authorKey && plain === authorKey) return false;
+    if (/^(?:liked by|followed by|suggested for you|people you may know)\b/i.test(line)) return false;
+    return true;
+  });
+  const cleaned = cleanText(kept.join(' '), 8000);
+  if (!cleaned || SOCIAL_NOTIFICATION.test(cleaned) || SOCIAL_UI_LINE.test(cleaned)) return '';
+  return cleaned;
+}
+
 const STOP = new Set(('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i you your we our they their he she his her not no yes just very really new now today tonight yesterday tomorrow have has had do does did can could would should will may might about into over under after before more most some any all one two via amp rt https http com www video watch post posts people thing things time day get got like know think make made going go went see saw says said say look looks looking why how what when where who which there here').split(' '));
 const GENERIC_TOPIC = new Set(('meme memes viral virality reaction reactions reacts reacted clip clips trend trends trending story stories update updates breaking news funny wild crazy internet tiktok twitter tweet tweets x social media creator creators account accounts').split(' '));
 const BROAD_TOPIC = new Set(('crypto cryptocurrency bitcoin btc ethereum eth solana market markets stocks stock politics political election elections sports football basketball baseball soccer music entertainment technology tech ai artificial intelligence gaming games celebrity celebrities world national local economy economic finance financial').split(' '));
@@ -345,9 +369,9 @@ export function normalizeEvidence(raw) {
   if (!platform) return null;
   const url = allowedUrl(platform, raw.url);
   if (!url) return null;
-  const content = cleanText(raw.content, 8000);
-  if (!content) return null;
   const author = cleanText(raw.author || (platform === 'X' ? 'X' : 'TikTok'), 120) || platform;
+  const content = cleanEvidenceContent(platform, raw.content, author);
+  if (!content) return null;
   const publishedNumber = Number(raw.published);
   const published = Number.isFinite(publishedNumber) && publishedNumber > 0 ? Math.trunc(publishedNumber) : null;
   const viewsNumber = raw.views === null || raw.views === undefined || raw.views === '' ? null : Number(raw.views);

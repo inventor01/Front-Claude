@@ -6,6 +6,7 @@ const db = () => { if (!env.DB) throw new Error('Database unavailable'); return 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const UI_NOISE = /^(show|show more|more|see more|view|view more|read more|explore|home|for you|trending|trend|news|sports|entertainment|posts?|replies?|likes?|views?|share|bookmark|follow|following)$/i;
+const SOCIAL_NOTIFICATION = /\b(?:and\s+\d[\d,.]*\s+others?\s+)?(?:liked|likes|reposted|reposts|quoted|quotes|followed|follows|mentioned|mentions|shared|shares)\s+(?:your|a|this)\s+(?:video|post|tweet|photo|comment|reply)\b/i;
 const GENERIC = new Set('meme memes viral virality reaction reactions clip clips trend trends trending story stories update updates breaking news funny internet tiktok twitter tweet tweets social media creator creators fyp foryou foryoupage'.split(' '));
 const BROAD = new Set('crypto cryptocurrency bitcoin btc ethereum eth solana market markets stocks stock politics political election elections sports football basketball baseball soccer music entertainment technology tech ai artificial intelligence gaming games celebrity celebrities world national local economy economic finance financial'.split(' '));
 const STOP = new Set('the a an and or but this that these those to of in on at for from with is are was were be been it its i you your we our they their he she his her not no just very really new now today tonight yesterday tomorrow have has had do does did can could would should will may might about into over under after before more most some any all one two via amp rt https http com www video watch post posts people thing things time day get got like know think make made going go went see saw says said say look looks looking why how what when where who which there here'.split(' '));
@@ -40,17 +41,18 @@ function cleanCandidate(value: string) {
 }
 
 function titleFor(row: BrowserRow) {
+  if (SOCIAL_NOTIFICATION.test(row.content)) return '';
   const content = row.content.trim();
   const chunks = content.split(/\s+·\s+|\n+/).map(cleanCandidate).filter(Boolean);
-  const meaningful = chunks.find((part) => !UI_NOISE.test(part) && !/^trending in\b/i.test(part) && !/^[\d,.]+\s*(?:posts?|views?|likes?)$/i.test(part));
+  const meaningful = chunks.find((part) => !UI_NOISE.test(part) && !SOCIAL_NOTIFICATION.test(part) && !/^trending in\b/i.test(part) && !/^[\d,.]+\s*(?:posts?|views?|likes?)$/i.test(part));
   const candidate = meaningful || cleanCandidate(content);
-  if (UI_NOISE.test(candidate) || candidate.length < 2) return '';
+  if (UI_NOISE.test(candidate) || SOCIAL_NOTIFICATION.test(candidate) || candidate.length < 2) return '';
   return candidate.slice(0, 180);
 }
 
 function signalQuality(item: PublicItem) {
   const title = item.title.trim();
-  if (!title || UI_NOISE.test(title)) return false;
+  if (!title || UI_NOISE.test(title) || SOCIAL_NOTIFICATION.test(title)) return false;
   const normalized = normalize(title);
   if (!normalized || normalized.length < 2) return false;
   if (/^(show|more|view|explore|home|trending)$/.test(normalized)) return false;
@@ -98,10 +100,11 @@ function candidateTokens(value:string) {
 }
 
 function candidateLabels(row:BrowserRow) {
+  if (SOCIAL_NOTIFICATION.test(row.content)) return [];
   const out = new Map<string,string>();
   const add = (raw:string) => {
     const label = cleanCandidate(raw).slice(0,80); const key = normalize(label); const tokens = candidateTokens(label);
-    if (!key || key.length < 3 || UI_NOISE.test(label) || !tokens.length) return;
+    if (!key || key.length < 3 || UI_NOISE.test(label) || SOCIAL_NOTIFICATION.test(label) || !tokens.length) return;
     if (tokens.every((token) => BROAD.has(token) || GENERIC.has(token))) return;
     if (!out.has(key)) out.set(key,label);
   };
@@ -114,7 +117,7 @@ function candidateLabels(row:BrowserRow) {
 function buildEarlyCandidates(rows:BrowserRow[], linked:Set<string>, now:number):PublicItem[] {
   const groups = new Map<string,CandidateGroup>();
   for (const row of rows) {
-    if (linked.has(row.id) || row.last_seen < now - 36*3600000) continue;
+    if (linked.has(row.id) || row.last_seen < now - 36*3600000 || SOCIAL_NOTIFICATION.test(row.content)) continue;
     for (const {key,label} of candidateLabels(row)) {
       const group:CandidateGroup = groups.get(key) ?? {labels:new Map<string,number>(),rows:[],authors:new Set<string>(),platforms:new Set<string>()};
       if (!group.rows.some((item)=>item.id===row.id)) group.rows.push(row);
@@ -155,8 +158,9 @@ export async function GET(request: Request) {
     const links = await db().prepare(`SELECT l.evidence,l.narrative,n.title FROM evidence_links l JOIN narratives n ON n.owner=l.owner AND n.id=l.narrative WHERE l.owner=? ORDER BY n.created DESC LIMIT 8000`).bind(user.userId).all<LinkRow>();
     const linkByEvidence = new Map<string, LinkRow>();
     for (const row of links.results) if (!linkByEvidence.has(row.evidence)) linkByEvidence.set(row.evidence, row);
+    const usableRows = browser.results.filter((row)=>!SOCIAL_NOTIFICATION.test(row.content));
 
-    const browserItems: PublicItem[] = browser.results.flatMap((row) => {
+    const browserItems: PublicItem[] = usableRows.flatMap((row) => {
       const meta = sourceFor(row); const linked = linkByEvidence.get(row.id); const title = titleFor(row);
       if (!title) return [];
       return [{
@@ -166,7 +170,7 @@ export async function GET(request: Request) {
         detail: linked ? `Promoted to ${linked.title}` : `${row.author} · observed from ${meta.source}`,
       }];
     });
-    const earlyCandidates = buildEarlyCandidates(browser.results,new Set(linkByEvidence.keys()),now);
+    const earlyCandidates = buildEarlyCandidates(usableRows,new Set(linkByEvidence.keys()),now);
 
     let external: Awaited<ReturnType<typeof publicSignals>> = { signals: [], coverage: [], at: now };
     try { external = await publicSignals(); } catch { /* browser signals still work when public providers fail */ }
@@ -180,26 +184,29 @@ export async function GET(request: Request) {
     const counts: Record<string, number> = { all: allItems.length };
     for (const item of allItems) counts[item.sourceKey] = (counts[item.sourceKey] || 0) + 1;
     const sourceCounts:Record<string,number>={};
-    for(const row of browser.results){const key=sourceFor(row).key;sourceCounts[key]=(sourceCounts[key]||0)+1;}
+    for(const row of usableRows){const key=sourceFor(row).key;sourceCounts[key]=(sourceCounts[key]||0)+1;}
 
     let items = source === 'all' ? balanced(allItems) : allItems.filter((item) => item.sourceKey === source).sort((a,b) => b.observed - a.observed);
     if (q) items = items.filter((item) => normalize(`${item.title} ${item.detail} ${item.narrative?.title || ''}`).includes(q));
     const total = items.length;
-    const uniqueAuthors = new Set(browser.results.map((row)=>`${row.platform}:${row.author.toLowerCase()}`)).size;
-    const latestBrowserSeen = browser.results[0]?.last_seen ?? null;
+    const uniqueAuthors = new Set(usableRows.map((row)=>`${row.platform}:${row.author.toLowerCase()}`)).size;
+    const latestBrowserSeen = usableRows[0]?.last_seen ?? null;
+    const ignoredNotifications = browser.results.length - usableRows.length;
     const diagnosis = browser.results.length===0
       ? 'No synced browser evidence is stored yet. Run a fresh Browser Sources scan, or use Sync background finds if the local bridge has pending evidence.'
-      : allItems.length===0
-        ? 'Browser evidence exists, but none survived signal-quality parsing. This should be investigated as an extractor regression.'
-        : null;
+      : usableRows.length===0
+        ? 'Stored browser evidence is notification/interface chrome rather than actual post content. Run a fresh scan after updating and restarting the bridge.'
+        : allItems.length===0
+          ? 'Browser evidence exists, but none survived signal-quality parsing. This should be investigated as an extractor regression.'
+          : null;
     return json({
       items: items.slice(offset, offset + limit),
       page: { limit, offset, total, hasMore: offset + limit < total, nextOffset: offset + limit < total ? offset + limit : null },
       counts,
       coverage: external.coverage,
-      diagnostics:{browserEvidence:browser.results.length,uniqueAuthors,earlyCandidates:earlyCandidates.length,sourceCounts,latestBrowserSeen,externalSignals:externalItems.length,diagnosis},
+      diagnostics:{browserEvidence:browser.results.length,usableBrowserEvidence:usableRows.length,ignoredNotifications,uniqueAuthors,earlyCandidates:earlyCandidates.length,sourceCounts,latestBrowserSeen,externalSignals:externalItems.length,diagnosis},
       at: now,
-      note: 'Public Signals is the high-recall layer. Early Candidate means repeated or unusually high-engagement evidence that is worth watching but has not passed Narrative Radar corroboration yet.',
+      note: 'Public Signals is the high-recall layer. Social notifications and engagement/interface chrome are excluded before topic analysis. Early Candidate means repeated or unusually high-engagement actual post evidence that has not passed Narrative Radar corroboration yet.',
     });
   } catch (error) {
     return json({ error: (error as Error).message }, 500);
