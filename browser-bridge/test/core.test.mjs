@@ -14,6 +14,7 @@ test('preserves unknown metrics as null', () => { const [row] = dedupeEvidence([
 test('extracts TikTok items from nested JSON safely', () => { const items = extractTikTokItemsFromJson({ deep: { id: '1234567890123456789', desc: 'A meme is taking off', author: { uniqueId: 'creator' }, createTime: 1700000000, stats: { playCount: 4000, diggCount: 200 } } }); assert.equal(items.length, 1); assert.equal(items[0].author, 'creator'); assert.equal(items[0].views, 4000); });
 test('extracts unique hashtag fallbacks', () => { assert.deepEqual(extractHashtags('Now #DejonLove then #viral and #DejonLove again', 5), ['DejonLove', 'viral']); });
 test('extracts an X trend label without metadata noise', () => { assert.equal(xTrendLabel('Trending in United States\n#DejonLove\n12.5K posts'), '#DejonLove'); });
+test('never promotes X interface labels such as show as a trend', () => { assert.equal(xTrendLabel('Show\nTrending in United States\n49ers\n18.2K posts'), '49ers'); assert.equal(xTrendLabel('Show more\nView more\n12K posts'), ''); });
 
 test('infers only corroborated topics from multiple authors', () => {
   const now = 1789100000000;
