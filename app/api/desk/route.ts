@@ -1,5 +1,5 @@
-import { env } from 'cloudflare:workers';
-import { getChatGPTUser } from '@/app/chatgpt-auth';
+import {env} from 'cloudflare:workers';
+import {getChatGPTUser} from '@/app/chatgpt-auth';
 import { searchCoins, quote, fetchJson } from '@/lib/providers';
 import { validMint, openFill, closeFill, type Signal } from '@/lib/domain';
 import { addNarrative, cleanupLegacyNarratives, deleteNarrative, inboxTikTok, matchNarrative, mergeNarratives, narrativeFeed, scanXBounded } from '@/lib/narratives';
