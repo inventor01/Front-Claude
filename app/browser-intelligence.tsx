@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Activity, ExternalLink, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Activity, ExternalLink, ShieldCheck, X } from 'lucide-react';
 
 const BRIDGE = 'http://127.0.0.1:43981';
 
@@ -120,10 +120,11 @@ export default function BrowserIntelligence() {
     }
   }
 
-  useEffect(() => {
-    if (!open) return;
-    void ping(true);
-  }, [open]);
+  function toggleOpen() {
+    const next = !open;
+    setOpen(next);
+    if (next) void ping(true);
+  }
 
   async function saveConfig() {
     setBusy('config'); setError(''); setMessage('');
@@ -167,7 +168,7 @@ export default function BrowserIntelligence() {
   }
 
   return <>
-    <button onClick={() => setOpen((v) => !v)} aria-label="Open browser intelligence" style={{position:'fixed',left:20,bottom:20,zIndex:70,border:0,borderRadius:999,padding:'12px 16px',fontWeight:800,background:'#fff',color:'#111',boxShadow:'0 10px 30px #0005',cursor:'pointer'}}>
+    <button onClick={toggleOpen} aria-label="Open browser intelligence" style={{position:'fixed',left:20,bottom:20,zIndex:70,border:0,borderRadius:999,padding:'12px 16px',fontWeight:800,background:'#fff',color:'#111',boxShadow:'0 10px 30px #0005',cursor:'pointer'}}>
       <Activity size={16} style={{display:'inline',verticalAlign:'-3px',marginRight:7}}/>Browser Sources
     </button>
     {open && <aside style={{position:'fixed',left:20,bottom:76,zIndex:69,width:'min(500px,calc(100vw - 28px))',maxHeight:'82vh',overflow:'auto',background:'#101216',color:'#f5f5f5',border:'1px solid #ffffff22',borderRadius:18,padding:18,boxShadow:'0 24px 60px #0009'}}>
