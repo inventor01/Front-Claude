@@ -5,8 +5,8 @@ import { env } from 'cloudflare:workers';
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 const db = () => { if (!env.DB) throw new Error('Database unavailable'); return env.DB; };
-function asMetric(value: unknown) { const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null; }
-function asTimestamp(value: unknown) { const n = Number(value); return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null; }
+function asMetric(value: unknown) { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null; }
+function asTimestamp(value: unknown) { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null; }
 function safeUrl(platform: 'X' | 'TikTok', raw: unknown) {
   if (typeof raw !== 'string' || raw.length > 2048) return null;
   let url: URL; try { url = new URL(raw); } catch { return null; }
@@ -42,7 +42,7 @@ export async function POST(request:Request){
     for(const row of accepted){const trendKey=trendNarrativeKey(row);if(trendKey)await ensureNarrative(user.userId,trendKey,at);await saveEvidence(db(),user.userId,row,at);}
 
     let matchedNarratives=0;
-    if(accepted.length){const feed=await narrativeFeed(db(),user.userId);const fresh=feed.cards.filter((card:{lastSeen:number})=>card.lastSeen>=at-2000).slice(0,8);for(const card of fresh){try{await matchNarrative(db(),user.userId,card.id);matchedNarratives+=1;}catch{}}}
+    if(accepted.length){const feed=await narrativeFeed(db(),user.userId);const fresh=feed.cards.filter((card:{lastSeen:number})=>card.lastSeen>=at-2000).slice(0,3);for(const card of fresh){try{await matchNarrative(db(),user.userId,card.id);matchedNarratives+=1;}catch{}}}
     const updated=await narrativeFeed(db(),user.userId);const freshNarratives=updated.cards.filter((card:{lastSeen:number})=>card.lastSeen>=at-2000).length;const freshCoins=updated.coins.filter((coin:{observed:number})=>coin.observed>=at-120000).length;
     return json({ok:true,accepted:accepted.length,rejected:body.evidence.length-accepted.length,at,freshNarratives,matchedNarratives,freshCoins,inferredNarratives:inferred.length});
   }catch(error){return json({error:error instanceof SyntaxError?'Invalid request.':(error as Error).message},500);}
