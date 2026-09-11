@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dedupeEvidence, extractTikTokItemsFromJson, metricFromAria, normalizeConfig, parseCompactNumber, sanitizeTopic, stableId } from '../src/core.mjs';
+import { dedupeEvidence, extractHashtags, extractTikTokItemsFromJson, metricFromAria, normalizeConfig, parseCompactNumber, sanitizeTopic, stableId, xTrendLabel } from '../src/core.mjs';
 
 test('normalizes and caps bridge config', () => {
   const cfg = normalizeConfig({
@@ -45,6 +45,15 @@ test('extracts TikTok items from nested JSON safely', () => {
   assert.equal(items.length, 1);
   assert.equal(items[0].author, 'creator');
   assert.equal(items[0].views, 4000);
+});
+
+test('extracts unique hashtag fallbacks', () => {
+  assert.deepEqual(extractHashtags('Now #DejonLove then #viral and #DejonLove again', 5), ['DejonLove', 'viral']);
+});
+
+test('extracts an X trend label without metadata noise', () => {
+  assert.equal(xTrendLabel('Trending in United States\n#DejonLove\n12.5K posts'), '#DejonLove');
+  assert.equal(xTrendLabel('Sports · Trending\nDetroit Lions\n8,421 posts'), 'Sports · Trending');
 });
 
 test('sanitizes topics', () => {
