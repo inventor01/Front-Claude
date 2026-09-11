@@ -31,6 +31,20 @@ jobs:
       - name: Install browser bridge dependencies
         run: npm install --prefix browser-bridge --no-audit --no-fund
 
+      - name: Install browser bridge Chromium
+        run: npx --prefix browser-bridge playwright install --with-deps chromium
+
+      - name: Browser bridge Chromium launch smoke test
+        run: |
+          cd browser-bridge
+          node --input-type=module - <<'NODE'
+          import { chromium } from 'playwright';
+          const expected = chromium.executablePath();
+          console.log(`Expected Chromium: ${expected}`);
+          const browser = await chromium.launch({ headless: true });
+          await browser.close();
+          NODE
+
       - name: Migrations match db/schema.ts
         run: |
           npm run db:generate

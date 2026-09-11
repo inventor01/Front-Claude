@@ -18,9 +18,22 @@ if [ ! -d node_modules/playwright ]; then
   npm install --no-audit --no-fund
 fi
 
-if [ ! -d "$HOME/Library/Caches/ms-playwright" ]; then
-  echo "Installing Chromium for the Front browser bridge..."
+# Playwright's cache directory can exist even when the exact Chromium revision
+# required by this Node Playwright package is missing (for example when another
+# Python/Node Playwright install created the cache first). Check the executable
+# Playwright actually expects instead of checking the cache directory itself.
+PLAYWRIGHT_EXECUTABLE="$(node --input-type=module -e "import { chromium } from 'playwright'; process.stdout.write(chromium.executablePath())")"
+if [ ! -x "$PLAYWRIGHT_EXECUTABLE" ]; then
+  echo "Installing the Chromium revision required by Front..."
   npx playwright install chromium
+  PLAYWRIGHT_EXECUTABLE="$(node --input-type=module -e "import { chromium } from 'playwright'; process.stdout.write(chromium.executablePath())")"
+fi
+
+if [ ! -x "$PLAYWRIGHT_EXECUTABLE" ]; then
+  echo "Front could not find a runnable Playwright Chromium executable after installation."
+  echo "Expected: $PLAYWRIGHT_EXECUTABLE"
+  echo "Run: cd \"$(pwd)\" && npx playwright install chromium"
+  exit 1
 fi
 
 echo "Starting Front browser bridge on http://127.0.0.1:43981"
