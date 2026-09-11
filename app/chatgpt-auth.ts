@@ -22,21 +22,41 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
-  if (!userId || !email) return null;
 
-  const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) === PERCENT_ENCODED_UTF8
-      ? safeDecodeURIComponent(encodedFullName)
-      : null;
+  if (userId && email) {
+    const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
+    const fullName =
+      encodedFullName &&
+      requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) === PERCENT_ENCODED_UTF8
+        ? safeDecodeURIComponent(encodedFullName)
+        : null;
 
-  return {
-    userId,
-    displayName: fullName ?? email,
-    email,
-    fullName,
-  };
+    return {
+      userId,
+      displayName: fullName ?? email,
+      email,
+      fullName,
+    };
+  }
+
+  // Standalone hosts such as Railway do not inject ChatGPT Sites auth headers.
+  // A deployment can opt into one private workspace identity without changing
+  // ChatGPT Sites behavior by setting FRONT_STANDALONE_USER_ID.
+  const standaloneUserId = process.env.FRONT_STANDALONE_USER_ID?.trim();
+  if (standaloneUserId) {
+    const standaloneEmail =
+      process.env.FRONT_STANDALONE_USER_EMAIL?.trim() || "standalone@front.local";
+    const standaloneName =
+      process.env.FRONT_STANDALONE_USER_NAME?.trim() || "Front Workspace";
+    return {
+      userId: standaloneUserId,
+      displayName: standaloneName,
+      email: standaloneEmail,
+      fullName: standaloneName,
+    };
+  }
+
+  return null;
 }
 
 export async function requireChatGPTUser(
