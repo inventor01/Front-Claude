@@ -1,5 +1,5 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { matchNarrative, narrativeFeed, saveEvidence, type Evidence } from '@/lib/narratives';
+import { isBroadNarrativeTitle, matchNarrative, narrativeFeed, saveEvidence, type Evidence } from '@/lib/narratives';
 import { samePublicOrigin } from '@/lib/request-origin';
 import { env } from 'cloudflare:workers';
 
@@ -25,8 +25,7 @@ function evidenceFrom(value: unknown): Evidence | null {
   return {id,platform,author,url,content,published:asTimestamp(row.published),views:asMetric(row.views),likes:asMetric(row.likes),provenance:(provenanceRaw||`${platform} local browser bridge`).slice(0,300)};
 }
 function normalizedNarrativeId(value:string){return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();}
-function narrativeKey(value:unknown){if(typeof value!=='string')return null;const clean=value.replace(/^#/,'').replace(/\s+/g,' ').trim().slice(0,80);const normalized=normalizedNarrativeId(clean);if(normalized.length<2||/^(trending|viral|news|meme|memes|fyp|for you)$/i.test(clean))return null;return clean;}
-function trendNarrativeKey(row:Evidence){if(!/X Explore|TikTok Creative Center|TikTok Explore fallback/i.test(row.provenance))return null;return narrativeKey(row.content.split('·')[0]);}
+function narrativeKey(value:unknown){if(typeof value!=='string')return null;const clean=value.replace(/^#/,'').replace(/\s+/g,' ').trim().slice(0,80);const normalized=normalizedNarrativeId(clean);if(normalized.length<2||/^(trending|viral|news|meme|memes|fyp|for you)$/i.test(clean)||isBroadNarrativeTitle(clean))return null;return clean;}
 
 type RelatedContextInput={key?:unknown;title?:unknown;relation?:unknown;score?:unknown;evidenceCount?:unknown;authorCount?:unknown;platforms?:unknown;evidenceIds?:unknown};
 type InferredTopicInput={topic?:unknown;evidenceCount?:unknown;authorCount?:unknown;corroborated?:unknown;relatedContexts?:unknown};
@@ -42,7 +41,7 @@ function inferredTopics(value:unknown){
     const related:InferredTopic['related']=[];
     if(Array.isArray(row.relatedContexts))for(const entry of row.relatedContexts.slice(0,8)){
       if(!entry||typeof entry!=='object')continue;const r=entry as RelatedContextInput;
-      const title=narrativeKey(r.title);const relatedKey=typeof r.key==='string'?normalizedNarrativeId(r.key).slice(0,80):title?normalizedNarrativeId(title):'';
+      const rawTitle=typeof r.title==='string'?r.title.replace(/^#/,'').replace(/\s+/g,' ').trim().slice(0,80):'';const title=rawTitle||null;const relatedKey=typeof r.key==='string'?normalizedNarrativeId(r.key).slice(0,80):title?normalizedNarrativeId(title):'';
       const evidenceCount=Math.trunc(Number(r.evidenceCount));const authorCount=Math.trunc(Number(r.authorCount));const score=Number(r.score);
       const platforms=Array.isArray(r.platforms)?r.platforms.filter((x):x is string=>x==='X'||x==='TikTok').slice(0,2):[];
       const evidenceIds=Array.isArray(r.evidenceIds)?r.evidenceIds.filter((x):x is string=>typeof x==='string'&&x.length<=180).slice(0,8):[];
@@ -68,11 +67,11 @@ export async function POST(request:Request){
     const accepted=body.evidence.map(evidenceFrom).filter((row):row is Evidence=>Boolean(row));if(!accepted.length&&body.evidence.length)return json({error:'No valid X or TikTok evidence records were supplied.'},400);
     const at=Date.now();const inferred=inferredTopics(body.inferredTopics);
     for(const topic of inferred){const id=await ensureNarrative(user.userId,topic.key,at);await saveRelationships(user.userId,id,topic.related,at);}
-    for(const row of accepted){const trendKey=trendNarrativeKey(row);if(trendKey)await ensureNarrative(user.userId,trendKey,at);await saveEvidence(db(),user.userId,row,at);}
+    for(const row of accepted)await saveEvidence(db(),user.userId,row,at);
 
     let matchedNarratives=0;
-    if(accepted.length){const feed=await narrativeFeed(db(),user.userId);const fresh=feed.cards.filter((card:{lastSeen:number})=>card.lastSeen>=at-2000).slice(0,3);for(const card of fresh){try{await matchNarrative(db(),user.userId,card.id);matchedNarratives+=1;}catch{}}}
-    const updated=await narrativeFeed(db(),user.userId);const freshNarratives=updated.cards.filter((card:{lastSeen:number})=>card.lastSeen>=at-2000).length;const freshCoins=updated.coins.filter((coin:{observed:number})=>coin.observed>=at-120000).length;
+    if(accepted.length){const feed=await narrativeFeed(db(),user.userId,{limit:20});const fresh=feed.cards.filter((card:{lastSeen:number})=>card.lastSeen>=at-2000).slice(0,3);for(const card of fresh){try{await matchNarrative(db(),user.userId,card.id);matchedNarratives+=1;}catch{}}}
+    const updated=await narrativeFeed(db(),user.userId,{limit:100});const freshNarratives=updated.cards.filter((card:{lastSeen:number})=>card.lastSeen>=at-2000).length;const freshCoins=updated.coins.filter((coin:{observed:number})=>coin.observed>=at-120000).length;
     return json({ok:true,accepted:accepted.length,rejected:body.evidence.length-accepted.length,at,freshNarratives,matchedNarratives,freshCoins,inferredNarratives:inferred.length,relationshipsSaved:inferred.reduce((sum,x)=>sum+x.related.length,0)});
   }catch(error){return json({error:error instanceof SyntaxError?'Invalid request.':(error as Error).message},500);}
 }
