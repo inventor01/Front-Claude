@@ -1,5 +1,24 @@
 # Front Bug / Fix Log
 
+## 2026-09-11 — Narrative results regressed into basic TikTok hashtags
+
+### Root cause
+The detector was still treating hashtags as structured narrative evidence. A repeated hashtag received a high candidate weight, and hashtag text was also being re-read by the lowercase token/phrase extractor, so the same tag could effectively support itself twice. TikTok Creative Center/X Explore seed rows could also enter the topic detector even though they are discovery surfaces rather than independent creators. During detector-path merging, `authorCount` was additionally allowed to rise to the number of evidence IDs, which could make multiple posts look like multiple independent creators. Finally, persisted topic intelligence stayed active for seven days, so weak/stale topics could continue appearing long after the scan that produced them.
+
+### Permanent fix
+- Treat TikTok/X trend hashtags as search/discovery seeds, not automatic narrative labels.
+- Strip hashtags before natural-language token/name/phrase extraction so one hashtag cannot count as both a hashtag and text corroboration.
+- Exclude TikTok Creative Center and X Explore seed rows from independent-creator corroboration.
+- Require non-hashtag natural-language creator support before a topic can enter pre-breakout/candidate state.
+- Require stronger corroboration for one-word narratives while preserving early recovery for distinctive names such as `Astra`.
+- Prefer repeated natural-language names/phrases over hashtag aliases when choosing the displayed narrative title.
+- Reject platform boilerplate topics such as `fyp`, `viral`, `trending`, `capcut`, and similar tags again at the server promotion boundary.
+- Stop inflating creator counts from evidence-count merges; creator count now remains creator count.
+- Limit active topic-intelligence results to the last 48 hours while keeping older evidence/history available in the narrative workbench.
+
+### Regression / release gate
+The detector suite now includes hashtag-only TikTok replay, Creative Center seed isolation, Astra recovery, Daejon/Dejon clustering, narrative-phrase-over-hashtag ranking, UI/metric junk replay, momentum, and origin timing. The release must also pass migrations, mounted D1 persistence, typecheck, lint and production build.
+
 ## 2026-09-11 — Narrative rows lacked the full decision context
 
 ### Root cause

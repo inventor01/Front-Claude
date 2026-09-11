@@ -8,6 +8,7 @@ const db = () => { if (!env.DB) throw new Error('Database unavailable'); return 
 const SOCIAL_NOTIFICATION = /\b(?:and\s+\d[\d,.]*\s+others?\s+)?(?:liked|likes|reposted|reposts|quoted|quotes|followed|follows|mentioned|mentions|shared|shares)\s+(?:your|a|this)\s+(?:video|post|tweet|photo|comment|reply)\b/i;
 const JUNK_LABEL = /^(?:hashtag|hashtags|caption|video|videos|photo|photos|sound|original sound|user|username|creator|account|profile|quote|reply|replies|repost|reposts|like|likes|bookmark|share|shares|view|views|show|show more|more|see more|read more|follow|following|for you|explore|home|trending|trend)$/i;
 const NUMERIC_ONLY = /^\s*\d+(?:[.,]\d+)?\s*[KMB]?\s*$/i;
+const SOCIAL_TAG_ONLY = new Set('fyp fy foryou foryoupage viral viralvideo viralvideos trending trend tiktok tiktokviral tiktoktrend tiktoktrending capcut edit edits funny comedy humor explore explorepage xyzbca xyzabc'.split(' '));
 function asMetric(value: unknown) { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null; }
 function asTimestamp(value: unknown) { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null; }
 function safeUrl(platform: 'X' | 'TikTok', raw: unknown) {
@@ -19,6 +20,8 @@ function safeUrl(platform: 'X' | 'TikTok', raw: unknown) {
   if (!allowed.has(host)) return null; url.hash = ''; return url.toString();
 }
 function normalizeLoose(value:string){return value.normalize('NFKC').toLowerCase().replace(/^@/,'').replace(/[^\p{L}\p{N}]+/gu,' ').trim();}
+function compactLoose(value:string){return normalizeLoose(value).replace(/\s+/g,'');}
+function lowValueSocialTopic(value:string){const clean=normalizeLoose(value);if(!clean)return true;const compact=compactLoose(value);if(SOCIAL_TAG_ONLY.has(compact))return true;const parts=clean.split(' ').filter(Boolean);return Boolean(parts.length)&&parts.every((part)=>SOCIAL_TAG_ONLY.has(part)||/^(?:meme|memes|viral|trend|trending|tiktok|twitter|video|videos|clip|clips|reaction|reactions|funny|social|media)$/.test(part));}
 function obviousJunk(content:string,author:string){
   const clean=content.replace(/\s+/g,' ').trim();
   if(!clean||SOCIAL_NOTIFICATION.test(clean)||JUNK_LABEL.test(clean)||NUMERIC_ONLY.test(clean))return true;
@@ -37,7 +40,7 @@ function evidenceFrom(value: unknown): Evidence | null {
   return {id,platform,author,url,content,published:asTimestamp(row.published),views:asMetric(row.views),likes:asMetric(row.likes),provenance:(provenanceRaw||`${platform} local browser bridge`).slice(0,300)};
 }
 function normalizedNarrativeId(value:string){return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();}
-function narrativeKey(value:unknown){if(typeof value!=='string')return null;const clean=value.replace(/^#/,'').replace(/\s+/g,' ').trim().slice(0,80);const normalized=normalizedNarrativeId(clean);if(normalized.length<2||JUNK_LABEL.test(clean)||NUMERIC_ONLY.test(clean)||/^(trending|viral|news|meme|memes|fyp|for you)$/i.test(clean)||isBroadNarrativeTitle(clean))return null;return clean;}
+function narrativeKey(value:unknown){if(typeof value!=='string')return null;const clean=value.replace(/^#/,'').replace(/\s+/g,' ').trim().slice(0,80);const normalized=normalizedNarrativeId(clean);if(normalized.length<2||JUNK_LABEL.test(clean)||NUMERIC_ONLY.test(clean)||lowValueSocialTopic(clean)||/^(trending|viral|news|meme|memes|fyp|for you)$/i.test(clean)||isBroadNarrativeTitle(clean))return null;return clean;}
 
 type RelatedContextInput={key?:unknown;title?:unknown;relation?:unknown;score?:unknown;evidenceCount?:unknown;authorCount?:unknown;platforms?:unknown;evidenceIds?:unknown};
 type MomentumInput={label?:unknown;score?:unknown;creatorDelta?:unknown;evidenceDelta?:unknown;platformDelta?:unknown;creatorGrowthPct?:unknown;windows?:unknown};
@@ -62,10 +65,10 @@ function inferredTopics(value:unknown){
       const rc=Math.trunc(Number(r.evidenceCount)),ac=Math.trunc(Number(r.authorCount)),score=Number(r.score);
       const platforms=Array.isArray(r.platforms)?r.platforms.filter((x):x is string=>x==='X'||x==='TikTok').slice(0,2):[];
       const evidenceIds=Array.isArray(r.evidenceIds)?r.evidenceIds.filter((x):x is string=>typeof x==='string'&&x.length<=180).slice(0,8):[];
-      if(!title||JUNK_LABEL.test(title)||NUMERIC_ONLY.test(title)||!relatedKey||rc<2||ac<2||!Number.isFinite(score)||relatedKey===normalizedNarrativeId(key))continue;
+      if(!title||JUNK_LABEL.test(title)||NUMERIC_ONLY.test(title)||lowValueSocialTopic(title)||!relatedKey||rc<2||ac<2||!Number.isFinite(score)||relatedKey===normalizedNarrativeId(key))continue;
       related.push({key:relatedKey,title,relation:typeof r.relation==='string'?r.relation.slice(0,50):'repeated-cooccurrence',score,evidenceCount:rc,authorCount:ac,platforms,evidenceIds});
     }
-    const aliases=Array.isArray(row.aliases)?row.aliases.filter((x):x is string=>typeof x==='string').map((x)=>x.trim()).filter(Boolean).slice(0,12):[key];
+    const aliases=Array.isArray(row.aliases)?row.aliases.filter((x):x is string=>typeof x==='string').map((x)=>x.trim()).filter((x)=>Boolean(x)&&!lowValueSocialTopic(x)).slice(0,12):[key];
     const platforms=Array.isArray(row.platforms)?row.platforms.filter((x):x is string=>x==='X'||x==='TikTok').slice(0,2):[];
     const score=Number(row.score);
     const momentum=row.momentum&&typeof row.momentum==='object'?row.momentum as MomentumInput:null;
