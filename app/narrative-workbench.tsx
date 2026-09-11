@@ -9,20 +9,24 @@ type Momentum={label?:string;score?:number;windows?:Record<string,MomentumWindow
 type Snapshot={observed:number;tier:string;score:number;creators:number;evidenceCount:number;platforms:string[];momentum:Momentum};
 type FeedHistory={observed:number;feedPenetration:number|null;feedPenetrationDelta:number|null;feedPenetrationVelocity:number|null};
 type SoundSignal={soundId?:string;title?:string;creators?:number|null;overlap?:number|null};
-type Evidence={id:string;platform:string;author:string;url:string;content:string;published:number|null;first_seen:number;last_seen:number;provenance:string;views:number|null;likes:number|null;replies?:number|null;reposts?:number|null;bookmarks?:number|null;quotes?:number|null;comments?:number|null;shares?:number|null;saves?:number|null;sound_id?:string|null;sound_title?:string|null;sound_author?:string|null;media_type?:string|null;quoted_url?:string|null;cover_url?:string|null;hashtags?:string[];feed_surface?:string|null};
+type VisualSignal={hash?:string;creators?:number|null;overlap?:number|null;platforms?:string[]};
+type Origin={url?:string;published?:number|null;author?:string;platform?:string;confidence?:string;method?:string;absolute?:boolean;targetedOriginRows?:number;parentSignals?:number;evidenceCount?:number};
+type SemanticMerge={score?:number|null;reason?:string|null};
+type Evidence={id:string;platform:string;author:string;url:string;content:string;published:number|null;first_seen:number;last_seen:number;provenance:string;views:number|null;likes:number|null;replies?:number|null;reposts?:number|null;bookmarks?:number|null;quotes?:number|null;comments?:number|null;shares?:number|null;saves?:number|null;sound_id?:string|null;sound_title?:string|null;sound_author?:string|null;media_type?:string|null;quoted_url?:string|null;cover_url?:string|null;hashtags?:string[];feed_surface?:string|null;creator_followers?:number|null;outbound_urls?:string[];relation_type?:string|null;related_video_id?:string|null;visual_hash?:string|null};
 type Relationship={related_key:string;related_title:string;relation:string;score:number;evidence_count:number;author_count:number;platforms:string[];observed:number};
 type CoinData={name?:string;symbol?:string;price?:number|null;liquidity?:number|null;volume?:number|null;volume24h?:number|null;marketCap?:number|null;matchReason?:string};
 type Coin={narrative:string;mint:string;observed:number;data:CoinData};
-type Launch={mint:string;name:string;symbol:string|null;seen:number;narrative:string|null;match_type:string;data:{narrativeTitle?:string}};
+type Launch={narrative:string;mint:string;observed:number;data:CoinData};
+type LaunchMatch={mint:string;name:string;symbol:string|null;seen:number;narrative:string|null;match_type:string;data:{narrativeTitle?:string}};
 type Detail={
  narrative:{id:string|null;title:string;aliases:string[];detectedAt:number|null;promotedAt:number|null;earliestEvidenceAt:number|null};
- latest:{key:string;title:string;observed:number;tier:string;score:number;momentum:Momentum;creators:number;evidenceCount:number;platforms:string[];origin:{url:string;published:number|null}|null;feedPenetration?:number|null;feedPenetrationDelta?:number|null;feedPenetrationVelocity?:number|null;soundSignals?:SoundSignal[]}|null;
+ latest:{key:string;title:string;observed:number;tier:string;score:number;momentum:Momentum;creators:number;evidenceCount:number;platforms:string[];origin:Origin|null;feedPenetration?:number|null;feedPenetrationDelta?:number|null;feedPenetrationVelocity?:number|null;soundSignals?:SoundSignal[];visualSignals?:VisualSignal[];semanticMerge?:SemanticMerge}|null;
  snapshots:Snapshot[];
  feedHistory?:FeedHistory[];
  evidence:Evidence[];
  relationships:Relationship[];
  coins:Coin[];
- launches:Launch[];
+ launches:LaunchMatch[];
  edge:{detectedAt:number|null;firstLaunchAt:number|null;leadMs:number|null;status:'waiting'|'before-launch'|'after-launch'|'same-time'};
  note:string;
 };
@@ -38,7 +42,7 @@ const pump=(mint:string)=>`https://pump.fun/coin/${encodeURIComponent(mint)}`;
 const axiom=(mint:string)=>`https://axiom.trade/t/${encodeURIComponent(mint)}`;
 const pct=(n:number|null|undefined)=>n==null?'—':`${n.toFixed(2)}%`;
 const signed=(n:number|null|undefined,suffix='')=>n==null?'—':`${n>=0?'+':''}${n.toFixed(2)}${suffix}`;
-const feedLabel=(value:string|null|undefined)=>value==='x-for-you'?'X For You':value==='tiktok-for-you'?'TikTok For You':value==='x-sentinel'?'X sentinel':value==='candidate-investigation'?'Investigation':value==='trend-seed'?'Trend seed':value||'';
+const feedLabel=(value:string|null|undefined)=>value==='x-for-you'?'X For You':value==='tiktok-for-you'?'TikTok For You':value==='x-sentinel'?'X sentinel':value==='candidate-investigation'?'Investigation':value==='origin-research'?'Origin research':value==='trend-seed'?'Trend seed':value||'';
 
 async function getJson<T>(url:string):Promise<T>{const response=await fetch(url,{cache:'no-store'});const data=await response.json() as T&{error?:string};if(!response.ok)throw new Error(data.error||`Request failed (${response.status})`);return data;}
 
@@ -53,6 +57,8 @@ export default function NarrativeWorkbench({narrativeId,topic}:Props){
  const edgeText=!detail?'':detail.edge.status==='waiting'?'No matching Pump.fun launch has been stored yet.':detail.edge.status==='before-launch'?`Front detected this ${duration(detail.edge.leadMs)} before the first matching stored launch.`:detail.edge.status==='after-launch'?`Front detected this ${duration(detail.edge.leadMs)} after the first matching stored launch.`:'Front detection and the first matching launch were recorded at about the same time.';
  const maxCreators=Math.max(1,...(detail?.snapshots??[]).map(s=>s.creators));
  const topSounds=(latest?.soundSignals||[]).filter(signal=>signal.soundId||signal.title).slice(0,5);
+ const topVisuals=(latest?.visualSignals||[]).filter(signal=>signal.hash).slice(0,5);
+ const origin=latest?.origin;
  const latestFeed=(detail?.feedHistory||[]).at(-1);
  return <div className={styles.workbench}>
   <div className={styles.topbar}><div><div className={styles.kicker}>NARRATIVE WORKBENCH</div><h4>{detail?.narrative.title||topic}</h4><p>Evidence, momentum, For You spread, context, coins, launches and Front&apos;s timing edge in one place.</p></div><button className={styles.refresh} onClick={()=>void load()} disabled={busy}><RefreshCw size={13} className={busy?styles.spin:''}/>{busy?'Refreshing':'Refresh detail'}</button></div>
@@ -62,7 +68,7 @@ export default function NarrativeWorkbench({narrativeId,topic}:Props){
    <div className={styles.edgeCard} data-status={detail.edge.status}><Timer size={18}/><div><b>{edgeText}</b><span>Detection = earliest stored topic snapshot or Radar creation. Launch = matching PumpPortal creation event.</span></div></div>
    <div className={styles.summaryGrid}>
     <div><span>Front first detected</span><b>{age(detail.narrative.detectedAt)}</b><small>{detail.narrative.detectedAt?new Date(detail.narrative.detectedAt).toLocaleString():'Not stored'}</small></div>
-    <div><span>Earliest sampled evidence</span><b>{age(detail.narrative.earliestEvidenceAt)}</b><small>Sampled evidence, not an absolute-origin claim</small></div>
+    <div><span>Earliest verified find</span><b>{age(detail.narrative.earliestEvidenceAt)}</b><small>{origin?.confidence?`${origin.confidence} origin confidence · `:''}Front&apos;s earliest found evidence, not an absolute-origin claim</small></div>
     <div><span>Creators in evidence</span><b>{distinctCreators||latest?.creators||0}</b><small>{latest?.platforms?.join(' + ')||'social'}</small></div>
     <div><span>Momentum</span><b>{latest?.momentum?.label||'No live snapshot'}</b><small>score {latest?.momentum?.score?.toFixed?.(1)??'—'} · {latest?.evidenceCount??evidence.length} posts</small></div>
     <div><span>For You penetration</span><b>{pct(latest?.feedPenetration??latestFeed?.feedPenetration)}</b><small>share of sampled For You evidence supporting this topic</small></div>
@@ -74,18 +80,22 @@ export default function NarrativeWorkbench({narrativeId,topic}:Props){
     {detail.snapshots.length>1&&<div className={styles.history} aria-label="Creator history">{detail.snapshots.slice(-24).map((snap,index)=><div key={`${snap.observed}:${index}`} className={styles.historyBar} title={`${new Date(snap.observed).toLocaleString()} · ${snap.creators} creators · ${snap.evidenceCount} posts`}><span style={{height:`${Math.max(8,Math.round((snap.creators/maxCreators)*100))}%`}}/></div>)}</div>}
    </section>
 
-   <section className={styles.section}><div className={styles.sectionHead}><div><h5><Sparkles size={14}/> Discovery signals</h5><p>What the recommendation feeds and repeated TikTok sounds are doing around this narrative.</p></div><span>{(detail.feedHistory||[]).length} feed snapshots</span></div>
+   <section className={styles.section}><div className={styles.sectionHead}><div><h5><Sparkles size={14}/> Discovery signals</h5><p>Recommendation-feed spread, repeated sounds/visual templates, semantic consolidation and targeted origin research.</p></div><span>{(detail.feedHistory||[]).length} feed snapshots</span></div>
     <div className={styles.windowGrid}>
      <div className={styles.window}><span>For You penetration</span><b>{pct(latest?.feedPenetration??latestFeed?.feedPenetration)}</b><small>higher means the topic occupies more of Front&apos;s sampled recommendation feed</small></div>
-     <div className={styles.window}><span>Penetration change</span><b>{signed(latest?.feedPenetrationDelta??latestFeed?.feedPenetrationDelta,' pts')}</b><small>change versus the prior comparable scan</small></div>
-     <div className={styles.window}><span>Penetration velocity</span><b>{signed(latest?.feedPenetrationVelocity??latestFeed?.feedPenetrationVelocity,' pts/hr')}</b><small>distribution acceleration, not total internet market share</small></div>
+     <div className={styles.window}><span>Penetration velocity</span><b>{signed(latest?.feedPenetrationVelocity??latestFeed?.feedPenetrationVelocity,' pts/hr')}</b><small>{signed(latest?.feedPenetrationDelta??latestFeed?.feedPenetrationDelta,' pts')} versus the prior comparable scan</small></div>
      <div className={styles.window}><span>Repeated TikTok sounds</span><b>{topSounds.length}</b><small>{topSounds[0]?.title||'No repeated sound attached yet'}</small></div>
+     <div className={styles.window}><span>Repeated visual templates</span><b>{topVisuals.length}</b><small>{topVisuals[0]?.creators?`${compact(topVisuals[0].creators)} creators share a near-matching template`:'No repeated visual template attached yet'}</small></div>
+     <div className={styles.window}><span>Origin research</span><b>{origin?.confidence||'Not established'}</b><small>{origin?.targetedOriginRows?`${origin.targetedOriginRows} targeted origin rows · `:''}{origin?.parentSignals?`${origin.parentSignals} ancestry signals`:'earliest verified find only'}</small></div>
+     <div className={styles.window}><span>Semantic consolidation</span><b>{latest?.semanticMerge?.reason||'No merge needed'}</b><small>{latest?.semanticMerge?.score!=null?`similarity ${latest.semanticMerge.score.toFixed(2)}`:'topic remained distinct'}</small></div>
     </div>
     {topSounds.length>0&&<div className={styles.contextList} style={{marginTop:10}}>{topSounds.map((sound,index)=><div key={`${sound.soundId||sound.title}:${index}`}><b>{sound.title||'TikTok sound'}</b><span>{compact(sound.creators)} creators in sampled evidence · {compact(sound.overlap)} linked videos{sound.soundId?` · sound ${sound.soundId}`:''}</span></div>)}</div>}
+    {topVisuals.length>0&&<div className={styles.contextList} style={{marginTop:10}}>{topVisuals.map((visual,index)=><div key={`${visual.hash}:${index}`}><b>Repeated visual template</b><span>{compact(visual.creators)} creators · {compact(visual.overlap)} linked posts/videos · {(visual.platforms||[]).join(' + ')||'social'} · perceptual match</span></div>)}</div>}
+    {origin?.method&&<div className={styles.note} style={{marginTop:10}}>{origin.method}{origin.url&&<> · <a href={origin.url} target="_blank" rel="noreferrer">Open earliest find <ExternalLink size={11}/></a></>}</div>}
    </section>
 
-   <section className={styles.section}><div className={styles.sectionHead}><div><h5><Sparkles size={14}/> Source evidence</h5><p>Actual posts/captions plus the engagement and media fields the platforms exposed during collection.</p></div><span>{evidence.length} loaded</span></div>
-    <div className={styles.evidenceList}>{evidence.slice(0,10).map(item=>{const extras=[metric(item.replies,'replies'),metric(item.reposts,'reposts'),metric(item.quotes,'quotes'),metric(item.comments,'comments'),metric(item.shares,'shares'),metric(item.saves,'saves')].filter(Boolean);return <article key={item.id} className={styles.evidenceCard}><div className={styles.evidenceMeta}><span>{item.platform}</span><span>{item.author}</span><span>{age(item.published||item.first_seen)}</span><span>views {compact(item.views)}</span><span>likes {compact(item.likes)}</span>{item.feed_surface&&<span>{feedLabel(item.feed_surface)}</span>}{item.media_type&&<span>{item.media_type}</span>}</div>{extras.length>0&&<div className={styles.evidenceMeta}>{extras.map(value=><span key={value}>{value}</span>)}</div>}<p>{item.content.slice(0,380)}{item.content.length>380?'…':''}</p>{item.sound_title&&<small style={{display:'block',marginBottom:6}}>Sound: <b>{item.sound_title}</b>{item.sound_author?` · ${item.sound_author}`:''}</small>}{(item.hashtags||[]).length>0&&<small style={{display:'block',marginBottom:6}}>#{(item.hashtags||[]).slice(0,8).join(' #')}</small>}<div style={{display:'flex',gap:10,flexWrap:'wrap'}}><a href={item.url} target="_blank" rel="noreferrer">Open source <ExternalLink size={11}/></a>{item.quoted_url&&<a href={item.quoted_url} target="_blank" rel="noreferrer">Quoted post <ExternalLink size={11}/></a>}</div></article>;})}{!evidence.length&&<div className={styles.empty}>No supporting evidence is available in the server detail record yet.</div>}</div>
+   <section className={styles.section}><div className={styles.sectionHead}><div><h5><Sparkles size={14}/> Source evidence</h5><p>Actual posts/captions plus creator size, engagement, ancestry, links, sound and visual fields Front could verify.</p></div><span>{evidence.length} loaded</span></div>
+    <div className={styles.evidenceList}>{evidence.slice(0,10).map(item=>{const extras=[metric(item.creator_followers,'followers'),metric(item.replies,'replies'),metric(item.reposts,'reposts'),metric(item.quotes,'quotes'),metric(item.comments,'comments'),metric(item.shares,'shares'),metric(item.saves,'saves')].filter(Boolean);return <article key={item.id} className={styles.evidenceCard}><div className={styles.evidenceMeta}><span>{item.platform}</span><span>{item.author}</span><span>{age(item.published||item.first_seen)}</span><span>views {compact(item.views)}</span><span>likes {compact(item.likes)}</span>{item.feed_surface&&<span>{feedLabel(item.feed_surface)}</span>}{item.media_type&&<span>{item.media_type}</span>}{item.relation_type&&<span>{item.relation_type}</span>}{item.visual_hash&&<span>visual fingerprint</span>}</div>{extras.length>0&&<div className={styles.evidenceMeta}>{extras.map(value=><span key={value}>{value}</span>)}</div>}<p>{item.content.slice(0,380)}{item.content.length>380?'…':''}</p>{item.sound_title&&<small style={{display:'block',marginBottom:6}}>Sound: <b>{item.sound_title}</b>{item.sound_author?` · ${item.sound_author}`:''}</small>}{item.related_video_id&&<small style={{display:'block',marginBottom:6}}>Parent video: <b>{item.related_video_id}</b>{item.relation_type?` · ${item.relation_type}`:''}</small>}{(item.hashtags||[]).length>0&&<small style={{display:'block',marginBottom:6}}>#{(item.hashtags||[]).slice(0,8).join(' #')}</small>}<div style={{display:'flex',gap:10,flexWrap:'wrap'}}><a href={item.url} target="_blank" rel="noreferrer">Open source <ExternalLink size={11}/></a>{item.quoted_url&&<a href={item.quoted_url} target="_blank" rel="noreferrer">Quoted/parent post <ExternalLink size={11}/></a>}{(item.outbound_urls||[]).slice(0,3).map((url,index)=><a key={`${url}:${index}`} href={url} target="_blank" rel="noreferrer">Shared link {index+1} <ExternalLink size={11}/></a>)}</div></article>;})}{!evidence.length&&<div className={styles.empty}>No supporting evidence is available in the server detail record yet.</div>}</div>
    </section>
 
    <div className={styles.twoCol}>
