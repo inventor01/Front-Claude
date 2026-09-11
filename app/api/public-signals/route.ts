@@ -22,6 +22,7 @@ type PublicItem = {
   published:number|null; views:number|null; likes:number|null; status:PublicStatus;
   narrative?:{id:string;title:string}|null; detail:string;
 };
+type CandidateGroup = { labels:Map<string,number>; rows:BrowserRow[]; authors:Set<string>; platforms:Set<string> };
 
 function sourceFor(row: BrowserRow) {
   const p = row.provenance;
@@ -111,11 +112,11 @@ function candidateLabels(row:BrowserRow) {
 }
 
 function buildEarlyCandidates(rows:BrowserRow[], linked:Set<string>, now:number):PublicItem[] {
-  const groups = new Map<string,{labels:Map<string,number>;rows:BrowserRow[];authors:Set<string>;platforms:Set<string>}>();
+  const groups = new Map<string,CandidateGroup>();
   for (const row of rows) {
     if (linked.has(row.id) || row.last_seen < now - 36*3600000) continue;
     for (const {key,label} of candidateLabels(row)) {
-      const group = groups.get(key) ?? {labels:new Map(),rows:[],authors:new Set(),platforms:new Set()};
+      const group:CandidateGroup = groups.get(key) ?? {labels:new Map<string,number>(),rows:[],authors:new Set<string>(),platforms:new Set<string>()};
       if (!group.rows.some((item)=>item.id===row.id)) group.rows.push(row);
       group.authors.add(`${row.platform}:${row.author.toLowerCase()}`); group.platforms.add(row.platform);
       group.labels.set(label,(group.labels.get(label)||0)+1); groups.set(key,group);
