@@ -22,6 +22,7 @@ export function intelligenceLabelTokens(value) {
 export function lowQualityIntelligenceLabel(value) {
   const key = normalizeIntelligenceLabel(value);
   if (key.length < 3 || key.length > 100) return true;
+  if (PLATFORM_TAG.has(key.replace(/\s+/g, ''))) return true;
   const tokens = intelligenceLabelTokens(value);
   if (!tokens.length || tokens.every((token) => /^\d+$/.test(token))) return true;
   if (tokens.length === 1 && (COMMON_SINGLE.has(tokens[0]) || GENERIC.has(tokens[0]) || BROAD.has(tokens[0]) || PLATFORM_TAG.has(tokens[0]))) return true;
