@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
+export const DEFAULT_CDP_PORT = 43982;
+
 export function findSystemChrome(platform = process.platform, env = process.env) {
   const candidates = [];
   if (platform === 'darwin') {
@@ -25,7 +27,16 @@ export function frontLoginProfileDir(dataDir) {
   return path.join(dataDir, 'chrome-profile');
 }
 
-export function openRegularChromeForLogin({ dataDir, chromeExecutable = findSystemChrome(), spawnImpl = spawn } = {}) {
+export function frontCdpUrl(port = DEFAULT_CDP_PORT) {
+  return `http://127.0.0.1:${port}`;
+}
+
+export function openRegularChromeForLogin({
+  dataDir,
+  chromeExecutable = findSystemChrome(),
+  debuggingPort = DEFAULT_CDP_PORT,
+  spawnImpl = spawn,
+} = {}) {
   if (!chromeExecutable) {
     throw new Error('Google Chrome was not found. Install Chrome or open X/TikTok in your normal browser manually.');
   }
@@ -33,11 +44,13 @@ export function openRegularChromeForLogin({ dataDir, chromeExecutable = findSyst
   fs.mkdirSync(profileDir, { recursive: true });
   const child = spawnImpl(chromeExecutable, [
     `--user-data-dir=${profileDir}`,
+    '--remote-debugging-address=127.0.0.1',
+    `--remote-debugging-port=${debuggingPort}`,
     '--no-first-run',
     '--no-default-browser-check',
     'https://x.com/home',
     'https://www.tiktok.com/',
   ], { detached: true, stdio: 'ignore' });
   child.unref?.();
-  return { chromeExecutable, profileDir };
+  return { chromeExecutable, profileDir, debuggingPort, cdpUrl: frontCdpUrl(debuggingPort) };
 }
