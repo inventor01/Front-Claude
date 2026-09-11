@@ -150,19 +150,20 @@ export default function BrowserIntelligence() {
   }
 
   async function scan() {
-    setBusy('scan'); setError(''); setMessage('');
+    setBusy('scan'); setError(''); setMessage('Scanning X + TikTok in the background… keep this panel open.');
     try {
       const result = await local<ScanResult>('/scan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...config, xAccounts: lines(accounts), keywords: lines(keywords) }),
       });
       setLastScan(result);
+      setMessage(`Collection finished: ${result.evidence.length} evidence record(s). Saving them to Front…`);
       const stored = await saveEvidence(result.evidence);
       const cards = await fetchNarratives();
       setNarratives(cards.slice(0, 8));
       setConnected(true);
       const warning = result.errors.length ? ` ${result.errors.length} source warning(s); details shown below.` : '';
-      setMessage(`Saved ${stored.accepted || 0} browser evidence records. X ${result.evidence.filter((x) => x.platform === 'X').length} · TikTok ${result.evidence.filter((x) => x.platform === 'TikTok').length}.${warning}`);
+      setMessage(`Scan complete. Saved ${stored.accepted || 0} browser evidence records. X ${result.evidence.filter((x) => x.platform === 'X').length} · TikTok ${result.evidence.filter((x) => x.platform === 'TikTok').length}.${warning}`);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(''); }
   }
@@ -180,7 +181,7 @@ export default function BrowserIntelligence() {
       <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
         <button onClick={() => void ping()} disabled={!!busy}>Reconnect</button>
         <button onClick={() => void openLogin()} disabled={!!busy}>{busy === 'login' ? 'Opening…' : 'Open X + TikTok login'}</button>
-        <button onClick={() => void scan()} disabled={!!busy || !connected}>{busy === 'scan' ? 'Scanning…' : 'Run browser scan'}</button>
+        <button onClick={() => void scan()} disabled={!!busy || !connected}>{busy === 'scan' ? 'Scanning in background…' : 'Run browser scan'}</button>
       </div>
       <hr style={{borderColor:'#ffffff18'}}/>
       <label style={{fontSize:12,fontWeight:700}}>High-signal X accounts</label>
@@ -210,7 +211,7 @@ export default function BrowserIntelligence() {
         <strong>Detected narrative groups</strong>
         {narratives.map((item) => <div key={item.id} style={{marginTop:7,fontSize:13}}><b>{item.title}</b> · {item.stage} · {item.authors} account(s) · {item.platforms.join(' + ')}</div>)}
       </>}
-      <div style={{marginTop:12,padding:10,borderRadius:9,background:'#ffffff0d',fontSize:12,display:'flex',gap:7}}><ShieldCheck size={15}/> X/TikTok cookies stay in ~/.front-browser-bridge/profile and are never uploaded to Front.</div>
+      <div style={{marginTop:12,padding:10,borderRadius:9,background:'#ffffff0d',fontSize:12,display:'flex',gap:7}}><ShieldCheck size={15}/> X/TikTok cookies stay in ~/.front-browser-bridge/chrome-profile and are never uploaded to Front.</div>
     </aside>}
   </>;
 }

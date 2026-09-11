@@ -36,6 +36,12 @@ if [ ! -x "$PLAYWRIGHT_EXECUTABLE" ]; then
   exit 1
 fi
 
+# Login happens in regular visible Chrome. Collection should be invisible by
+# default so clicking Run browser scan does not pop up a disposable blank/search
+# window. Set FRONT_BRIDGE_HEADLESS=0 before launching only when debugging.
+export FRONT_BRIDGE_HEADLESS="${FRONT_BRIDGE_HEADLESS:-1}"
+
 echo "Starting Front browser bridge on http://127.0.0.1:43981"
 echo "Keep this Terminal window open while you want browser intelligence running."
+echo "Browser scans run in the background; login still opens regular Chrome."
 npm start
