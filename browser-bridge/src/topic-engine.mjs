@@ -103,29 +103,28 @@ function bestDisplayLabel(topic, rows) {
   if (candidates[0]) return candidates[0].label;
   const repeated = repeatedContiguousPhrases(rows);
   if (repeated[0]) return repeated[0].label;
-  return cleanLabel(topic.topic || topic.key);
+  const fallback = cleanLabel(topic.topic || topic.key);
+  return fallback && !genericLabel(fallback) ? fallback : '';
 }
 
-function keepTopic(topic, rows) {
+function keepTopic(topic) {
   const label = cleanLabel(topic.topic || topic.key);
   const parts = tokens(label);
   if (!label || genericLabel(label)) return false;
   const creators = Number(topic.authorCount || 0);
   const evidenceCount = Number(topic.evidenceCount || 0);
   if (creators < 2 || evidenceCount < 2) return false;
-  const support = exactSupport(label, rows);
   if (parts.length === 1) {
     if (GENERIC_SINGLE.has(parts[0])) return false;
-    // Preserve genuinely emerging one-word names such as Astra, but never promote
-    // one from a single account or a UI/common-word coincidence.
-    return topic.tier === 'pre-breakout' ? support.creators >= 2 : support.creators >= 3;
+    // Base v11 has already established natural independent support. Keep a
+    // specific emerging one-word name in pre-breakout with two creators, but
+    // require three creators before presenting it as a promoted candidate.
+    return topic.tier === 'candidate' ? creators >= 3 : creators >= 2;
   }
-  if (support.creators >= 2) return true;
-  // Semantic/media inference may describe a real event in words that are not
-  // verbatim in every post. Require stronger independent corroboration before
-  // allowing that non-verbatim label onto the user-facing topic list.
-  const platforms = Array.isArray(topic.platforms) ? topic.platforms.length : 0;
-  return creators >= 3 && platforms >= 2;
+  // Multi-word topics that have already cleared the base detector remain
+  // eligible even when spelling variants or semantic/media context mean the
+  // exact full phrase does not occur verbatim in every supporting post.
+  return creators >= 2;
 }
 
 export function detectTopics(events = [], now = Date.now(), limit = 15) {
@@ -133,7 +132,7 @@ export function detectTopics(events = [], now = Date.now(), limit = 15) {
   const out = [];
   for (const topic of raw) {
     const rows = supportingRows(topic, events);
-    if (!keepTopic(topic, rows)) continue;
+    if (!keepTopic(topic)) continue;
     const display = bestDisplayLabel(topic, rows);
     if (!display || genericLabel(display)) continue;
     const repaired = {
