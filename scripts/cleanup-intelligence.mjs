@@ -42,25 +42,44 @@ function query(sql) {
   const blocks = Array.isArray(parsed) ? parsed : [parsed];
   return blocks.flatMap((block) => Array.isArray(block?.results) ? block.results : []);
 }
+function stripHashtags(value) {
+  return String(value || '').replace(/#[\p{L}\p{N}_]{2,80}/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+function phraseInBody(body, phrase) {
+  const haystack = ` ${normalizeIntelligenceLabel(stripHashtags(body))} `;
+  const needle = normalizeIntelligenceLabel(phrase);
+  return Boolean(needle && haystack.includes(` ${needle} `));
+}
+function seedProvenance(value) {
+  return /(?:X Explore|TikTok Creative Center)/i.test(String(value || ''));
+}
 
 try {
   const ownerSql = sqlString(owner);
-  const rows = query(`SELECT n.id,n.title,n.aliases,n.created,COALESCE(MAX(e.last_seen),n.created) AS last_seen,COUNT(DISTINCT CASE WHEN e.id IS NOT NULL AND e.provenance NOT LIKE '%X Explore%' AND e.provenance NOT LIKE '%TikTok Creative Center%' THEN e.id END) AS natural_evidence,COUNT(DISTINCT CASE WHEN e.id IS NOT NULL AND e.provenance NOT LIKE '%X Explore%' AND e.provenance NOT LIKE '%TikTok Creative Center%' THEN e.platform || ':' || lower(e.author) END) AS natural_creators FROM narratives n LEFT JOIN evidence_links l ON l.owner=n.owner AND l.narrative=n.id LEFT JOIN evidence e ON e.owner=l.owner AND e.id=l.evidence WHERE n.owner=${ownerSql} AND n.id LIKE 'auto:%' GROUP BY n.id,n.title,n.aliases,n.created ORDER BY n.created ASC`);
+  const evidenceRows = query(`SELECT n.id,n.title,n.aliases,n.created,e.id AS evidence_id,e.platform,e.author,e.content,e.provenance,e.last_seen FROM narratives n LEFT JOIN evidence_links l ON l.owner=n.owner AND l.narrative=n.id LEFT JOIN evidence e ON e.owner=l.owner AND e.id=l.evidence WHERE n.owner=${ownerSql} AND n.id LIKE 'auto:%' ORDER BY n.created ASC,e.last_seen DESC`);
+  const grouped = new Map();
+  for (const row of evidenceRows) {
+    if (!grouped.has(row.id)) grouped.set(row.id, { id: row.id, title: row.title, aliases: row.aliases, created: row.created, evidence: [] });
+    if (row.evidence_id) grouped.get(row.id).evidence.push(row);
+  }
+
   let removedNarratives = 0;
   const removedTitles = [];
-  for (const row of rows) {
+  for (const row of grouped.values()) {
     const title = String(row.title || '');
-    const naturalCreators = Number(row.natural_creators || 0);
-    const naturalEvidence = Number(row.natural_evidence || 0);
-    if (!lowQualityIntelligenceLabel(title) && hasEnoughNaturalSupport(title, naturalCreators, naturalEvidence)) continue;
-    const idSql = sqlString(row.id);
     let aliases = [];
     try { aliases = JSON.parse(row.aliases || '[]'); } catch {}
-    const keys = [...new Set([title, ...aliases].map(normalizeIntelligenceLabel).filter(Boolean))];
+    const labels = [...new Set([title, ...aliases].map(String).filter(Boolean))];
+    const supporting = row.evidence.filter((e) => !seedProvenance(e.provenance) && labels.some((label) => phraseInBody(e.content, label)));
+    const naturalCreators = new Set(supporting.map((e) => `${e.platform}:${String(e.author).toLowerCase()}`)).size;
+    const naturalEvidence = new Set(supporting.map((e) => e.evidence_id)).size;
+    if (!lowQualityIntelligenceLabel(title) && hasEnoughNaturalSupport(title, naturalCreators, naturalEvidence)) continue;
+    const idSql = sqlString(row.id);
+    const keys = [...new Set(labels.map(normalizeIntelligenceLabel).filter(Boolean))];
     const keyClause = keys.length ? ` AND topic_key IN (${keys.map(sqlString).join(',')})` : '';
     execute(`BEGIN;DELETE FROM narrative_coins WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM evidence_links WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM narrative_relationships WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM coin_match_queue WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM launch_events WHERE owner=${ownerSql} AND narrative=${idSql};DELETE FROM topic_snapshots WHERE owner=${ownerSql}${keyClause};DELETE FROM narratives WHERE owner=${ownerSql} AND id=${idSql};COMMIT;`);
     removedNarratives++;
-    removedTitles.push(title);
+    removedTitles.push(`${title} (${naturalCreators} natural creators)`);
   }
 
   const invalidSnapshots = query(`SELECT topic_key,topic_title,MAX(observed) AS observed,MAX(creators) AS creators,MAX(evidence_count) AS evidence_count FROM topic_snapshots WHERE owner=${ownerSql} GROUP BY topic_key,topic_title`)
