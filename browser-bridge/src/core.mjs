@@ -88,7 +88,7 @@ export function extractHashtags(value, limit = 30) {
 
 export function xTrendLabel(value) {
   const lines = String(value ?? '').split(/\n+/).map((line) => cleanText(line, 160)).filter(Boolean);
-  const noise = /^(trending|show more|what(?:'|’)s happening|for you|news|sports|entertainment|[\d,.]+\s*(?:posts?|post))$/i;
+  const noise = /^(trending|show|show more|more|see more|view|view more|read more|what(?:'|’)s happening|for you|news|sports|entertainment|posts?|[\d,.]+\s*(?:posts?|post|views?|likes?))$/i;
   const candidates = lines.filter((line) => !noise.test(line) && !/^trending in\b/i.test(line));
   return candidates.find((line) => line.startsWith('#')) || candidates.find((line) => !/\bposts?\b/i.test(line)) || '';
 }
