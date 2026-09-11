@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -17,6 +18,11 @@ const PERCENT_ENCODED_UTF8 = "percent-encoded-utf-8";
 const SIGN_IN_PATH = "/signin-with-chatgpt";
 const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
+
+function workerEnv(name: string): string | undefined {
+  const value = (env as unknown as Record<string, unknown>)[name];
+  return typeof value === "string" ? value.trim() || undefined : undefined;
+}
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
@@ -39,15 +45,16 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
     };
   }
 
-  // Standalone hosts such as Railway do not inject ChatGPT Sites auth headers.
-  // A deployment can opt into one private workspace identity without changing
-  // ChatGPT Sites behavior by setting FRONT_STANDALONE_USER_ID.
-  const standaloneUserId = process.env.FRONT_STANDALONE_USER_ID?.trim();
+  // Standalone hosts such as Railway run inside the Cloudflare Worker runtime.
+  // Runtime variables therefore arrive as Worker bindings, not Node process.env.
+  // Keep this opt-in so ChatGPT Sites auth remains authoritative when the
+  // standalone binding is absent.
+  const standaloneUserId = workerEnv("FRONT_STANDALONE_USER_ID");
   if (standaloneUserId) {
     const standaloneEmail =
-      process.env.FRONT_STANDALONE_USER_EMAIL?.trim() || "standalone@front.local";
+      workerEnv("FRONT_STANDALONE_USER_EMAIL") || "standalone@front.local";
     const standaloneName =
-      process.env.FRONT_STANDALONE_USER_NAME?.trim() || "Front Workspace";
+      workerEnv("FRONT_STANDALONE_USER_NAME") || "Front Workspace";
     return {
       userId: standaloneUserId,
       displayName: standaloneName,
