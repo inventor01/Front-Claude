@@ -13,10 +13,45 @@ test('generic Original never becomes a narrative even when repeated',()=>{
  assert(!topics.some((topic)=>/^original(?:s)?$/i.test(topic.topic)||/^original(?:s)?$/i.test(topic.key)));
 });
 
+test('multilingual sound boilerplate and ordinary words never become narratives',()=>{
+ const rows=[
+  t('a','1234567890123456701','sonido original',1,90000),t('b','1234567890123456702','Sonido Original #fyp',2,100000),
+  t('c','1234567890123456703','оригинальный звук',3,120000),t('d','1234567890123456704','оригинальный звук',4,80000),
+  x('e','41','ever',2,30000),x('f','42','ever',3,25000),t('g','1234567890123456705','ever',4,50000),
+  x('h','43','created',2,30000),x('i','44','created',3,25000),t('j','1234567890123456706','created',4,50000),
+ ];
+ const topics=detectTopics(rows,NOW,30).map((topic)=>topic.key);
+ for(const junk of ['sonido','sonido original','оригинальный','оригинальный звук','ever','created'])assert(!topics.includes(junk),`${junk} must stay out of narratives`);
+});
+
 test('specific one-word names can still surface with independent support',()=>{
  const rows=[x('a','11','astra is suddenly all over my timeline',1,30000),x('b','12','everyone is posting astra today',2,25000),t('c','1234567890123456790','astra keeps showing up on my fyp',3,40000)];
  const topic=detectTopics(rows,NOW,20).find((row)=>row.key==='astra');
  assert(topic,'Astra should remain eligible with three independent creators');
+});
+
+test('person-name fragments collapse into the fuller event entity',()=>{
+ const rows=[
+  x('a','51','Madison Cassaday airport reaction is everywhere',2,30000),
+  t('b','1234567890123456711','Madison Cassaday airport reaction is everywhere',4,42000),
+  x('c','52','people keep reposting Madison Cassaday airport reaction',6,18000),
+  t('d','1234567890123456712','Madison Cassaday airport reaction again',8,26000),
+ ];
+ const topics=detectTopics(rows,NOW,30);
+ assert(topics.some((topic)=>/madison cassaday/i.test(topic.topic)),'full entity should survive');
+ assert(!topics.some((topic)=>/^madison$/i.test(topic.topic)||/^cassaday$/i.test(topic.topic)),'single-name fragments should be suppressed when the same evidence supports the full name');
+});
+
+test('cross-platform badge requires the same event, not merely two platforms',()=>{
+ const rows=[
+  x('a','61','Nova Harbor mascot falls off the stage',2,45000),
+  t('b','1234567890123456721','Nova Harbor mascot falls off the stage',3,52000),
+  x('c','62','Nova Harbor mascot stage fall remix',5,32000),
+ ];
+ const hit=detectTopics(rows,NOW,20).find((topic)=>/nova harbor/i.test(topic.topic));
+ assert(hit,'specific event should surface');
+ assert.equal(hit.crossPlatform?.corroborated,true);
+ assert(hit.crossPlatform.creators>=2);
 });
 
 test('100K fast post plus cross-post evidence becomes highest priority and triggers Deep',()=>{
