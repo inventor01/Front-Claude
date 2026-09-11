@@ -37,10 +37,10 @@ test('rejects repeated plain English words as topics while keeping a specific ph
  assert(topics.some(row=>/blue smurf cat/i.test(row.topic)),'specific multi-word narrative should still surface');
 });
 
-test('keeps niche Daejon/Dejon variant cluster and independent creators',()=>{
+test('keeps niche Daejon/Dejon variant cluster while requiring natural-language creator support',()=>{
  const rows=[x('a','201','Daejon Love reaction is taking over',1),t('b','1234567890123456702','#DejonLove clip is everywhere',2),x('c','202','that Dejon Love meme keeps getting reposted',3)];
  const topics=detectTopics(rows,NOW,20);const hit=topics.find(row=>/d[ae]+jon/i.test(row.topic)||/d[ae]+jon/.test(row.key));
- assert(hit);assert(hit.authorCount>=3);assert(hit.evidenceCount>=3);
+ assert(hit);assert(hit.authorCount>=2);assert(hit.evidenceCount>=2);assert.equal(hit.tier,'candidate');
 });
 
 test('two independent lowercase mentions can enter pre-breakout without being promoted',()=>{
@@ -87,4 +87,33 @@ test('golden mixed replay finds known narratives while suppressing one-offs',()=
  assert(topics.some(row=>row.key==='astra'||row.topic.toLowerCase()==='astra'));
  assert(topics.some(row=>/d[ae]+jon/i.test(row.topic)||/d[ae]+jon/.test(row.key)));
  assert(!topics.some(row=>/^uniquephrase/.test(row.key)));
+});
+
+test('TikTok boilerplate hashtags are discovery seeds, never narratives',()=>{
+ const rows=[];
+ for(let i=0;i<10;i++)rows.push(t(`tag${i}`,`93345678901234567${10+i}`,'#fyp #viral #funny #capcut #trending',i+1));
+ const topics=detectTopics(rows,NOW,30);
+ assert.equal(topics.length,0,'platform boilerplate hashtags must not become narrative results');
+});
+
+test('Creative Center seed rows do not count as independent creators',()=>{
+ const seed={...t('TikTok Creative Center','9434567890123456701','#Astra',1),author:'TikTok Creative Center',url:'https://ads.tiktok.com/business/creativecenter/hashtag/astra',provenance:'Local Chrome browser · TikTok Creative Center trends'};
+ const rows=[seed,t('tagger','9434567890123456702','#Astra',2),x('a','901','astra is starting to pop up everywhere',3)];
+ assert(!detectTopics(rows,NOW,20).some(row=>row.key==='astra'||row.topic.toLowerCase()==='astra'),'one real text creator plus seed/hashtag rows must not qualify');
+ const withSecond=[...rows,x('b','902','people keep talking about astra today',4)];
+ const astra=detectTopics(withSecond,NOW,20).find(row=>row.key==='astra'||row.topic.toLowerCase()==='astra');
+ assert(astra);assert.equal(astra.authorCount,2);assert.equal(astra.tier,'pre-breakout');
+});
+
+test('natural narrative phrase outranks its TikTok hashtag alias',()=>{
+ const rows=[
+  x('a','911','Daejon Love sideline reaction is everywhere #DaejonLove',1),
+  t('b','9534567890123456701','people keep reposting the Daejon Love sideline reaction #fyp #DaejonLove',2),
+  x('c','912','Daejon Love sideline reaction became a meme overnight',3),
+ ];
+ const hit=detectTopics(rows,NOW,30).find(row=>/daejon love/i.test(row.topic)||/daejon love/i.test(row.key));
+ assert(hit,'expected the narrative cluster to surface');
+ assert(!hit.topic.startsWith('#'));
+ assert(!['fyp','viral','trending','capcut'].includes(hit.topic.toLowerCase()));
+ assert(hit.authorCount>=2);
 });
