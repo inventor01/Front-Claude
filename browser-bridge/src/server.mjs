@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
 import { dedupeEvidence, extractTikTokItemsFromJson, metricFromAria, normalizeConfig, sanitizeTopic, stableId } from './core.mjs';
-import { findSystemChrome, frontLoginProfileDir, openRegularChromeForLogin } from './system-browser.mjs';
+import { findSystemChrome, frontCdpUrl, frontLoginProfileDir, openRegularChromeForLogin } from './system-browser.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
@@ -12,6 +12,7 @@ const dataDir = process.env.FRONT_BRIDGE_DATA || path.join(os.homedir(), '.front
 const profileDir = frontLoginProfileDir(dataDir);
 const configPath = path.join(dataDir, 'config.json');
 const systemChrome = findSystemChrome();
+const cdpUrl = frontCdpUrl(Number(process.env.FRONT_BRIDGE_CDP_PORT || 43982));
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://believable-inspiration-production-a68b.up.railway.app',
   'https://front-narrative-desk.austinrock2000.chatgpt.site',
@@ -26,6 +27,7 @@ const allowedOrigins = new Set(
 );
 fs.mkdirSync(profileDir, { recursive: true });
 
+let browserConnection;
 let context;
 let config = normalizeConfig(readJson(configPath, {}));
 let running = false;
@@ -65,26 +67,27 @@ function json(req, res, status, body) {
   });
   res.end(payload);
 }
+
 async function ensureBrowser() {
-  if (context) return context;
+  if (context && browserConnection?.isConnected?.()) return context;
   if (!systemChrome) throw new Error('Google Chrome is required for authenticated X/TikTok scans. Install Chrome, then restart the Front browser bridge.');
   try {
-    context = await chromium.launchPersistentContext(profileDir, {
-      executablePath: systemChrome,
-      headless: process.env.FRONT_BRIDGE_HEADLESS === '1',
-      viewport: { width: 1440, height: 1000 },
-      locale: 'en-US',
+    browserConnection = await chromium.connectOverCDP(cdpUrl);
+    context = browserConnection.contexts()[0];
+    if (!context) throw new Error('Front Chrome did not expose its browser context.');
+    browserConnection.on('disconnected', () => {
+      browserConnection = undefined;
+      context = undefined;
     });
+    return context;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/profile|singleton|already in use|user data directory/i.test(message)) {
-      throw new Error('Front login Chrome is still open. Finish signing in, fully quit that Front Chrome window, then run the scan again.');
-    }
-    throw error;
+    browserConnection = undefined;
+    context = undefined;
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Front login Chrome is not available for scanning. Click Open X + TikTok login, finish signing in, and LEAVE that Front Chrome window open while scanning. (${detail})`);
   }
-  context.on('close', () => { context = undefined; });
-  return context;
 }
+
 async function newPage(url) {
   const browser = await ensureBrowser();
   const page = await browser.newPage();
@@ -230,7 +233,18 @@ async function collectAll(input = {}) {
 }
 
 function status() {
-  return { ok: true, service: 'front-browser-bridge', version: 2, running, lastRun, lastCount, lastError, config, loginBrowser: systemChrome ? 'system-chrome' : 'unavailable' };
+  return {
+    ok: true,
+    service: 'front-browser-bridge',
+    version: 3,
+    running,
+    lastRun,
+    lastCount,
+    lastError,
+    config,
+    loginBrowser: systemChrome ? 'system-chrome' : 'unavailable',
+    scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome',
+  };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -253,15 +267,14 @@ const server = http.createServer(async (req, res) => {
       return json(req, res, 200, await collectAll(JSON.parse(body || '{}')));
     }
     if (req.method === 'POST' && url.pathname === '/open-login') {
-      if (context) {
-        await context.close();
-        context = undefined;
-      }
       const opened = openRegularChromeForLogin({ dataDir, chromeExecutable: systemChrome });
+      browserConnection = undefined;
+      context = undefined;
       return json(req, res, 200, {
         ok: true,
-        message: 'Opened X and TikTok in regular Google Chrome using Front’s private local Chrome profile. Sign in normally, then fully quit that Front Chrome window before running a scan.',
+        message: 'Opened X and TikTok in regular Google Chrome using Front’s private local Chrome profile. Sign in normally and LEAVE this Front Chrome window open; Front now attaches to that exact logged-in session for scans.',
         profileDir: opened.profileDir,
+        cdpUrl: opened.cdpUrl,
       });
     }
     return json(req, res, 404, { error: 'Not found' });
@@ -275,5 +288,6 @@ server.listen(PORT, HOST, () => {
   console.log(`[front-bridge] listening on http://${HOST}:${PORT}`);
   console.log(`[front-bridge] browser profile: ${profileDir}`);
   console.log(`[front-bridge] login browser: ${systemChrome || 'Google Chrome not found'}`);
+  console.log(`[front-bridge] scan connection: ${cdpUrl}`);
   console.log(`[front-bridge] allowed origins: ${[...allowedOrigins].join(', ')}`);
 });
