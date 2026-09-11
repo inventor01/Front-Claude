@@ -1,5 +1,23 @@
 # Front Bug / Fix Log
 
+## 2026-09-11 — Unified dashboard lost old Desk usability
+
+### Root cause
+The first consolidation removed the legacy Desk from the homepage but did not migrate enough of its useful workflows into the replacement dashboard. That made the page visually simpler while losing important day-to-day usability: stored Radar narratives were not merged into the main narrative list when the newest detector set was empty, related coin candidates were hidden in a separate manager, delete controls were not available where items were viewed, there was no compact/collapsible browsing mode, and the single funnel mixed current-scan counts with persistent historical Radar counts. A state such as `390 collected → 347 usable → 0 topics → 38 radar → 0 coin checks queued` therefore looked internally contradictory even though the 38 Radar narratives were persisted from earlier scans and a queue count of zero could simply mean no checks were waiting.
+
+### Permanent fix
+- Merge fresh topic detections with all stored Radar narratives into one ranked narrative workspace so stored intelligence stays visible even when the newest scan has zero fresh topics.
+- Put stored related-coin candidates directly on narrative rows and add a dedicated Coins view with narrative/ticker/mint search, Pump.fun links, Axiom links and watchlist actions.
+- Add persistent dashboard dismissals for raw/early signals and unpromoted topic rows without deleting the underlying social evidence.
+- Add direct deletion for Radar narratives, stored narrative-coin candidates and stored launch matches.
+- Add row expansion for aliases, related context, origin evidence and coin details.
+- Add compact/comfortable density controls, whole-dashboard collapse, and Show More / Show All controls instead of forcing one fixed long layout.
+- Split the old misleading funnel into `CURRENT SCAN` and `STORED INTELLIGENCE` lanes, and show waiting versus completed coin checks separately.
+- Remove the redundant floating Radar Manager from the homepage because its primary delete/rematch/coin-inspection actions now live in the main dashboard.
+
+### Regression / release gate
+The release must still pass migrations, D1 persistence, unit tests, browser bridge tests, typecheck, lint and production build before merge.
+
 ## 2026-09-11 — Plain-word early-candidate leak
 
 ### Root cause
