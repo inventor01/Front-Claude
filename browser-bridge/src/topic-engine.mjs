@@ -13,7 +13,8 @@ const GENERIC_SINGLE=new Set((
   'post posts repost reposts reply replies comment comments share shares view views like likes follow follows part parts episode episodes full live new latest today tonight yesterday tomorrow update updates breaking news '+
   'meme memes viral virality trend trends trending funny reaction reactions clip clips edit edits account accounts user users profile profiles people person guy guys girl girls man men woman women bro dude someone somebody anyone anybody '+
   'everyone everybody thing things stuff something anything everything name names word words topic topics story stories love hate trade trading buy buying sell selling market markets coin coins token tokens crypto solana tiktok twitter x fyp foryou '+
-  'ever solo human back sonido sonidos originales esta este esto hacer hace haciendo hecho haber escucha escuchar escuchando canción cancion canciones música musica nuevo nueva nuevos nuevas hoy ayer mañana '+
+  'ever solo human back everywhere feed timeline discussion discussions appearing appears appear spreading spreads spread popping popped becoming became keeps keep again '+
+  'sonido sonidos originales esta este esto hacer hace haciendo hecho haber escucha escuchar escuchando canción cancion canciones música musica nuevo nueva nuevos nuevas hoy ayer mañana '+
   'звук звуки оригинальный оригинальная оригинальное оригинальные оригинал видео фото пост посты тренд тренды вирусный som sons originais postagem postagens compartilhar curtida curtidas tendance tendances originalton'
 ).split(/\s+/));
 const STOP=new Set((
@@ -47,12 +48,17 @@ function bestDisplayLabel(topic,rows){
  const candidates=[...new Set([topic.topic,...(topic.aliases||[])].map(cleanLabel).filter(Boolean))].filter((label)=>!genericLabel(label)).map((label)=>({label,...exactSupport(label,rows)})).filter((item)=>item.creators>=2).sort((a,b)=>{const aw=tokens(a.label).length,bw=tokens(b.label).length;const as=a.creators*8+a.platforms*3+Math.min(4,aw)*1.5-(aw>6?6:0);const bs=b.creators*8+b.platforms*3+Math.min(4,bw)*1.5-(bw>6?6:0);return bs-as||bw-aw||a.label.length-b.label.length;});
  if(candidates[0])return candidates[0].label;const repeated=repeatedContiguousPhrases(rows);if(repeated[0])return repeated[0].label;const fallback=cleanLabel(topic.topic||topic.key);return fallback&&!genericLabel(fallback)?fallback:'';
 }
-function stableIdentity(topic,display){
- const original=cleanLabel(topic?.key||'');
- // Keep the base detector's specific identity for momentum/history matching.
- // Display labels are allowed to become richer phrases without making Astra on
- // one scan a different topic from “astra everywhere” on the next scan.
- if(original&&!genericLabel(original)&&specificWords(original).length)return normalize(original);
+function stableIdentity(topic,display,rows){
+ const original=cleanLabel(topic?.key||''),originalWords=specificWords(original);
+ if(original&&!genericLabel(original)&&tokens(original).length===1&&originalWords.length===1)return normalize(original);
+ // When captions change across scans, use the one distinctive entity token all
+ // supporting creators still share. This keeps an emerging entity like Astra
+ // attached to the same history while the human title becomes richer.
+ if(rows.length>=2){
+  const common=[...new Set(specificWords(rows[0].content))].filter((word)=>rows.every((row)=>specificWords(row.content).includes(word)));
+  if(common.length===1&&common[0].length>=4)return common[0];
+ }
+ if(original&&!genericLabel(original)&&originalWords.length)return normalize(original);
  return normalize(display);
 }
 function mediaKey(row){return[row.soundId?`sound:${row.soundId}`:null,row.visualHash?`visual:${row.visualHash}`:null,row.quotedUrl?`quote:${row.quotedUrl}`:null,row.relatedVideoId?`parent:${row.relatedVideoId}`:null].filter(Boolean);}
@@ -72,7 +78,7 @@ function suppressFragments(rows){return rows.filter((candidate,index)=>!rows.som
 
 export function detectTopics(events=[],now=Date.now(),limit=15){
  const evidence=dedupeEvidence(events);const raw=baseDetectTopics(evidence,now,Math.max(limit*4,40));const repaired=[];
- for(const topic of raw){const rows=supportingRows(topic,evidence);const display=bestDisplayLabel(topic,rows);if(!keepTopic(topic,display,rows))continue;const labelEvidence=exactSupport(display,rows),crossPlatform=semanticCrossPlatform(rows,display);repaired.push({...topic,topic:display,key:stableIdentity(topic,display),aliases:[...new Set([display,topic.topic,...(topic.aliases||[])].map(cleanLabel).filter((value)=>value&&!genericLabel(value)))].filter((alias)=>tokens(alias).length>1||normalize(alias)===normalize(display)).slice(0,18),labelEvidence,crossPlatform,labelPolicy:'event-level-natural-phrase'});}
+ for(const topic of raw){const rows=supportingRows(topic,evidence);const display=bestDisplayLabel(topic,rows);if(!keepTopic(topic,display,rows))continue;const labelEvidence=exactSupport(display,rows),crossPlatform=semanticCrossPlatform(rows,display);repaired.push({...topic,topic:display,key:stableIdentity(topic,display,rows),aliases:[...new Set([display,topic.topic,...(topic.aliases||[])].map(cleanLabel).filter((value)=>value&&!genericLabel(value)))].filter((alias)=>tokens(alias).length>1||normalize(alias)===normalize(display)).slice(0,18),labelEvidence,crossPlatform,labelPolicy:'event-level-natural-phrase'});}
  const out=[];for(const topic of suppressFragments(repaired)){const duplicate=out.find((item)=>sameTopicKey(item.key||item.topic,topic.key||topic.topic));if(!duplicate)out.push(topic);}
  return out.sort((a,b)=>(b.score||0)-(a.score||0)||(b.authorCount||0)-(a.authorCount||0)).slice(0,Math.max(0,limit));
 }
