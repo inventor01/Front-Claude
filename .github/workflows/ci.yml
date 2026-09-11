@@ -65,14 +65,15 @@ jobs:
 
       - name: Browser bridge health smoke test
         run: |
-          node browser-bridge/src/server.mjs > /tmp/front-bridge.log 2>&1 &
+          node browser-bridge/src/server-v10.mjs > /tmp/front-bridge.log 2>&1 &
           BRIDGE_PID=$!
           trap 'kill $BRIDGE_PID || true' EXIT
           for i in {1..20}; do
             if curl --fail --silent http://127.0.0.1:43981/health > /tmp/front-bridge-health.json; then break; fi
             sleep 0.25
           done
-          node -e "const d=require('/tmp/front-bridge-health.json');if(!d.ok||d.service!=='front-browser-bridge')process.exit(1)"
+          cat /tmp/front-bridge.log || true
+          node -e "const d=require('/tmp/front-bridge-health.json');if(!d.ok||d.service!=='front-browser-bridge'||d.version!==10||d.scanner!=='for-you-adaptive')process.exit(1)"
 
       # verify.mjs replays the migrations through node:sqlite. This proves they
       # also apply through wrangler to a real D1, which is stricter (0002 uses
