@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Activity, ExternalLink, Radio, RefreshCw, Sparkles, Timer, TrendingUp } from 'lucide-react';
 import styles from './narrative-workbench.module.css';
 
@@ -38,10 +38,10 @@ async function getJson<T>(url:string):Promise<T>{const response=await fetch(url,
 export default function NarrativeWorkbench({narrativeId,topic}:Props){
  const [detail,setDetail]=useState<Detail|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
  async function load(){setBusy(true);setError('');try{const params=new URLSearchParams(narrativeId?{id:narrativeId}:{topic});setDetail(await getJson<Detail>('/api/narrative-detail?'+params));}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- useEffect(()=>{void load();},[narrativeId,topic]); // eslint-disable-line react-hooks/exhaustive-deps
+ useEffect(()=>{const timer=window.setTimeout(()=>void load(),0);return()=>window.clearTimeout(timer);},[narrativeId,topic]); // eslint-disable-line react-hooks/exhaustive-deps
  const latest=detail?.latest;
  const evidence=detail?.evidence??[];
- const distinctCreators=useMemo(()=>new Set(evidence.map(item=>`${item.platform}:${item.author.toLowerCase()}`)).size,[evidence]);
+ const distinctCreators=new Set(evidence.map(item=>`${item.platform}:${item.author.toLowerCase()}`)).size;
  const windows=[['15','15m'],['60','1h'],['360','6h'],['1440','24h']] as const;
  const edgeText=!detail?'':detail.edge.status==='waiting'?'No matching Pump.fun launch has been stored yet.':detail.edge.status==='before-launch'?`Front detected this ${duration(detail.edge.leadMs)} before the first matching stored launch.`:detail.edge.status==='after-launch'?`Front detected this ${duration(detail.edge.leadMs)} after the first matching stored launch.`:'Front detection and the first matching launch were recorded at about the same time.';
  const maxCreators=Math.max(1,...(detail?.snapshots??[]).map(s=>s.creators));
