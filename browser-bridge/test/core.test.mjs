@@ -72,12 +72,70 @@ test('infers only corroborated topics from multiple authors', () => {
     {platform:'X',author:'solo',url:'https://x.com/solo/status/3',content:'#OneOffThing',published:now-10000,views:900000,likes:50000},
   ];
   const topics = inferTopics(rows, now, 10);
-  const hit = topics.find((row) => row.key === 'dejonlove');
+  const hit = topics.find((row) => row.key === 'dejon love' || row.key === 'dejonlove' || row.topic.toLowerCase().includes('dejon'));
   assert(hit);
   assert.equal(hit.authorCount, 3);
   assert.equal(hit.evidenceCount, 3);
   assert.deepEqual(new Set(hit.platforms), new Set(['X','TikTok']));
+  assert.equal(hit.niche, true);
+  assert(hit.specificityScore > 0);
+  assert.equal(hit.anchors.length, 3);
+  assert.deepEqual(new Set(hit.anchors.map((anchor) => anchor.platform)), new Set(['X','TikTok']));
   assert(!topics.some((row) => row.key === 'oneoffthing'));
+});
+
+test('clusters narrative wording variants across creators and platforms', () => {
+  const now = 1789100000000;
+  const rows = [
+    {platform:'X',author:'alice',url:'https://x.com/alice/status/11',content:'Dejon Love reaction is taking over my feed',published:now-30000,views:12000,likes:900},
+    {platform:'TikTok',author:'bob',url:'https://www.tiktok.com/@bob/video/2234567890123456789',content:'that Dejon reaction has me crying #DejonLove',published:now-60000,views:180000,likes:14000},
+    {platform:'X',author:'carol',url:'https://x.com/carol/status/12',content:'Everyone keeps reposting the Dejon clip',published:now-90000,views:44000,likes:2500},
+  ];
+  const topics = inferTopics(rows, now, 10);
+  const hit = topics.find((row) => row.topic.toLowerCase().includes('dejon') || row.key.includes('dejon'));
+  assert(hit, 'expected Dejon variants to cluster into one corroborated topic');
+  assert.equal(hit.authorCount, 3);
+  assert.equal(hit.evidenceCount, 3);
+  assert.deepEqual(new Set(hit.platforms), new Set(['X','TikTok']));
+  assert.equal(hit.niche, true);
+  assert(hit.nicheEvidenceCount >= 2);
+  assert.equal(topics.filter((row) => row.topic.toLowerCase().includes('dejon') || row.key.includes('dejon')).length, 1, 'variant aliases should dedupe to one radar topic');
+});
+
+test('does not promote generic viral words by themselves', () => {
+  const now = 1789100000000;
+  const rows = [
+    {platform:'X',author:'alice',url:'https://x.com/alice/status/21',content:'This viral meme is funny',published:now-10000,views:1000,likes:100},
+    {platform:'TikTok',author:'bob',url:'https://www.tiktok.com/@bob/video/3234567890123456789',content:'another viral meme trend',published:now-20000,views:2000,likes:200},
+  ];
+  const topics = inferTopics(rows, now, 10);
+  assert(!topics.some((row) => ['viral','meme','trend','reaction'].includes(row.key)));
+});
+
+test('rejects broad category narratives without a niche hook', () => {
+  const now = 1789100000000;
+  const rows = [
+    {platform:'X',author:'alice',url:'https://x.com/alice/status/31',content:'Crypto market news is moving today',published:now-10000,views:20000,likes:500},
+    {platform:'TikTok',author:'bob',url:'https://www.tiktok.com/@bob/video/4234567890123456789',content:'More crypto market news this morning',published:now-20000,views:30000,likes:800},
+  ];
+  const topics = inferTopics(rows, now, 10);
+  assert.equal(topics.length, 0);
+});
+
+test('keeps a niche meme phrase instead of collapsing to a broad category', () => {
+  const now = 1789100000000;
+  const rows = [
+    {platform:'X',author:'alice',url:'https://x.com/alice/status/41',content:'Everyone is posting the Banana Phone Kid meme again',published:now-15000,views:42000,likes:2200},
+    {platform:'TikTok',author:'bob',url:'https://www.tiktok.com/@bob/video/5234567890123456789',content:'Banana Phone Kid reaction audio is everywhere',published:now-30000,views:210000,likes:19000},
+    {platform:'X',author:'carol',url:'https://x.com/carol/status/42',content:'That Banana Phone Kid clip is all over my feed',published:now-45000,views:65000,likes:3400},
+  ];
+  const topics = inferTopics(rows, now, 10);
+  const hit = topics.find((row) => row.topic.toLowerCase().includes('banana phone kid'));
+  assert(hit, 'expected the niche meme identity to be retained');
+  assert.equal(hit.niche, true);
+  assert(hit.specificityScore >= 4);
+  assert(hit.anchors.some((anchor) => /meme|reaction|clip/i.test(anchor.content)));
+  assert(!topics.some((row) => ['crypto','market','news','viral','meme'].includes(row.key)));
 });
 
 test('sanitizes topics', () => {
