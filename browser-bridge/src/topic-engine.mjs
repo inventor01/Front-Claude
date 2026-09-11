@@ -3,6 +3,7 @@ import { dedupeEvidence, extractHashtags, inferTopics } from './core.mjs';
 const STOP = new Set(('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i you your we our they their he she his her not no yes just very really new now today tonight yesterday tomorrow have has had do does did can could would should will may might about into over under after before more most some any all one two via amp rt https http com www video watch post posts people thing things time day get got like know think make made going go went see saw says said say look looks looking why how what when where who which there here want wants wanted gonna gotta lol omg yeah yep okay ok good great best bad big small still even much many another first last every literally actually').split(' '));
 const GENERIC = new Set(('meme memes viral virality reaction reactions reacts reacted clip clips trend trends trending story stories update updates breaking news funny wild crazy internet tiktok twitter tweet tweets x social media creator creators account accounts hashtag hashtags caption video videos photo photos sound user username profile').split(' '));
 const BROAD = new Set(('crypto cryptocurrency bitcoin btc ethereum eth solana market markets stocks stock politics political election elections sports football basketball baseball soccer music entertainment technology tech ai artificial intelligence gaming games celebrity celebrities world national local economy economic finance financial').split(' '));
+const COMMON_SINGLE = new Set(('never always sometimes often usually maybe probably perhaps someone somebody anyone anybody everyone everybody something anything everything nothing somewhere anywhere everywhere nowhere trade trading buy buying sell selling blue red green black white orange yellow pink purple brown grey gray dark light big small old young high low hot cold fast slow early late long short better worse best worst free paid money price prices cost costs deal deals work works working worked use used using try trying tried start started starting stop stopped stopping keep keeps keeping kept need needs needed want wants wanted help helps helped find finds found show shows showing see sees seeing look looks looking tell tells told ask asks asked say says said said feel feels felt think thinks thought know knows knew believe believes believed love loves loved hate hates hated like likes liked follow follows followed watch watches watched share shares shared click clicks clicked open opens opened close closes closed run runs running ran play plays playing played move moves moving moved turn turns turned call calls called name names named word words post posts video videos photo photos account accounts profile profiles creator creators user users person persons people guy guys girl girls man men woman women kid kids child children friend friends bro dude team teams game games song songs movie movies food foods car cars phone phones app apps site sites page pages link links number numbers thing things stuff part parts way ways place places home homes room rooms school schools job jobs business businesses company companies product products service services market markets coin coins token tokens story stories news update updates topic topics idea ideas question questions answer answers comment comments reply replies').split(' '));
 const UI = /^(?:show|show more|more|view|view more|read more|explore|home|for you|trending|trend|hashtag|hashtags|caption|video|videos|photo|photos|sound|original sound|profile|user|username|creator|account|quote|reply|replies|repost|reposts|like|likes|share|shares|views?)$/i;
 const METRIC = /^\s*[+$-]?\d+(?:[.,]\d+)?\s*(?:K|M|B|T|%|x)?(?:\s+(?:views?|likes?|posts?|shares?|comments?|replies?|reposts?))?\s*$/i;
 const SOCIAL_NOTIFICATION = /\b(?:and\s+\d[\d,.]*\s+others?\s+)?(?:liked|likes|reposted|reposts|quoted|quotes|followed|follows|mentioned|mentions|shared|shares)\s+(?:your|a|this)\s+(?:video|post|tweet|photo|comment|reply)\b/i;
@@ -11,6 +12,8 @@ const clean = (value) => String(value ?? '').replace(/([a-z\d])([A-Z])/g, '$1 $2
 const normalize = (value) => clean(value).normalize('NFKC').toLocaleLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const compact = (value) => normalize(value).replace(/\s+/g, '');
 const tokens = (value) => normalize(value).split(' ').filter((word) => word.length >= 3 && !STOP.has(word) && !GENERIC.has(word) && !BROAD.has(word) && !/^\d+$/.test(word));
+const topicTokens = (value) => tokens(value).filter((word) => !COMMON_SINGLE.has(word));
+const isPlainSingleWord = (value) => { const parts = normalize(value).split(' ').filter(Boolean); return parts.length === 1 && COMMON_SINGLE.has(parts[0]); };
 
 function editDistance(a, b) {
   if (a === b) return 0;
@@ -41,8 +44,8 @@ export function sameTopicKey(a, b) {
 
 function validLabel(label) {
   const value = clean(label);
-  if (!value || value.length < 3 || UI.test(value) || METRIC.test(value) || SOCIAL_NOTIFICATION.test(value)) return false;
-  return tokens(value).length > 0;
+  if (!value || value.length < 3 || UI.test(value) || METRIC.test(value) || SOCIAL_NOTIFICATION.test(value) || isPlainSingleWord(value)) return false;
+  return topicTokens(value).length > 0 || tokens(value).length >= 2;
 }
 
 function candidatesFor(event) {
@@ -56,7 +59,7 @@ function candidatesFor(event) {
   };
   for (const tag of extractHashtags(event.content, 15)) add(tag, 'hashtag', 3.4);
   for (const match of String(event.content).matchAll(/\b[A-Z][\p{L}\p{N}'’_-]{2,30}(?:\s+[A-Z][\p{L}\p{N}'’_-]{2,30}){0,2}\b/gu)) add(match[0], 'name', 2.8);
-  const words = normalize(event.content).split(' ').filter((word) => word.length >= 4 && word.length <= 30 && !STOP.has(word) && !GENERIC.has(word) && !BROAD.has(word) && !/\d/.test(word)).slice(0, 70);
+  const words = normalize(event.content).split(' ').filter((word) => word.length >= 4 && word.length <= 30 && !STOP.has(word) && !GENERIC.has(word) && !BROAD.has(word) && !COMMON_SINGLE.has(word) && !/\d/.test(word)).slice(0, 70);
   for (const word of words) add(word, 'token', 0.75);
   for (let size = 2; size <= 3; size++) for (let i = 0; i <= words.length - size; i++) add(words.slice(i, i + size).join(' '), 'phrase', size === 3 ? 1.2 : 1);
   return [...out.values()];
@@ -94,17 +97,19 @@ function supplementalTopics(events, now) {
   }
   return [...buckets.values()].flatMap((row) => {
     const evidence = [...row.evidence.values()], authorCount = row.authors.size, platformCount = row.platforms.size;
-    const structured = row.kinds.has('hashtag') || row.kinds.has('name');
-    const candidateEnough = structured ? authorCount >= 2 : authorCount >= 3 || (platformCount >= 2 && authorCount >= 2);
-    const preBreakoutEnough = authorCount >= 2 && evidence.length >= 2;
+    const label = [...row.labels.entries()].sort((a, b) => b[1] - a[1] || topicTokens(b[0]).length - topicTokens(a[0]).length || a[0].length - b[0].length)[0]?.[0] || row.key;
+    if (!validLabel(label)) return [];
+    const labelWordCount = normalize(label).split(' ').filter(Boolean).length;
+    const structured = row.kinds.has('hashtag') || (row.kinds.has('name') && labelWordCount >= 2);
+    const cross = platformCount > 1;
+    const candidateEnough = structured ? authorCount >= 2 : authorCount >= 3 || (cross && authorCount >= 2);
+    const preBreakoutEnough = authorCount >= 2 && evidence.length >= 2 && !isPlainSingleWord(label);
     if (!candidateEnough && !preBreakoutEnough) return [];
     const tier = candidateEnough ? 'candidate' : 'pre-breakout';
-    const label = [...row.labels.entries()].sort((a, b) => b[1] - a[1] || tokens(b[0]).length - tokens(a[0]).length || a[0].length - b[0].length)[0]?.[0] || row.key;
-    if (!validLabel(label)) return [];
     const dated = evidence.map((item) => item.published).filter((value) => Number.isFinite(value));
     const engagement = evidence.reduce((sum, item) => sum + Math.log10(1 + (item.views || 0)) + .35 * Math.log10(1 + (item.likes || 0)), 0);
     const recency = evidence.reduce((sum, item) => { const ageHours = item.published ? Math.max(0, (now - item.published) / 3600000) : 6; return sum + Math.max(.15, 1 / (1 + ageHours / 3)); }, 0);
-    const specificityScore = Math.min(10, tokens(label).length * 1.4 + (structured ? 1.6 : 0) + (platformCount > 1 ? .8 : 0) + Math.min(2, authorCount * .4));
+    const specificityScore = Math.min(10, topicTokens(label).length * 1.4 + (structured ? 1.6 : 0) + (platformCount > 1 ? .8 : 0) + Math.min(2, authorCount * .4));
     const score = row.weights + authorCount * 3.2 + platformCount * 2.5 + recency * 1.4 + Math.min(8, engagement * .35) + specificityScore;
     const anchors = [...evidence].sort((a, b) => ((b.views || 0) + 4 * (b.likes || 0)) - ((a.views || 0) + 4 * (a.likes || 0)) || (b.published || 0) - (a.published || 0)).slice(0, 3).map((item) => ({ id: item.id, platform: item.platform, author: item.author, url: item.url, content: String(item.content).slice(0, 260), published: item.published, views: item.views, likes: item.likes }));
     const aliases = [...new Set([label, ...row.labels.keys()])].slice(0, 12);
