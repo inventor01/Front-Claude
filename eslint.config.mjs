@@ -33,14 +33,13 @@ const eslintConfig = defineConfig([
     },
   },
   {
-    files: ["lib/narratives.ts", "app/desk.tsx", "app/lab/page.tsx"],
+    files: ["lib/narratives.ts", "lib/narratives-base.ts", "app/desk.tsx", "app/lab/page.tsx"],
     rules: {
-      // Third-party payloads are now parsed through lib/schemas.ts, so
-      // lib/providers.ts is held to the rule. What remains here is a different
-      // kind of debt: untyped D1 row shapes, the collector state blob this code
-      // writes itself, and browser-side `response.json()`. Those want generated
-      // row types and a typed API client, not runtime validation. Kept visible as
-      // warnings rather than silenced.
+      // narratives-base.ts is an immutable snapshot of the pre-v12 narrative
+      // engine retained so the typed v12 facade can override coin matching
+      // without silently changing the legacy evidence/lifecycle behavior.
+      // The same untyped D1 row debt already existed in lib/narratives.ts;
+      // keep it visible as warnings while holding new v12 code to strict lint.
       "@typescript-eslint/no-explicit-any": "warn",
     },
   },
