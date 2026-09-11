@@ -48,16 +48,19 @@ function bestDisplayLabel(topic,rows){
  const candidates=[...new Set([topic.topic,...(topic.aliases||[])].map(cleanLabel).filter(Boolean))].filter((label)=>!genericLabel(label)).map((label)=>({label,...exactSupport(label,rows)})).filter((item)=>item.creators>=2).sort((a,b)=>{const aw=tokens(a.label).length,bw=tokens(b.label).length;const as=a.creators*8+a.platforms*3+Math.min(4,aw)*1.5-(aw>6?6:0);const bs=b.creators*8+b.platforms*3+Math.min(4,bw)*1.5-(bw>6?6:0);return bs-as||bw-aw||a.label.length-b.label.length;});
  if(candidates[0])return candidates[0].label;const repeated=repeatedContiguousPhrases(rows);if(repeated[0])return repeated[0].label;const fallback=cleanLabel(topic.topic||topic.key);return fallback&&!genericLabel(fallback)?fallback:'';
 }
-function stableIdentity(topic,display,rows){
+function stableIdentity(topic,display,evidence){
  const original=cleanLabel(topic?.key||''),originalWords=specificWords(original);
- if(original&&!genericLabel(original)&&tokens(original).length===1&&originalWords.length===1)return normalize(original);
- // When captions change across scans, use the one distinctive entity token all
- // supporting creators still share. This keeps an emerging entity like Astra
- // attached to the same history while the human title becomes richer.
- if(rows.length>=2){
-  const common=[...new Set(specificWords(rows[0].content))].filter((word)=>rows.every((row)=>specificWords(row.content).includes(word)));
-  if(common.length===1&&common[0].length>=4)return common[0];
+ const candidates=[...new Set([...specificWords(display),...specificWords(topic?.topic||''),...specificWords(topic?.key||'')])];
+ const support=candidates.map((term)=>({
+  term,
+  creators:new Set(evidence.filter((row)=>specificWords(row.content).includes(term)).map(creatorKey)).size,
+ })).filter((entry)=>entry.creators>=2&&entry.term.length>=4).sort((a,b)=>b.creators-a.creators||b.term.length-a.term.length);
+ if(support.length){
+  const max=support[0].creators;
+  const leaders=support.filter((entry)=>entry.creators===max);
+  if(leaders.length===1)return leaders[0].term;
  }
+ if(original&&!genericLabel(original)&&tokens(original).length===1&&originalWords.length===1)return normalize(original);
  if(original&&!genericLabel(original)&&originalWords.length)return normalize(original);
  return normalize(display);
 }
@@ -78,7 +81,7 @@ function suppressFragments(rows){return rows.filter((candidate,index)=>!rows.som
 
 export function detectTopics(events=[],now=Date.now(),limit=15){
  const evidence=dedupeEvidence(events);const raw=baseDetectTopics(evidence,now,Math.max(limit*4,40));const repaired=[];
- for(const topic of raw){const rows=supportingRows(topic,evidence);const display=bestDisplayLabel(topic,rows);if(!keepTopic(topic,display,rows))continue;const labelEvidence=exactSupport(display,rows),crossPlatform=semanticCrossPlatform(rows,display);repaired.push({...topic,topic:display,key:stableIdentity(topic,display,rows),aliases:[...new Set([display,topic.topic,...(topic.aliases||[])].map(cleanLabel).filter((value)=>value&&!genericLabel(value)))].filter((alias)=>tokens(alias).length>1||normalize(alias)===normalize(display)).slice(0,18),labelEvidence,crossPlatform,labelPolicy:'event-level-natural-phrase'});}
+ for(const topic of raw){const rows=supportingRows(topic,evidence);const display=bestDisplayLabel(topic,rows);if(!keepTopic(topic,display,rows))continue;const labelEvidence=exactSupport(display,rows),crossPlatform=semanticCrossPlatform(rows,display);repaired.push({...topic,topic:display,key:stableIdentity(topic,display,evidence),aliases:[...new Set([display,topic.topic,...(topic.aliases||[])].map(cleanLabel).filter((value)=>value&&!genericLabel(value)))].filter((alias)=>tokens(alias).length>1||normalize(alias)===normalize(display)).slice(0,18),labelEvidence,crossPlatform,labelPolicy:'event-level-natural-phrase'});}
  const out=[];for(const topic of suppressFragments(repaired)){const duplicate=out.find((item)=>sameTopicKey(item.key||item.topic,topic.key||topic.topic));if(!duplicate)out.push(topic);}
  return out.sort((a,b)=>(b.score||0)-(a.score||0)||(b.authorCount||0)-(a.authorCount||0)).slice(0,Math.max(0,limit));
 }
