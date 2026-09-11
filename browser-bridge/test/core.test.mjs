@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dedupeEvidence, extractHashtags, extractTikTokItemsFromJson, inferTopics, metricFromAria, normalizeConfig, parseCompactNumber, sanitizeTopic, stableId, xTrendLabel } from '../src/core.mjs';
+import { cleanEvidenceContent, dedupeEvidence, extractHashtags, extractTikTokItemsFromJson, inferTopics, metricFromAria, normalizeConfig, parseCompactNumber, sanitizeTopic, stableId, xTrendLabel } from '../src/core.mjs';
 
 test('normalizes and caps bridge config', () => {
   const cfg = normalizeConfig({ intervalMinutes: 1, maxTrendQueries: 99, inferredTopicSearches: 99, scrollPasses: 99, maxFeedItems: 999, resultsPerQuery: 100, xAccounts: ['@abc', 'abc', 'bad handle'], keywords: [' Dejon Love ', '', 'x'] });
@@ -15,6 +15,9 @@ test('extracts TikTok items from nested JSON safely', () => { const items = extr
 test('extracts unique hashtag fallbacks', () => { assert.deepEqual(extractHashtags('Now #DejonLove then #viral and #DejonLove again', 5), ['DejonLove', 'viral']); });
 test('extracts an X trend label without metadata noise', () => { assert.equal(xTrendLabel('Trending in United States\n#DejonLove\n12.5K posts'), '#DejonLove'); });
 test('never promotes X interface labels such as show as a trend', () => { assert.equal(xTrendLabel('Show\nTrending in United States\n49ers\n18.2K posts'), '49ers'); assert.equal(xTrendLabel('Show more\nView more\n12K posts'), ''); });
+test('drops social notification chrome instead of treating it as post content', () => { assert.equal(cleanEvidenceContent('TikTok', 'throwing100s, Kay.Mareee and 47 others liked your video.', 'throwing100s'), ''); assert.equal(cleanEvidenceContent('TikTok', 'Kay.Mareee liked your video', 'Kay.Mareee'), ''); });
+test('keeps actual post text while removing author handles and engagement controls', () => { const cleaned=cleanEvidenceContent('X','Dejon Love\n@dejonlove\nThis 49ers reaction clip is everywhere 😂 #DejonLove\n12 replies\n44 likes\n8.2K views','dejonlove'); assert.match(cleaned,/49ers reaction clip/i); assert.match(cleaned,/#DejonLove/); assert.doesNotMatch(cleaned,/44 likes|8\.2K views|@dejonlove/i); });
+test('dedupe rejects notification-only evidence before inference', () => { const rows=dedupeEvidence([{platform:'TikTok',author:'throwing100s',url:'https://www.tiktok.com/@throwing100s/video/1234567890123456789',content:'throwing100s, Kay.Mareee and 47 others liked your video.'}]); assert.equal(rows.length,0); });
 
 test('infers only corroborated topics from multiple authors', () => {
   const now = 1789100000000;
