@@ -28,7 +28,7 @@ test('keeps niche Daejon/Dejon variant cluster and independent creators',()=>{
 });
 
 test('two independent lowercase mentions can enter pre-breakout without being promoted',()=>{
- const rows=[x('a','211','astra just popped up on my feed',1),t('b','1234567890123456712','anyone else seeing astra?',2)];
+ const rows=[x('a','211','astra just popped up on my feed',1),x('b','212','anyone else seeing astra?',2)];
  const hit=detectTopics(rows,NOW,20).find(row=>row.key==='astra'||row.topic.toLowerCase()==='astra');
  assert(hit);assert.equal(hit.tier,'pre-breakout');assert.equal(hit.corroborated,false);assert.equal(hit.authorCount,2);
 });
