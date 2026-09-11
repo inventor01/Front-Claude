@@ -57,6 +57,9 @@ jobs:
       - name: Test
         run: node tests/verify.mjs
 
+      - name: Request origin regression tests
+        run: node --test tests/request-origin.test.mjs
+
       - name: Browser bridge unit tests
         run: npm test --prefix browser-bridge
 
