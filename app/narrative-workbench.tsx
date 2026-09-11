@@ -16,7 +16,6 @@ type Evidence={id:string;platform:string;author:string;url:string;content:string
 type Relationship={related_key:string;related_title:string;relation:string;score:number;evidence_count:number;author_count:number;platforms:string[];observed:number};
 type CoinData={name?:string;symbol?:string;price?:number|null;liquidity?:number|null;volume?:number|null;volume24h?:number|null;marketCap?:number|null;matchReason?:string};
 type Coin={narrative:string;mint:string;observed:number;data:CoinData};
-type Launch={narrative:string;mint:string;observed:number;data:CoinData};
 type LaunchMatch={mint:string;name:string;symbol:string|null;seen:number;narrative:string|null;match_type:string;data:{narrativeTitle?:string}};
 type Detail={
  narrative:{id:string|null;title:string;aliases:string[];detectedAt:number|null;promotedAt:number|null;earliestEvidenceAt:number|null};
