@@ -39,8 +39,10 @@ type HotPost = {
   content:string;
   published:number|null;
   views:number|null;
+  likes:number|null;
   ageHours:number|null;
   viewsPerHour:number;
+  likesPerHour:number;
   hot:boolean;
   rising:boolean;
 };
@@ -58,7 +60,9 @@ type Row = {
   reasons:string[];
   hotPosts:HotPost[];
   maxViewsPerHour:number;
+  maxLikesPerHour:number;
   crossPostedCreators:number;
+  semanticCrossPlatformCreators:number;
   coins:Coin[];
   possibleCoins:Coin[];
   topMarketCap:number|null;
@@ -142,6 +146,12 @@ const usd = (n:number|null|undefined) => n == null
       notation:n >= 10000 ? 'compact' : 'standard',
       maximumFractionDigits:n >= 1 ? 2 : 8,
     }).format(n);
+
+const metric = (value:unknown) => {
+  if(value===null||value===undefined||value==='') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+};
 
 const ago = (ts:number|null|undefined, now:number) => {
   if(!ts || !now) return '—';
@@ -340,20 +350,21 @@ export default function FrontDesk(){
 
     <section className={styles.feed}>
       <div className={styles.feedHead}>
-        <div><h2>Priority feed</h2><p>Fast engagement + independent creators + cross-posting + verified coin matches rise to the top.</p></div>
+        <div><h2>Priority feed</h2><p>Fast engagement + independent creators + same-event cross-platform spread + verified coin matches rise to the top.</p></div>
         <span>{feed?.rows.length??0} qualified</span>
       </div>
 
       {(feed?.rows||[]).map((row,index)=>{
         const open = expanded===row.id;
         const detail = details[row.id];
+        const explosiveViews = row.hotPosts.some((post)=>post.viewsPerHour>=100000||(post.views!=null&&post.views>=100000&&(post.ageHours??99)<=6));
         return <article className={styles.card} key={row.id} data-hot={row.hotPosts.some((p)=>p.hot)||undefined}>
           <button className={styles.cardButton} onClick={()=>void toggle(row)}>
             <span className={styles.rank}>{index+1}</span>
             <div className={styles.cardMain}>
               <div className={styles.badges}>
                 <span className={styles.stage}>{row.stage}</span>
-                {row.hotPosts.some((p)=>p.hot)&&<span className={styles.hot}><Flame size={12}/>100K+ fast</span>}
+                {row.hotPosts.some((p)=>p.hot)&&<span className={styles.hot}><Flame size={12}/>{explosiveViews?'100K+ fast':'breakout engagement'}</span>}
                 {row.platforms.map((platform)=><span key={platform}>{platform}</span>)}
                 <span>{ago(renderAt-row.ageMs,renderAt)} old</span>
               </div>
@@ -361,7 +372,7 @@ export default function FrontDesk(){
               <div className={styles.metrics}>
                 <span><b>{row.creators}</b> creators</span>
                 <span><b>{row.posts}</b> posts</span>
-                <span><b>{compact(row.maxViewsPerHour)}</b> max views/hr</span>
+                {row.maxViewsPerHour>0?<span><b>{compact(row.maxViewsPerHour)}</b> max views/hr</span>:row.maxLikesPerHour>0?<span><b>{compact(row.maxLikesPerHour)}</b> max likes/hr</span>:<span>velocity metrics pending</span>}
                 {row.crossPostedCreators>0&&<span><b>{row.crossPostedCreators}</b> cross-post creators</span>}
               </div>
               <div className={styles.reasons}>{row.reasons.slice(0,5).map((reason)=><span key={reason}>{reason}</span>)}</div>
@@ -379,7 +390,7 @@ export default function FrontDesk(){
 
       {feed&&!feed.rows.length&&<div className={styles.empty}>
         <Sparkles size={24}/><h3>Clean slate.</h3>
-        <p>No narrative has cleared the independent-creator quality gate yet. Run a scan and Front will only surface specific, corroborated topics.</p>
+        <p>No specific event has cleared the quality + acceleration gate yet. Run a scan and Front will keep generic words out of the priority feed.</p>
       </div>}
     </section>
   </main>;
@@ -402,10 +413,16 @@ function Expanded({detail,row,now}:{detail:Detail;row:Row;now:number}){
 
     {row.hotPosts.length>0&&<section className={styles.section}>
       <h4><Flame size={14}/> Fast posts</h4>
-      <p className={styles.hint}>Front evaluates each post by its age and engagement instead of treating scrolling as detection.</p>
+      <p className={styles.hint}>Front evaluates each supporting post by age and engagement instead of treating scrolling as detection.</p>
       <div className={styles.postGrid}>{row.hotPosts.map((post)=><a href={post.url} target='_blank' rel='noreferrer' key={post.url}>
         <b>{post.platform} · @{post.author}</b>
-        <span>{compact(post.views)} views · {compact(post.viewsPerHour)} views/hr · {post.ageHours?.toFixed(1)??'—'}h old</span>
+        <span>{[
+          post.views!=null?`${compact(post.views)} views`:null,
+          post.viewsPerHour>0?`${compact(post.viewsPerHour)} views/hr`:null,
+          post.likes!=null?`${compact(post.likes)} likes`:null,
+          post.likesPerHour>0?`${compact(post.likesPerHour)} likes/hr`:null,
+          post.ageHours!=null?`${post.ageHours.toFixed(1)}h old`:null,
+        ].filter(Boolean).join(' · ')}</span>
         <p>{post.content}</p>
       </a>)}</div>
     </section>}
@@ -419,7 +436,7 @@ function Expanded({detail,row,now}:{detail:Detail;row:Row;now:number}){
           <div>
             <span className={styles.match} data-type={launch.match_type}>{launch.match_type}</span>
             <h5>{launch.name}{launch.symbol?` · ${launch.symbol}`:''}</h5>
-            <p>Market cap <b>{usd(Number(data.marketCap)||null)}</b> · liq {usd(Number(data.liquidity)||null)} · 24h vol {usd(Number(data.volume24h)||null)}</p>
+            <p>Market cap <b>{usd(metric(data.marketCap))}</b> · liq {usd(metric(data.liquidity))} · 24h vol {usd(metric(data.volume24h))}</p>
             <small>{String(data.matchReason||launch.match_type)}</small>
           </div>
           <div>
@@ -451,8 +468,15 @@ function Expanded({detail,row,now}:{detail:Detail;row:Row;now:number}){
         const published = item.published||item.first_seen;
         const hours = published&&now ? Math.max(1/60,(now-published)/3600000) : null;
         const viewsPerHour = item.views!=null&&hours ? item.views/hours : null;
+        const likesPerHour = item.likes!=null&&hours ? item.likes/hours : null;
         return <a href={item.url} target='_blank' rel='noreferrer' key={item.id}>
-          <div><b>{item.platform} · @{item.author}</b><span>{ago(published,now)} ago · {compact(item.views)} views{viewsPerHour!=null?` · ${compact(viewsPerHour)} views/hr`:''}</span></div>
+          <div><b>{item.platform} · @{item.author}</b><span>{[
+            `${ago(published,now)} ago`,
+            item.views!=null?`${compact(item.views)} views`:null,
+            viewsPerHour!=null?`${compact(viewsPerHour)} views/hr`:null,
+            item.likes!=null?`${compact(item.likes)} likes`:null,
+            item.views==null&&likesPerHour!=null?`${compact(likesPerHour)} likes/hr`:null,
+          ].filter(Boolean).join(' · ')}</span></div>
           <p>{item.content}</p>
           <small>{[
             item.creator_followers!=null?`${compact(item.creator_followers)} followers`:null,
