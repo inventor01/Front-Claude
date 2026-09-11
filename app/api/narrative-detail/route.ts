@@ -10,19 +10,20 @@ function parseJson<T>(value:string|null|undefined,fallback:T):T{try{return value
 function safeAliases(raw:string|null|undefined){const value=parseJson<unknown>(raw,[]);return Array.isArray(value)?value.filter((x):x is string=>typeof x==='string'&&x.trim().length>1).slice(0,24):[];}
 
 type NarrativeRow={id:string;title:string;aliases:string;created:number};
-type EvidenceRow={id:string;platform:string;author:string;url:string;content:string;published:number|null;first_seen:number;last_seen:number;provenance:string;views:number|null;likes:number|null;replies:number|null;reposts:number|null;bookmarks:number|null;quotes:number|null;comments:number|null;shares:number|null;saves:number|null;sound_id:string|null;sound_title:string|null;sound_author:string|null;media_type:string|null;quoted_url:string|null;cover_url:string|null;hashtags:string|null;feed_surface:string|null};
+type EvidenceRow={id:string;platform:string;author:string;url:string;content:string;published:number|null;first_seen:number;last_seen:number;provenance:string;views:number|null;likes:number|null;replies:number|null;reposts:number|null;bookmarks:number|null;quotes:number|null;comments:number|null;shares:number|null;saves:number|null;sound_id:string|null;sound_title:string|null;sound_author:string|null;media_type:string|null;quoted_url:string|null;cover_url:string|null;hashtags:string|null;feed_surface:string|null;creator_followers:number|null;outbound_urls:string|null;relation_type:string|null;related_video_id:string|null;visual_hash:string|null};
 type RelationshipRow={related_key:string;related_title:string;relation:string;score:number;evidence_count:number;author_count:number;platforms:string;observed:number};
 type CoinRow={narrative:string;mint:string;data:string;observed:number};
 type LaunchRow={mint:string;name:string;symbol:string|null;seen:number;narrative:string|null;match_type:string;data:string};
 type SnapshotRow={topic_key:string;topic_title:string;observed:number;tier:string;score:number;momentum:string;creators:number;evidence_count:number;platforms:string;origin_url:string|null;origin_published:number|null;aliases:string};
-type RichTopicRow={topic_key:string;observed:number;feed_penetration:number|null;feed_penetration_delta:number|null;feed_penetration_velocity:number|null;aliases:string;sound_signals:string};
+type RichTopicRow={topic_key:string;observed:number;feed_penetration:number|null;feed_penetration_delta:number|null;feed_penetration_velocity:number|null;aliases:string;sound_signals:string;visual_signals:string|null;semantic_merge:string|null;origin_research:string|null};
 
 function unique(values:string[]){const out=new Map<string,string>();for(const value of values){const clean=value.replace(/\s+/g,' ').trim();const key=normalize(clean);if(key&&!out.has(key))out.set(key,clean);}return[...out.values()];}
 function snapshotMatches(row:SnapshotRow,keys:Set<string>){if(keys.has(normalize(row.topic_key))||keys.has(normalize(row.topic_title)))return true;return safeAliases(row.aliases).some(alias=>keys.has(normalize(alias)));}
 function richSnapshotMatches(row:RichTopicRow,keys:Set<string>){if(keys.has(normalize(row.topic_key)))return true;return safeAliases(row.aliases).some(alias=>keys.has(normalize(alias)));}
 const richEvidenceSelect=`
  er.replies,er.reposts,er.bookmarks,er.quotes,er.comments,er.shares,er.saves,
- er.sound_id,er.sound_title,er.sound_author,er.media_type,er.quoted_url,er.cover_url,er.hashtags,er.feed_surface`;
+ er.sound_id,er.sound_title,er.sound_author,er.media_type,er.quoted_url,er.cover_url,er.hashtags,er.feed_surface,
+ er.creator_followers,er.outbound_urls,er.relation_type,er.related_video_id,er.visual_hash`;
 const richEvidenceJoin=`LEFT JOIN evidence_rich er ON er.owner=e.owner AND er.id=e.id AND er.observed=(SELECT MAX(er2.observed) FROM evidence_rich er2 WHERE er2.owner=e.owner AND er2.id=e.id)`;
 
 export async function GET(request:Request){
@@ -55,7 +56,7 @@ export async function GET(request:Request){
   const richKeys=new Set(aliases.map(normalize).filter(Boolean));
   let richSnapshots:RichTopicRow[]=[];
   try{
-   const rows=await db().prepare('SELECT topic_key,observed,feed_penetration,feed_penetration_delta,feed_penetration_velocity,aliases,sound_signals FROM topic_rich_snapshots WHERE owner=? AND observed>? ORDER BY observed ASC LIMIT 4000').bind(user.userId,Date.now()-14*86400000).all<RichTopicRow>();
+   const rows=await db().prepare('SELECT topic_key,observed,feed_penetration,feed_penetration_delta,feed_penetration_velocity,aliases,sound_signals,visual_signals,semantic_merge,origin_research FROM topic_rich_snapshots WHERE owner=? AND observed>? ORDER BY observed ASC LIMIT 4000').bind(user.userId,Date.now()-14*86400000).all<RichTopicRow>();
    richSnapshots=rows.results.filter(row=>richSnapshotMatches(row,richKeys));
   }catch{richSnapshots=[];}
   const latestRich=richSnapshots.at(-1)||null;
@@ -92,21 +93,23 @@ export async function GET(request:Request){
   const detectedCandidates=[narrative?.created||null,...snapshots.map(row=>row.observed)].filter((v):v is number=>typeof v==='number'&&v>0);
   const detectedAt=detectedCandidates.length?Math.min(...detectedCandidates):null;
   const evidenceTimes=evidence.map(row=>row.published||row.first_seen).filter((v):v is number=>Number.isFinite(v)&&v>0);
-  const earliestEvidenceAt=evidenceTimes.length?Math.min(...evidenceTimes):latest?.origin_published||null;
+  const richOrigin=parseJson<Record<string,unknown>|null>(latestRich?.origin_research,null);
+  const richOriginPublished=typeof richOrigin?.published==='number'?richOrigin.published:null;
+  const earliestEvidenceAt=evidenceTimes.length?Math.min(...evidenceTimes):richOriginPublished||latest?.origin_published||null;
   const firstLaunchAt=launches.length?launches[0].seen:null;
   const leadMs=detectedAt&&firstLaunchAt?firstLaunchAt-detectedAt:null;
 
   return json({
    narrative:{id:narrative?.id||null,title:narrative?.title||latest?.topic_title||requestedTopic,aliases,detectedAt,promotedAt:narrative?.created||null,earliestEvidenceAt},
-   latest:latest?{key:latest.topic_key,title:latest.topic_title,observed:latest.observed,tier:latest.tier,score:latest.score,momentum:parseJson(latest.momentum,{}),creators:latest.creators,evidenceCount:latest.evidence_count,platforms:parseJson<string[]>(latest.platforms,[]),origin:latest.origin_url?{url:latest.origin_url,published:latest.origin_published}:null,feedPenetration:latestRich?.feed_penetration??null,feedPenetrationDelta:latestRich?.feed_penetration_delta??null,feedPenetrationVelocity:latestRich?.feed_penetration_velocity??null,soundSignals:parseJson(latestRich?.sound_signals,[])}:null,
+   latest:latest?{key:latest.topic_key,title:latest.topic_title,observed:latest.observed,tier:latest.tier,score:latest.score,momentum:parseJson(latest.momentum,{}),creators:latest.creators,evidenceCount:latest.evidence_count,platforms:parseJson<string[]>(latest.platforms,[]),origin:richOrigin|| (latest.origin_url?{url:latest.origin_url,published:latest.origin_published}:null),feedPenetration:latestRich?.feed_penetration??null,feedPenetrationDelta:latestRich?.feed_penetration_delta??null,feedPenetrationVelocity:latestRich?.feed_penetration_velocity??null,soundSignals:parseJson(latestRich?.sound_signals,[]),visualSignals:parseJson(latestRich?.visual_signals,[]),semanticMerge:parseJson(latestRich?.semantic_merge,{})}:null,
    snapshots:snapshots.slice(-48).map(row=>({observed:row.observed,tier:row.tier,score:row.score,creators:row.creators,evidenceCount:row.evidence_count,platforms:parseJson<string[]>(row.platforms,[]),momentum:parseJson(row.momentum,{})})),
    feedHistory:richSnapshots.slice(-48).map(row=>({observed:row.observed,feedPenetration:row.feed_penetration,feedPenetrationDelta:row.feed_penetration_delta,feedPenetrationVelocity:row.feed_penetration_velocity})),
-   evidence:evidence.slice(0,20).map(row=>({...row,hashtags:parseJson<string[]>(row.hashtags,[])})),
+   evidence:evidence.slice(0,20).map(row=>({...row,hashtags:parseJson<string[]>(row.hashtags,[]),outbound_urls:parseJson<string[]>(row.outbound_urls,[])})),
    relationships:relationships.map(row=>({...row,platforms:parseJson<string[]>(row.platforms,[])})),
    coins:coins.map(row=>({...row,data:parseJson(row.data,{})})),
    launches:launches.map(row=>({...row,data:parseJson(row.data,{})})),
    edge:{detectedAt,firstLaunchAt,leadMs,status:firstLaunchAt==null?'waiting':leadMs!=null&&leadMs>0?'before-launch':leadMs!=null&&leadMs<0?'after-launch':'same-time'},
-   note:'Front detection time is the earliest stored topic snapshot or Radar creation time. Earliest evidence is the earliest sampled evidence Front has, not a guarantee of the absolute first internet post. For You penetration and engagement fields are shown only when the platform exposed them during collection.',
+   note:'Front detection time is the earliest stored topic snapshot or Radar creation time. Origin research deep-scrolls narrative aliases and parent/quoted evidence; the earliest result is Front’s earliest verified find, not a guarantee of the absolute first internet post. For You penetration, creator size, relation, visual-hash and engagement fields are shown only when the platform exposed or Front could safely derive them.',
    at:Date.now(),
   });
  }catch(error){return json({error:(error as Error).message},500);}
