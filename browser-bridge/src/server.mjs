@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
-import { dedupeEvidence, extractHashtags, extractTikTokItemsFromJson, inferTopics, metricFromAria, normalizeConfig, sanitizeTopic, stableId, xTrendLabel } from './core.mjs';
+import { cleanEvidenceContent, dedupeEvidence, extractHashtags, extractTikTokItemsFromJson, inferTopics, metricFromAria, normalizeConfig, sanitizeTopic, stableId, xTrendLabel } from './core.mjs';
 import { findSystemChrome, frontCdpUrl, frontLoginProfileDir, openRegularChromeForLogin, stopExistingFrontChrome, waitForCdp } from './system-browser.mjs';
 
 const HOST = '127.0.0.1';
@@ -102,18 +102,21 @@ async function extractXArticles(page, limit, provenance) {
   const out = [];
   for (let i = 0; i < count; i++) {
     const article = articles.nth(i);
-    const text = (await article.innerText().catch(() => '')).trim();
-    if (!text) continue;
     const href = await article.locator('a[href*="/status/"]').first().getAttribute('href').catch(() => null);
     if (!href) continue;
     const url = href.startsWith('http') ? href : `https://x.com${href}`;
     const dt = await article.locator('time').first().getAttribute('datetime').catch(() => null);
     const published = dt && Number.isFinite(Date.parse(dt)) ? Date.parse(dt) : null;
-    const aria = await article.getAttribute('aria-label').catch(() => '') || text;
+    const wholeText = (await article.innerText().catch(() => '')).trim();
+    const aria = await article.getAttribute('aria-label').catch(() => '') || wholeText;
     const views = metricFromAria(aria, 'views');
     const likes = metricFromAria(aria, 'likes');
     const authorHref = await article.locator('a[href^="/"][role="link"]').first().getAttribute('href').catch(() => null);
     const author = authorHref ? authorHref.split('/').filter(Boolean)[0] : 'X';
+    const tweetTextParts = await article.locator('[data-testid="tweetText"]').allInnerTexts().catch(() => []);
+    const directText = tweetTextParts.map((value) => value.trim()).filter(Boolean).join(' ');
+    const text = cleanEvidenceContent('X', directText || wholeText, author);
+    if (!text) continue;
     out.push({id:stableId('X',url,text),platform:'X',author,url,content:text,published,views,likes,provenance});
   }
   return dedupeEvidence(out);
@@ -190,13 +193,20 @@ async function extractTikTokPage(page, provenance, limit) {
   for (let i = 0; i < anchorCount; i++) {
     const a = anchors.nth(i); const href = await a.getAttribute('href').catch(() => null); if (!href) continue;
     const match = href.match(/\/@([^/]+)\/video\/(\d{10,25})/); if (!match || byId.has(match[2])) continue;
-    const text = (await a.locator('xpath=..').innerText().catch(() => '') || await a.innerText().catch(() => '')).trim();
+    const aria = (await a.getAttribute('aria-label').catch(() => null) || '').trim();
+    const title = (await a.getAttribute('title').catch(() => null) || '').trim();
+    const imageAlt = (await a.locator('img').first().getAttribute('alt').catch(() => null) || '').trim();
+    const anchorText = (await a.innerText().catch(() => '')).trim();
+    const candidates = [aria, title, imageAlt, anchorText].map((value) => cleanEvidenceContent('TikTok', value, match[1])).filter(Boolean);
+    const text = candidates.find((value) => value.length >= 4) || '';
     if (text) byId.set(match[2], {id:match[2],content:text,author:match[1],published:null,views:null,likes:null});
   }
-  return [...byId.values()].slice(0, limit).map((item) => {
+  return [...byId.values()].slice(0, limit).flatMap((item) => {
     const author = item.author || 'TikTok';
     const url = author !== 'TikTok' ? `https://www.tiktok.com/@${author}/video/${item.id}` : `https://www.tiktok.com/video/${item.id}`;
-    return {id:`tiktok:browser:${item.id}`,platform:'TikTok',author,url,content:item.content,published:item.published,views:item.views,likes:item.likes,provenance};
+    const content = cleanEvidenceContent('TikTok', item.content, author);
+    if (!content) return [];
+    return [{id:`tiktok:browser:${item.id}`,platform:'TikTok',author,url,content,published:item.published,views:item.views,likes:item.likes,provenance}];
   });
 }
 
@@ -299,7 +309,7 @@ function scheduleNext() {
   scheduleTimer.unref?.();
 }
 
-function status(){return{ok:true,service:'front-browser-bridge',version:6,running,lastRun,lastCount,lastError,lastTopics,config,pendingCount:pendingEvidence.length,nextScheduledRun,loginBrowser:systemChrome?'system-chrome':'unavailable',scanConnection:browserConnection?.isConnected?.()?'attached':'waiting-for-front-chrome',cdpUrl};}
+function status(){return{ok:true,service:'front-browser-bridge',version:7,running,lastRun,lastCount,lastError,lastTopics,config,pendingCount:pendingEvidence.length,nextScheduledRun,loginBrowser:systemChrome?'system-chrome':'unavailable',scanConnection:browserConnection?.isConnected?.()?'attached':'waiting-for-front-chrome',cdpUrl};}
 
 const server=http.createServer(async(req,res)=>{
   if(!originAllowed(req))return json(req,res,403,{error:'Origin not allowed.'});
