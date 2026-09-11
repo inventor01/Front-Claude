@@ -1,19 +1,24 @@
 import { spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { projectRoot } from "./sites-env.mjs";
 
 const port = String(process.env.PORT || "8787");
 const host = process.env.HOST || "0.0.0.0";
+const persistDir = process.env.FRONT_PERSIST_DIR
+  ? path.resolve(process.env.FRONT_PERSIST_DIR)
+  : path.join(projectRoot, ".wrangler/state");
+mkdirSync(persistDir, { recursive: true });
 
 // Railway/standalone containers do not get the ChatGPT Sites control-plane
-// migration step, so make the local D1 schema ready before serving requests.
+// migration step, so make the same persistent D1 schema ready before serving.
 const migrate = spawnSync(
   process.execPath,
   [path.join(projectRoot, "scripts/migrate-local.mjs")],
   {
     cwd: projectRoot,
     stdio: "inherit",
-    env: process.env,
+    env: { ...process.env, FRONT_PERSIST_DIR: persistDir },
   },
 );
 if (migrate.error) throw migrate.error;
@@ -29,7 +34,7 @@ const args = [
   path.join(projectRoot, "dist/server/wrangler.json"),
   "--local",
   "--persist-to",
-  path.join(projectRoot, ".wrangler/state"),
+  persistDir,
   "--ip",
   host,
   "--port",
@@ -69,6 +74,7 @@ if (forwardedWorkerVariableNames.length) {
     `[front] Forwarding Worker bindings: ${forwardedWorkerVariableNames.join(", ")}`,
   );
 }
+console.log(`[front] D1 persistence directory: ${persistDir}`);
 
 const server = spawnSync(process.execPath, args, {
   cwd: projectRoot,
