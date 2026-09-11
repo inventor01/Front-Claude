@@ -57,6 +57,19 @@ function evidenceFrom(value: unknown): Evidence | null {
   };
 }
 
+function normalizedNarrativeId(value: string) {
+  return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function trendNarrativeKey(row: Evidence) {
+  if (!/X Explore|TikTok Creative Center|TikTok Explore fallback/i.test(row.provenance)) return null;
+  const first = row.content.split('·')[0]?.replace(/^#/, '').replace(/\s+/g, ' ').trim() || '';
+  const normalized = normalizedNarrativeId(first);
+  if (normalized.length < 2 || normalized.length > 80) return null;
+  if (/^(trending|viral|news|meme|memes|fyp|for you)$/i.test(first)) return null;
+  return first;
+}
+
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return json({ error: 'Please sign in to save browser evidence.' }, 401);
@@ -68,7 +81,16 @@ export async function POST(request: Request) {
     const accepted = body.evidence.map(evidenceFrom).filter((row): row is Evidence => Boolean(row));
     if (!accepted.length && body.evidence.length) return json({ error: 'No valid X or TikTok evidence records were supplied.' }, 400);
     const at = Date.now();
-    for (const row of accepted) await saveEvidence(db(), user.userId, row, at);
+
+    for (const row of accepted) {
+      const trendKey = trendNarrativeKey(row);
+      if (trendKey) {
+        const normalized = normalizedNarrativeId(trendKey);
+        await db().prepare('INSERT INTO narratives(owner,id,title,aliases,created) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING')
+          .bind(user.userId, `auto:${normalized}`, trendKey, JSON.stringify([trendKey]), at).run();
+      }
+      await saveEvidence(db(), user.userId, row, at);
+    }
 
     let matchedNarratives = 0;
     if (accepted.length) {
