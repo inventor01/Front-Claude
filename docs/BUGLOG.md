@@ -1,5 +1,13 @@
 # Front bug / change log
 
+## 2026-09-11 — Scan could not attach to Front Chrome (`ECONNREFUSED 127.0.0.1:43982`)
+
+**Root cause:** An older dedicated Front Chrome process could remain alive from a previous login launch that did not include the remote-debugging flags. When Front later launched Chrome with `--remote-debugging-port=43982`, Chrome reused the already-running process for that profile and silently ignored the new startup flags. The tabs opened, but no DevTools endpoint listened on 127.0.0.1:43982, so every scan failed before collection with `ECONNREFUSED`.
+
+**Permanent fix:** Before opening the Front login browser, the bridge now terminates only Chrome processes using Front's private `~/.front-browser-bridge/chrome-profile`, waits for the profile to release, launches a fresh Chrome process with the loopback DevTools endpoint, and actively polls `/json/version` until Chrome returns a WebSocket debugger URL. `/open-login` now returns success only after the scan connection is actually ready. Chrome is also launched with background mode disabled and a new window to reduce stale-profile reuse.
+
+**Regression protection:** Added tests for targeted Front-profile termination, DevTools readiness polling/retry, loopback-only debugging arguments, and the dedicated login profile. Bridge status is version 4 and exposes the CDP URL for diagnostics.
+
 ## 2026-09-11 — Scans returned zero because login Chrome locked the authenticated profile
 
 **Root cause:** Front first opened a dedicated regular Chrome profile for X/TikTok login, then tried to launch a second Playwright-controlled Chrome process against that exact same profile for scanning. Chrome correctly locked the profile while the login browser was alive, so both X and TikTok collectors failed before navigation with the same profile-in-use error. Closing the login browser avoided the lock but also made the UX brittle and contradicted the goal of using the exact trusted logged-in browser session.
