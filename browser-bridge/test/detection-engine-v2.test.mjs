@@ -21,6 +21,22 @@ test('recovers repeated lowercase Astra without promoting random neighboring wor
  assert(!topics.some(row=>row.key==='sandwich'),'one-off lowercase tokens must not surface');
 });
 
+test('rejects repeated plain English words as topics while keeping a specific phrase',()=>{
+ const rows=[
+  x('a','111','Never thought someone would trade the Blue one',1),
+  x('b','112','someone said never trade the blue version',2),
+  t('c','1234567890123456711','Blue is what someone picked, never trade it',3),
+  x('d','113','trade it blue if someone says never',4),
+  x('e','114','the Blue Smurf Cat meme is suddenly everywhere',5),
+  t('f','1234567890123456712','people keep posting Blue Smurf Cat today',6),
+  x('g','115','Blue Smurf Cat is all over my feed',7),
+ ];
+ const topics=detectTopics(rows,NOW,30);
+ const labels=topics.map(row=>row.topic.toLowerCase());
+ for(const word of ['never','blue','trade','someone']) assert(!labels.includes(word),`${word} must not become an early candidate`);
+ assert(topics.some(row=>/blue smurf cat/i.test(row.topic)),'specific multi-word narrative should still surface');
+});
+
 test('keeps niche Daejon/Dejon variant cluster and independent creators',()=>{
  const rows=[x('a','201','Daejon Love reaction is taking over',1),t('b','1234567890123456702','#DejonLove clip is everywhere',2),x('c','202','that Dejon Love meme keeps getting reposted',3)];
  const topics=detectTopics(rows,NOW,20);const hit=topics.find(row=>/d[ae]+jon/i.test(row.topic)||/d[ae]+jon/.test(row.key));
