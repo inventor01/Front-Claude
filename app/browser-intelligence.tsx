@@ -40,6 +40,15 @@ type Narrative = {
   platforms: string[];
 };
 
+type StoredResult = {
+  accepted?: number;
+  rejected?: number;
+  freshNarratives?: number;
+  matchedNarratives?: number;
+  freshCoins?: number;
+  error?: string;
+};
+
 const DEFAULT_CONFIG: BridgeConfig = {
   enabled: true,
   intervalMinutes: 15,
@@ -70,7 +79,7 @@ async function saveEvidence(evidence: Evidence[]) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ evidence }),
   });
-  const data = await response.json() as { accepted?: number; rejected?: number; error?: string };
+  const data = await response.json() as StoredResult;
   if (!response.ok) throw new Error(data.error || 'Could not save browser evidence.');
   return data;
 }
@@ -157,13 +166,21 @@ export default function BrowserIntelligence() {
         body: JSON.stringify({ ...config, xAccounts: lines(accounts), keywords: lines(keywords) }),
       });
       setLastScan(result);
-      setMessage(`Collection finished: ${result.evidence.length} evidence record(s). Saving them to Front…`);
+      setMessage(`Collection finished: ${result.evidence.length} evidence record(s). Saving and matching narratives…`);
       const stored = await saveEvidence(result.evidence);
       const cards = await fetchNarratives();
       setNarratives(cards.slice(0, 8));
       setConnected(true);
       const warning = result.errors.length ? ` ${result.errors.length} source warning(s); details shown below.` : '';
-      setMessage(`Scan complete. Saved ${stored.accepted || 0} browser evidence records. X ${result.evidence.filter((x) => x.platform === 'X').length} · TikTok ${result.evidence.filter((x) => x.platform === 'TikTok').length}.${warning}`);
+      const promoted = stored.freshNarratives ? ` ${stored.freshNarratives} narrative${stored.freshNarratives === 1 ? '' : 's'} promoted to Narrative Radar.` : '';
+      const coins = stored.freshCoins ? ` ${stored.freshCoins} related coin candidate${stored.freshCoins === 1 ? '' : 's'} stored.` : '';
+      setMessage(`Scan complete. Saved ${stored.accepted || 0} browser evidence records. X ${result.evidence.filter((x) => x.platform === 'X').length} · TikTok ${result.evidence.filter((x) => x.platform === 'TikTok').length}.${promoted}${coins}${warning}`);
+      if ((stored.accepted || 0) > 0) {
+        // The main Desk owns its own client-side discovery state. A reload is the
+        // most reliable cross-component handoff: Discover then requests the merged
+        // public + stored-browser Narrative Radar feed immediately.
+        window.setTimeout(() => window.location.reload(), 900);
+      }
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(''); }
   }
