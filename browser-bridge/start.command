@@ -36,6 +36,26 @@ if [ ! -x "$PLAYWRIGHT_EXECUTABLE" ]; then
   exit 1
 fi
 
+# v13 changes the definition of a promotable narrative. On the first v13 start,
+# remove stale v10/v11 active scan state so junk topics cannot be reintroduced
+# from the local queue/history after the server has been cleared. Preserve the
+# files in a private local archive and leave login/profile, config, source
+# reputation, creator stats and visual caches untouched.
+FRONT_DATA_DIR="${FRONT_BRIDGE_DATA:-$HOME/.front-browser-bridge}"
+QUALITY_MARKER="$FRONT_DATA_DIR/.quality-reset-v13.done"
+if [ ! -f "$QUALITY_MARKER" ]; then
+  ARCHIVE_DIR="$FRONT_DATA_DIR/archive/v13-quality-reset-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$ARCHIVE_DIR"
+  for file in pending-evidence.json topic-history.json feed-seen-v10.json feed-penetration-v10.json sentinel-rotation-v10.json auto-deep-v11.json; do
+    if [ -f "$FRONT_DATA_DIR/$file" ]; then
+      mv "$FRONT_DATA_DIR/$file" "$ARCHIVE_DIR/$file"
+    fi
+  done
+  mkdir -p "$FRONT_DATA_DIR"
+  printf 'v13 quality reset completed at %s\narchive=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ARCHIVE_DIR" > "$QUALITY_MARKER"
+  echo "Front v13: archived old active scanner state and started with a clean feed."
+fi
+
 # Login happens in regular visible Chrome. Collection should be invisible by
 # default so clicking Run browser scan does not pop up a disposable blank/search
 # window. Set FRONT_BRIDGE_HEADLESS=0 before launching only when debugging.
