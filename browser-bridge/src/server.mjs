@@ -10,6 +10,18 @@ const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
 const dataDir = process.env.FRONT_BRIDGE_DATA || path.join(os.homedir(), '.front-browser-bridge');
 const profileDir = path.join(dataDir, 'profile');
 const configPath = path.join(dataDir, 'config.json');
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://believable-inspiration-production-a68b.up.railway.app',
+  'https://front-narrative-desk.austinrock2000.chatgpt.site',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+];
+const allowedOrigins = new Set(
+  (process.env.FRONT_ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS.join(','))
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
 fs.mkdirSync(profileDir, { recursive: true });
 
 let context;
@@ -26,15 +38,28 @@ function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(value, null, 2));
 }
-function json(res, status, body) {
+function corsHeaders(req) {
+  const origin = req.headers.origin;
+  const headers = {
+    'Access-Control-Allow-Headers': 'content-type',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Private-Network': 'true',
+    'Vary': 'Origin, Access-Control-Request-Private-Network',
+  };
+  if (origin && allowedOrigins.has(origin)) headers['Access-Control-Allow-Origin'] = origin;
+  return headers;
+}
+function originAllowed(req) {
+  const origin = req.headers.origin;
+  return !origin || allowedOrigins.has(origin);
+}
+function json(req, res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(payload),
     'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'content-type',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    ...corsHeaders(req),
   });
   res.end(payload);
 }
@@ -193,26 +218,27 @@ async function collectAll(input = {}) {
 }
 
 function status() {
-  return { ok: true, service: 'front-browser-bridge', version: 1, running, lastRun, lastCount, lastError, config, profileDir };
+  return { ok: true, service: 'front-browser-bridge', version: 1, running, lastRun, lastCount, lastError, config };
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'OPTIONS') return json(res, 204, {});
+  if (!originAllowed(req)) return json(req, res, 403, { error: 'Origin not allowed.' });
+  if (req.method === 'OPTIONS') return json(req, res, 204, {});
   const url = new URL(req.url || '/', `http://${HOST}:${PORT}`);
   try {
-    if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, status());
-    if (req.method === 'GET' && url.pathname === '/config') return json(res, 200, config);
+    if (req.method === 'GET' && url.pathname === '/health') return json(req, res, 200, status());
+    if (req.method === 'GET' && url.pathname === '/config') return json(req, res, 200, config);
     if (req.method === 'POST' && url.pathname === '/config') {
       let body = '';
       for await (const chunk of req) body += chunk;
       config = normalizeConfig(JSON.parse(body || '{}'));
       writeJson(configPath, config);
-      return json(res, 200, { ok: true, config });
+      return json(req, res, 200, { ok: true, config });
     }
     if (req.method === 'POST' && url.pathname === '/scan') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      return json(res, 200, await collectAll(JSON.parse(body || '{}')));
+      return json(req, res, 200, await collectAll(JSON.parse(body || '{}')));
     }
     if (req.method === 'POST' && url.pathname === '/open-login') {
       const browser = await ensureBrowser();
@@ -220,16 +246,17 @@ const server = http.createServer(async (req, res) => {
       await x.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 45000 });
       const tiktok = await browser.newPage();
       await tiktok.goto('https://www.tiktok.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
-      return json(res, 200, { ok: true, message: 'X and TikTok opened in the local persistent browser profile. Sign in there once, then run a scan.' });
+      return json(req, res, 200, { ok: true, message: 'X and TikTok opened in the local persistent browser profile. Sign in there once, then run a scan.' });
     }
-    return json(res, 404, { error: 'Not found' });
+    return json(req, res, 404, { error: 'Not found' });
   } catch (error) {
     lastError = error instanceof Error ? error.message : String(error);
-    return json(res, 500, { error: lastError });
+    return json(req, res, 500, { error: lastError });
   }
 });
 
 server.listen(PORT, HOST, () => {
   console.log(`[front-bridge] listening on http://${HOST}:${PORT}`);
   console.log(`[front-bridge] browser profile: ${profileDir}`);
+  console.log(`[front-bridge] allowed origins: ${[...allowedOrigins].join(', ')}`);
 });
