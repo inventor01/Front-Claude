@@ -77,6 +77,10 @@ test('infers only corroborated topics from multiple authors', () => {
   assert.equal(hit.authorCount, 3);
   assert.equal(hit.evidenceCount, 3);
   assert.deepEqual(new Set(hit.platforms), new Set(['X','TikTok']));
+  assert.equal(hit.niche, true);
+  assert(hit.specificityScore > 0);
+  assert.equal(hit.anchors.length, 3);
+  assert.deepEqual(new Set(hit.anchors.map((anchor) => anchor.platform)), new Set(['X','TikTok']));
   assert(!topics.some((row) => row.key === 'oneoffthing'));
 });
 
@@ -93,6 +97,8 @@ test('clusters narrative wording variants across creators and platforms', () => 
   assert.equal(hit.authorCount, 3);
   assert.equal(hit.evidenceCount, 3);
   assert.deepEqual(new Set(hit.platforms), new Set(['X','TikTok']));
+  assert.equal(hit.niche, true);
+  assert(hit.nicheEvidenceCount >= 2);
   assert.equal(topics.filter((row) => row.topic.toLowerCase().includes('dejon') || row.key.includes('dejon')).length, 1, 'variant aliases should dedupe to one radar topic');
 });
 
@@ -104,6 +110,32 @@ test('does not promote generic viral words by themselves', () => {
   ];
   const topics = inferTopics(rows, now, 10);
   assert(!topics.some((row) => ['viral','meme','trend','reaction'].includes(row.key)));
+});
+
+test('rejects broad category narratives without a niche hook', () => {
+  const now = 1789100000000;
+  const rows = [
+    {platform:'X',author:'alice',url:'https://x.com/alice/status/31',content:'Crypto market news is moving today',published:now-10000,views:20000,likes:500},
+    {platform:'TikTok',author:'bob',url:'https://www.tiktok.com/@bob/video/4234567890123456789',content:'More crypto market news this morning',published:now-20000,views:30000,likes:800},
+  ];
+  const topics = inferTopics(rows, now, 10);
+  assert.equal(topics.length, 0);
+});
+
+test('keeps a niche meme phrase instead of collapsing to a broad category', () => {
+  const now = 1789100000000;
+  const rows = [
+    {platform:'X',author:'alice',url:'https://x.com/alice/status/41',content:'Everyone is posting the Banana Phone Kid meme again',published:now-15000,views:42000,likes:2200},
+    {platform:'TikTok',author:'bob',url:'https://www.tiktok.com/@bob/video/5234567890123456789',content:'Banana Phone Kid reaction audio is everywhere',published:now-30000,views:210000,likes:19000},
+    {platform:'X',author:'carol',url:'https://x.com/carol/status/42',content:'That Banana Phone Kid clip is all over my feed',published:now-45000,views:65000,likes:3400},
+  ];
+  const topics = inferTopics(rows, now, 10);
+  const hit = topics.find((row) => row.topic.toLowerCase().includes('banana phone kid'));
+  assert(hit, 'expected the niche meme identity to be retained');
+  assert.equal(hit.niche, true);
+  assert(hit.specificityScore >= 4);
+  assert(hit.anchors.some((anchor) => /meme|reaction|clip/i.test(anchor.content)));
+  assert(!topics.some((row) => ['crypto','market','news','viral','meme'].includes(row.key)));
 });
 
 test('sanitizes topics', () => {
