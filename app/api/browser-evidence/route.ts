@@ -1,5 +1,5 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { saveEvidence, type Evidence } from '@/lib/narratives';
+import { matchNarrative, narrativeFeed, saveEvidence, type Evidence } from '@/lib/narratives';
 import { samePublicOrigin } from '@/lib/request-origin';
 import { env } from 'cloudflare:workers';
 
@@ -69,7 +69,33 @@ export async function POST(request: Request) {
     if (!accepted.length && body.evidence.length) return json({ error: 'No valid X or TikTok evidence records were supplied.' }, 400);
     const at = Date.now();
     for (const row of accepted) await saveEvidence(db(), user.userId, row, at);
-    return json({ ok: true, accepted: accepted.length, rejected: body.evidence.length - accepted.length, at });
+
+    let matchedNarratives = 0;
+    if (accepted.length) {
+      const feed = await narrativeFeed(db(), user.userId);
+      const fresh = feed.cards.filter((card: { lastSeen: number }) => card.lastSeen >= at - 2000).slice(0, 3);
+      for (const card of fresh) {
+        try {
+          await matchNarrative(db(), user.userId, card.id);
+          matchedNarratives += 1;
+        } catch {
+          // Narrative evidence is still valid even if a coin provider is temporarily unavailable.
+        }
+      }
+    }
+
+    const updated = await narrativeFeed(db(), user.userId);
+    const freshNarratives = updated.cards.filter((card: { lastSeen: number }) => card.lastSeen >= at - 2000).length;
+    const freshCoins = updated.coins.filter((coin: { observed: number }) => coin.observed >= at - 120000).length;
+    return json({
+      ok: true,
+      accepted: accepted.length,
+      rejected: body.evidence.length - accepted.length,
+      at,
+      freshNarratives,
+      matchedNarratives,
+      freshCoins,
+    });
   } catch (error) {
     return json({ error: error instanceof SyntaxError ? 'Invalid request.' : (error as Error).message }, 500);
   }
