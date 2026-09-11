@@ -116,14 +116,10 @@ function keepTopic(topic) {
   if (creators < 2 || evidenceCount < 2) return false;
   if (parts.length === 1) {
     if (GENERIC_SINGLE.has(parts[0])) return false;
-    // Base v11 has already established natural independent support. Keep a
-    // specific emerging one-word name in pre-breakout with two creators, but
-    // require three creators before presenting it as a promoted candidate.
-    return topic.tier === 'candidate' ? creators >= 3 : creators >= 2;
+    // Generic one-word noise is blocked above. A specific emerging name still
+    // needs at least two independent creators, matching the main-feed gate.
+    return creators >= 2;
   }
-  // Multi-word topics that have already cleared the base detector remain
-  // eligible even when spelling variants or semantic/media context mean the
-  // exact full phrase does not occur verbatim in every supporting post.
   return creators >= 2;
 }
 
