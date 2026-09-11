@@ -47,6 +47,14 @@ function bestDisplayLabel(topic,rows){
  const candidates=[...new Set([topic.topic,...(topic.aliases||[])].map(cleanLabel).filter(Boolean))].filter((label)=>!genericLabel(label)).map((label)=>({label,...exactSupport(label,rows)})).filter((item)=>item.creators>=2).sort((a,b)=>{const aw=tokens(a.label).length,bw=tokens(b.label).length;const as=a.creators*8+a.platforms*3+Math.min(4,aw)*1.5-(aw>6?6:0);const bs=b.creators*8+b.platforms*3+Math.min(4,bw)*1.5-(bw>6?6:0);return bs-as||bw-aw||a.label.length-b.label.length;});
  if(candidates[0])return candidates[0].label;const repeated=repeatedContiguousPhrases(rows);if(repeated[0])return repeated[0].label;const fallback=cleanLabel(topic.topic||topic.key);return fallback&&!genericLabel(fallback)?fallback:'';
 }
+function stableIdentity(topic,display){
+ const original=cleanLabel(topic?.key||'');
+ // Keep the base detector's specific identity for momentum/history matching.
+ // Display labels are allowed to become richer phrases without making Astra on
+ // one scan a different topic from “astra everywhere” on the next scan.
+ if(original&&!genericLabel(original)&&specificWords(original).length)return normalize(original);
+ return normalize(display);
+}
 function mediaKey(row){return[row.soundId?`sound:${row.soundId}`:null,row.visualHash?`visual:${row.visualHash}`:null,row.quotedUrl?`quote:${row.quotedUrl}`:null,row.relatedVideoId?`parent:${row.relatedVideoId}`:null].filter(Boolean);}
 function semanticCrossPlatform(rows,label){
  const x=rows.filter((r)=>r.platform==='X').slice(0,50),t=rows.filter((r)=>r.platform==='TikTok').slice(0,50),labelTerms=specificWords(label);const creators=new Set();let pairs=0;
@@ -64,7 +72,7 @@ function suppressFragments(rows){return rows.filter((candidate,index)=>!rows.som
 
 export function detectTopics(events=[],now=Date.now(),limit=15){
  const evidence=dedupeEvidence(events);const raw=baseDetectTopics(evidence,now,Math.max(limit*4,40));const repaired=[];
- for(const topic of raw){const rows=supportingRows(topic,evidence);const display=bestDisplayLabel(topic,rows);if(!keepTopic(topic,display,rows))continue;const labelEvidence=exactSupport(display,rows),crossPlatform=semanticCrossPlatform(rows,display);repaired.push({...topic,topic:display,key:normalize(display),aliases:[...new Set([display,topic.topic,...(topic.aliases||[])].map(cleanLabel).filter((value)=>value&&!genericLabel(value)))].filter((alias)=>tokens(alias).length>1||normalize(alias)===normalize(display)).slice(0,18),labelEvidence,crossPlatform,labelPolicy:'event-level-natural-phrase'});}
+ for(const topic of raw){const rows=supportingRows(topic,evidence);const display=bestDisplayLabel(topic,rows);if(!keepTopic(topic,display,rows))continue;const labelEvidence=exactSupport(display,rows),crossPlatform=semanticCrossPlatform(rows,display);repaired.push({...topic,topic:display,key:stableIdentity(topic,display),aliases:[...new Set([display,topic.topic,...(topic.aliases||[])].map(cleanLabel).filter((value)=>value&&!genericLabel(value)))].filter((alias)=>tokens(alias).length>1||normalize(alias)===normalize(display)).slice(0,18),labelEvidence,crossPlatform,labelPolicy:'event-level-natural-phrase'});}
  const out=[];for(const topic of suppressFragments(repaired)){const duplicate=out.find((item)=>sameTopicKey(item.key||item.topic,topic.key||topic.topic));if(!duplicate)out.push(topic);}
  return out.sort((a,b)=>(b.score||0)-(a.score||0)||(b.authorCount||0)-(a.authorCount||0)).slice(0,Math.max(0,limit));
 }
