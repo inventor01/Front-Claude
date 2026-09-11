@@ -94,21 +94,21 @@ function attachPostPriority(topics = [], evidence = [], now = Date.now()) {
       }
     }
     const crossPostedCreators = crossPosted.size;
-    const platformCount = new Set(rows.map((row) => row.platform)).size || (Array.isArray(topic.platforms) ? topic.platforms.length : 0);
+    const sameEventCrossPlatform = Boolean(topic.crossPlatform?.corroborated);
     const authorCount = Number(topic.authorCount || new Set(rows.map(creatorKey)).size || 0);
     const baseNarrativeScore = Number(topic.baseNarrativeScore ?? topic.score ?? 0);
     let priorityScore = baseNarrativeScore;
     priorityScore += Math.min(42, hotPosts.reduce((sum, row) => sum + Math.min(20, row.velocityScore * .55), 0));
     priorityScore += Math.min(18, Math.log10(1 + maxViewsPerHour) * 3.2);
     priorityScore += Math.min(12, crossPostedCreators * 2.5);
-    priorityScore += platformCount >= 2 ? 10 : 0;
+    priorityScore += sameEventCrossPlatform ? 10 : 0;
     priorityScore += Math.min(10, authorCount * 1.4);
     if (hotPosts.some((row) => row.explosive)) priorityScore += 16;
     const priorityReasons = [];
     if (hotPosts.some((row) => row.explosive)) priorityReasons.push('100K+ fast post');
     else if (hotPosts.length) priorityReasons.push('fast engagement');
     if (crossPostedCreators >= 2) priorityReasons.push(`${crossPostedCreators} cross-post creators`);
-    if (platformCount >= 2) priorityReasons.push('X + TikTok');
+    if (sameEventCrossPlatform) priorityReasons.push('X ↔ TikTok same event');
     if (maxViewsPerHour >= 100000) priorityReasons.push(`${Math.round(maxViewsPerHour / 1000)}K views/hr`);
     return {
       ...topic,
@@ -125,12 +125,12 @@ function attachPostPriority(topics = [], evidence = [], now = Date.now()) {
   }).sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0) || (b.score || 0) - (a.score || 0));
 }
 
-export function attachVisualSignals(topics = [], evidence = []) {
-  return attachPostPriority(baseAttachVisualSignals(topics, evidence), evidence);
+export function attachVisualSignals(topics = [], evidence = [], now = Date.now()) {
+  return attachPostPriority(baseAttachVisualSignals(topics, evidence), evidence, now);
 }
 
-export function semanticConsolidateTopics(topics = [], evidence = []) {
-  return attachPostPriority(baseSemanticConsolidateTopics(topics, evidence), evidence);
+export function semanticConsolidateTopics(topics = [], evidence = [], now = Date.now()) {
+  return attachPostPriority(baseSemanticConsolidateTopics(topics, evidence), evidence, now);
 }
 
 export function attachOriginResearch(topics = [], evidence = [], now = Date.now()) {
@@ -152,5 +152,9 @@ export function shouldAutoDeep(topics = [], audit = {}, now = Date.now()) {
       return { trigger: true, topic: topic.topic || topic.key, key: norm(topic.key || topic.topic), reasons, at: now, strength: Math.min(1, .62 + reasons.length * .11) };
     }
   }
-  return baseShouldAutoDeep(topics, audit, now);
+  // The legacy deep-escalation engine used raw platform count as a shortcut for
+  // corroboration. Strip that shortcut unless v13 has verified that X and
+  // TikTok are discussing the same event.
+  const safeTopics = topics.map((topic) => topic.crossPlatform?.corroborated ? topic : { ...topic, platforms: (topic.platforms || []).slice(0, 1) });
+  return baseShouldAutoDeep(safeTopics, audit, now);
 }
