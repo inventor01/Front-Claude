@@ -8,7 +8,7 @@ import { detectTopics } from './topic-engine.mjs';
 import { attachSoundSignals, consolidateTopicAliases } from './adaptive-intelligence.mjs';
 import { attachVisualSignals, semanticConsolidateTopics } from './advanced-intelligence.mjs';
 import { frontCdpUrl } from './system-browser.mjs';
-import { CONTENT_UNDERSTANDING_VERSION, ContentUnderstandingEngine } from './content-understanding.mjs';
+import { ContentUnderstandingEngine } from './content-understanding.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
@@ -38,6 +38,7 @@ let childRestartTimer;
 
 function clean(value, max = 300) { return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max); }
 function normalize(value) { return clean(value, 240).normalize('NFKC').toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim(); }
+function creatorKey(row) { return `${row.platform}:${String(row.author || '').toLowerCase()}`; }
 function corsHeaders(req) {
   const origin = req.headers.origin;
   const headers = {
@@ -129,17 +130,28 @@ function deriveTopicsFromContent(evidence = [], at = Date.now()) {
   return topics;
 }
 
+function contentSupportForTopic(topic, evidence = []) {
+  const ids = new Set(topic.evidenceIds || []);
+  const rows = evidence.filter((row) => ids.has(row.id) && row.contentSummary && Number(row.contentConfidence || 0) >= 0.5);
+  return {
+    evidence: rows.length,
+    creators: new Set(rows.map(creatorKey)).size,
+  };
+}
+
 function mergeTopics(existing = [], derived = [], evidence = []) {
-  const understood = new Set(evidence.filter((row) => row.contentSummary).map((row) => row.id));
   const out = existing.map((topic) => ({ ...topic }));
   for (const topic of derived) {
     const key = normalize(topic.key || topic.topic);
     if (!key) continue;
-    const contentSupport = (topic.evidenceIds || []).filter((id) => understood.has(id)).length;
+    const support = contentSupportForTopic(topic, evidence);
     const index = out.findIndex((old) => normalize(old.key || old.topic) === key);
     if (index < 0) {
-      if (contentSupport < 1) continue;
-      out.push({ ...topic, contentUnderstandingSupport: contentSupport });
+      // A model-generated interpretation can never create a narrative from one
+      // post/creator. Brand-new visual topics require independent grounded video
+      // understanding from at least two creators and still pass detectTopics.
+      if (support.evidence < 2 || support.creators < 2) continue;
+      out.push({ ...topic, contentUnderstandingSupport: support.evidence, contentUnderstandingCreators: support.creators });
       continue;
     }
     const old = out[index];
@@ -156,7 +168,8 @@ function mergeTopics(existing = [], derived = [], evidence = []) {
       score: Math.max(Number(old.score || 0), Number(topic.score || 0)),
       corroborated: Boolean(old.corroborated || topic.corroborated),
       tier: old.tier === 'candidate' || topic.tier === 'candidate' ? 'candidate' : 'pre-breakout',
-      contentUnderstandingSupport: Math.max(Number(old.contentUnderstandingSupport || 0), contentSupport),
+      contentUnderstandingSupport: Math.max(Number(old.contentUnderstandingSupport || 0), support.evidence),
+      contentUnderstandingCreators: Math.max(Number(old.contentUnderstandingCreators || 0), support.creators),
     };
   }
   return out.sort((a, b) => Number(b.priorityScore || b.score || 0) - Number(a.priorityScore || a.score || 0)).slice(0, 60);
@@ -272,10 +285,16 @@ async function handle(req, res) {
 
   if (req.url === '/pending' && req.method === 'GET' && response.ok) {
     const evidence = detector.applyCached(Array.isArray(data.evidence) ? data.evidence : []);
+    const understood = evidence.some((row) => row.contentSummary && Number(row.contentConfidence || 0) >= 0.5);
+    const derived = understood ? deriveTopicsFromContent(evidence, Date.now()) : [];
+    const lastTopics = understood
+      ? mergeTopics(Array.isArray(data.lastTopics) ? data.lastTopics : [], derived, evidence)
+      : (Array.isArray(data.lastTopics) ? data.lastTopics : []);
     void prefetchPending();
     return json(req, res, response.status, {
       ...data,
       evidence,
+      lastTopics,
       contentUnderstanding: { ...detector.status(), visuallyUnderstood: evidence.filter((row) => row.contentSummary).length },
     });
   }
