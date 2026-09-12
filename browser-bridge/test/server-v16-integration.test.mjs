@@ -6,14 +6,17 @@ const server=fs.readFileSync(new URL('../src/server-v16.mjs',import.meta.url),'u
 const gateway=fs.readFileSync(new URL('../src/server-v17.mjs',import.meta.url),'utf8');
 const supervisor=fs.readFileSync(new URL('../src/server-v18.mjs',import.meta.url),'utf8');
 const ledgerSupervisor=fs.readFileSync(new URL('../src/server-v19.mjs',import.meta.url),'utf8');
-const launcher=fs.readFileSync(new URL('../src/launcher-v19.mjs',import.meta.url),'utf8');
+const liveSupervisor=fs.readFileSync(new URL('../src/server-v20.mjs',import.meta.url),'utf8');
+const liveObserver=fs.readFileSync(new URL('../src/live-observer-v20.mjs',import.meta.url),'utf8');
+const launcher=fs.readFileSync(new URL('../src/launcher-v20.mjs',import.meta.url),'utf8');
 const compat=fs.readFileSync(new URL('../src/playwright-cdp-compat.mjs',import.meta.url),'utf8');
 const fallback=fs.readFileSync(new URL('../src/fallback-discovery-v18.mjs',import.meta.url),'utf8');
 const worker=fs.readFileSync(new URL('../src/fallback-worker-v18.mjs',import.meta.url),'utf8');
 const pkg=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8'));
 
-test('v19 ledger supervisor is default while v18/v17/v16 remain explicit fallbacks',()=>{
-  assert.equal(pkg.scripts.start,'node src/launcher-v19.mjs');
+test('v20 live supervisor is default while v19/v18/v17/v16 remain explicit fallbacks',()=>{
+  assert.equal(pkg.scripts.start,'node src/launcher-v20.mjs');
+  assert.equal(pkg.scripts['start:v19'],'node src/launcher-v19.mjs');
   assert.equal(pkg.scripts['start:v18'],'node src/server-v18.mjs');
   assert.equal(pkg.scripts['start:v17'],'node src/server-v17.mjs');
   assert.equal(pkg.scripts['start:v16'],'node src/server-v16.mjs');
@@ -22,13 +25,37 @@ test('v19 ledger supervisor is default while v18/v17/v16 remain explicit fallbac
   assert.match(gateway,/scanner:\s*'viral-narrative-content-scout-v17'/);
   assert.match(supervisor,/scanner:\s*'viral-narrative-content-scout-v18'/);
   assert.match(ledgerSupervisor,/scanner:\s*'viral-narrative-content-scout-v19'/);
+  assert.match(liveSupervisor,/scanner:\s*'viral-narrative-content-scout-v20'/);
 });
 
-test('v19 preloads Playwright CDP noDefaults compatibility into the full child tree',()=>{
+test('v20 preloads Playwright CDP noDefaults compatibility into the full child tree',()=>{
   assert.match(launcher,/NODE_OPTIONS/);
   assert.match(launcher,/playwright-cdp-compat\.mjs/);
   assert.match(compat,/noDefaults:\s*options\.noDefaults \?\? true/);
   assert.match(compat,/frontCdpNoDefaults = true/);
+});
+
+test('v20 observes live browser pages and exposes progressive evidence without changing quality gates',()=>{
+  assert.match(liveSupervisor,/url\.pathname === '\/live'/);
+  assert.match(liveSupervisor,/'live-dashboard-stream'/);
+  assert.match(liveSupervisor,/'live-evidence-preview'/);
+  assert.match(liveObserver,/article\[data-testid="tweet"\]/);
+  assert.match(liveObserver,/a\[href\*="\/video\/"\]/);
+  assert.match(liveObserver,/detectTopics\(evidence, at, 24\)/);
+  assert.match(liveObserver,/rankInvestigationCandidates\(/);
+});
+
+test('v20 rejects duplicate scans before v19 can create a misleading ledger entry',()=>{
+  assert.match(liveSupervisor,/Could not verify scanner state before starting/);
+  assert.match(liveSupervisor,/health\.running \|\| health\.scanLedger\?\.current/);
+  assert.match(liveSupervisor,/A scan is already running\. Use Stop scan before starting another one\./);
+  assert.match(liveSupervisor,/'fast-duplicate-preflight'/);
+});
+
+test('v20 distinguishes a ready Chrome CDP endpoint from an attached Playwright session',()=>{
+  assert.match(liveSupervisor,/\/json\/version/);
+  assert.match(liveSupervisor,/'cdp-ready'/);
+  assert.match(liveSupervisor,/'cdp-ready-status'/);
 });
 
 test('v19 persists a readable scan ledger with current status, diagnostics and samples',()=>{
