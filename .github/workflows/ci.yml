@@ -66,6 +66,9 @@ jobs:
       - name: Settings navigation regression tests
         run: node --test tests/settings-navigation.test.mjs
 
+      - name: Front feed quality regression tests
+        run: node --test tests/front-feed-quality.test.mjs
+
       - name: Browser bridge unit tests
         run: npm test --prefix browser-bridge
 
