@@ -180,6 +180,7 @@ function runFallbackWorker(scanBody) {
     const stdout = [];
     const stderr = [];
     let size = 0;
+    let stderrSize = 0;
     let overflow = false;
     proc.stdout?.on('data', (chunk) => {
       size += chunk.length;
@@ -187,7 +188,10 @@ function runFallbackWorker(scanBody) {
       stdout.push(chunk);
     });
     proc.stderr?.on('data', (chunk) => {
-      if (stderr.reduce((sum, part) => sum + part.length, 0) < 20000) stderr.push(chunk);
+      if (stderrSize < 20000) {
+        stderr.push(chunk);
+        stderrSize += chunk.length;
+      }
     });
     proc.on('error', (error) => {
       if (fallbackWorker === proc) fallbackWorker = undefined;
@@ -234,10 +238,13 @@ async function zeroResultFallback(scanBody, basePayload) {
 
 function normalizeHealth(data) {
   const staleInnerError = data?.gateway?.lastError && /Scanner child unavailable: fetch failed/i.test(String(data.gateway.lastError));
+  const recoveryRunning = Boolean(fallbackWorker);
   return {
     ...data,
     version: 18,
     scanner: 'viral-narrative-content-scout-v18',
+    running: Boolean(data?.running || recoveryRunning),
+    scanPhase: recoveryRunning ? 'visual-recovery' : data?.running ? 'primary' : 'idle',
     capabilities: [...new Set([
       ...(Array.isArray(data?.capabilities) ? data.capabilities : []),
       'manual-scan-stop',
