@@ -1,4 +1,6 @@
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +12,8 @@ const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
 const V20_PORT = Number(process.env.FRONT_BRIDGE_V20_PORT || 43986);
 const CDP_PORT = Number(process.env.FRONT_BRIDGE_CDP_PORT || 43982);
 const here = path.dirname(fileURLToPath(import.meta.url));
+const dataDir = process.env.FRONT_BRIDGE_DATA || path.join(os.homedir(), '.front-browser-bridge');
+const breadthLedgerPath = path.join(dataDir, 'tiktok-breadth-v21.json');
 const innerServer = path.join(here, 'launcher-v20.mjs');
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://believable-inspiration-production-a68b.up.railway.app',
@@ -23,6 +27,7 @@ const allowedOrigins = new Set((process.env.FRONT_ALLOWED_ORIGINS || DEFAULT_ALL
 let inner;
 let restartTimer;
 let shuttingDown = false;
+let lastBroadScan = (() => { try { return JSON.parse(fs.readFileSync(breadthLedgerPath, 'utf8')); } catch { return null; } })();
 const broadTikTok = new BroadTikTokObserver({ cdpUrl: `http://${HOST}:${CDP_PORT}`, intervalMs: Number(process.env.FRONT_TIKTOK_OBSERVER_MS || 850) });
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -123,6 +128,27 @@ async function parseJsonResponse(response) {
   try { return await response.json(); }
   catch { throw new Error('Local scanner returned invalid JSON.'); }
 }
+
+function persistBroadScan(value) {
+  lastBroadScan = value;
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(breadthLedgerPath, JSON.stringify(value, null, 2));
+  } catch (error) {
+    console.error(`Could not persist v21 TikTok breadth ledger: ${clean(error?.message || error)}`);
+  }
+}
+function broadAudit() {
+  const snapshot = broadTikTok.snapshot();
+  return {
+    observedVideos: snapshot.observed,
+    groundedVideos: snapshot.grounded,
+    target: snapshot.target,
+    sourcePages: snapshot.sourcePages,
+    errors: snapshot.errors,
+  };
+}
+
 function augmentWithBroadTikTok(data = {}) {
   const snapshot = broadTikTok.snapshot();
   const grounded = broadTikTok.groundedEvidence();
@@ -134,12 +160,8 @@ function augmentWithBroadTikTok(data = {}) {
     audit: {
       ...(data.audit || {}),
       broadTikTok: {
-        observedVideos: snapshot.observed,
-        groundedVideos: snapshot.grounded,
+        ...broadAudit(),
         mergedGroundedVideos: evidence.filter((row) => row.platform === 'TikTok').length,
-        target: snapshot.target,
-        sourcePages: snapshot.sourcePages,
-        errors: snapshot.errors,
       },
     },
   };
@@ -195,6 +217,8 @@ async function handle(req, res) {
     try { data = await parseJsonResponse(response); }
     catch (error) { broadTikTok.stop('failed'); return json(req, res, 502, { error: clean(error.message) }); }
     data = augmentWithBroadTikTok(data);
+    const breadth = data.audit?.broadTikTok || broadAudit();
+    persistBroadScan({ at: Date.now(), status: response.status === 499 || data.stopped ? 'stopped' : !response.ok ? 'failed' : 'complete', ...breadth });
     if (response.status === 499 || data.stopped) broadTikTok.stop('stopped');
     else if (!response.ok) broadTikTok.stop('failed');
     else broadTikTok.stop(data.evidence?.length ? 'complete' : 'zero');
@@ -219,6 +243,18 @@ async function handle(req, res) {
           errors: broad.errors,
         },
       };
+    }});
+  }
+
+  if (req.method === 'GET' && url.pathname === '/ledger') {
+    return proxy(req, res, `${url.pathname}${url.search}`, body, { retries: 1, timeoutMs: 2500, transform: async (data) => {
+      const currentBroad = broadTikTok.snapshot();
+      const current = data.current ? {
+        ...data.current,
+        broadTikTok: currentBroad.active ? { observedVideos: currentBroad.observed, groundedVideos: currentBroad.grounded, target: currentBroad.target, sourcePages: currentBroad.sourcePages, errors: currentBroad.errors } : data.current.broadTikTok,
+      } : data.current;
+      const scans = Array.isArray(data.scans) ? data.scans.map((scan, index) => index === 0 && lastBroadScan ? { ...scan, broadTikTok: scan.broadTikTok || lastBroadScan } : scan) : data.scans;
+      return { ...data, version: 21, current, scans, broadTikTok: currentBroad };
     }});
   }
 
