@@ -25,6 +25,20 @@ test('settings can stop an active local scan and blocks duplicate deep scans',()
   assert.match(source,/Boolean\(health\?\.running\)/);
 });
 
+test('deep scan wait window allows long visual recovery and points timed-out scans to ledger',()=>{
+  assert.match(source,/const DEEP_TIMEOUT_MS=20\*60_000/);
+  assert.match(source,/20-minute Settings wait window/);
+  assert.match(source,/open Scan Ledger before starting another scan/);
+});
+
+test('settings exposes all major discovery surfaces and respects real sentinel limits',()=>{
+  for(const key of ['scanXForYou','scanXHome','scanXExplore','scanTikTokForYou','scanTikTokTrends','scanTikTokExplore'])assert.match(source,new RegExp(`checked=\\{config\\.${key}`.replace('config.scanXForYou','config.scanXForYou').replace('config.scanTikTokForYou','config.scanTikTokForYou')));
+  assert.match(source,/Scout sentinels/);
+  assert.match(source,/min=\{0\} max=\{15\} value=\{config\.sentinelAccountsPerScout\?\?6\}/);
+  assert.match(source,/min=\{0\} max=\{20\} value=\{config\.sentinelAccountsPerDeep\?\?10\}/);
+  assert.match(source,/Stale pass limit/);
+});
+
 test('zero-result deep scan is surfaced locally instead of posting an empty evidence batch',()=>{
   const zeroGuard=source.indexOf('if(!result.evidence.length)');
   const save=source.indexOf('const stored=await saveEvidence',zeroGuard);
@@ -33,10 +47,17 @@ test('zero-result deep scan is surfaced locally instead of posting an empty evid
   assert.match(source,/Deep scan finished with 0 usable evidence records/);
 });
 
-test('settings exposes an authenticated live scan ledger',()=>{
+test('completed deep scan saves with its stable observation timestamp',()=>{
+  assert.match(source,/saveEvidence\(result\.evidence,result\.inferredTopics\|\|\[\],result\.at\)/);
+  assert.match(source,/scanObservedAt/);
+});
+
+test('settings exposes an authenticated live scan ledger with QA diagnostics',()=>{
   assert.match(settingsPage,/href="\/settings\/ledger"/);
   assert.match(ledgerPage,/requireChatGPTUser\('\/settings\/ledger'\)/);
   assert.match(ledgerClient,/fetch\(`\$\{BRIDGE\}\/ledger`/);
   assert.match(ledgerClient,/setInterval\(\(\)=>void refresh\(true\),2000\)/);
+  assert.match(ledgerClient,/Scan health/);
+  assert.match(ledgerClient,/Video QA/);
   assert.match(ledgerClient,/Open scanned post/);
 });

@@ -7,6 +7,8 @@ const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache
 const clean=(value:unknown,max:number)=>String(value??'').replace(/\s+/g,' ').trim().slice(0,max);
 const metric=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&value>=0?Math.trunc(value):null;
 const finite=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?value:null;
+const timestamp=(value:unknown)=>{const n=Number(value);return Number.isFinite(n)&&n>0?Math.trunc(n):null;};
+const stableObservationAt=(value:unknown,receivedAt:number)=>{const parsed=timestamp(value);if(!parsed)return receivedAt;return parsed>=receivedAt-7*86400000&&parsed<=receivedAt+5*60000?parsed:receivedAt;};
 const safeUrl=(value:unknown)=>{try{const u=new URL(String(value));return u.protocol==='https:'?u.href.slice(0,2048):null;}catch{return null;}};
 const safeArray=(value:unknown,maxItems:number,maxChars:number)=>Array.isArray(value)?[...new Set(value.map((item)=>clean(item,maxChars)).filter(Boolean))].slice(0,maxItems):[];
 const feedSurface=(provenance:string)=>/X For You/i.test(provenance)?'x-for-you':/TikTok For You/i.test(provenance)?'tiktok-for-you':/sentinel/i.test(provenance)?'x-sentinel':/candidate investigation/i.test(provenance)?'candidate-investigation':/origin research/i.test(provenance)?'origin-research':/trend/i.test(provenance)?'trend-seed':null;
@@ -43,10 +45,10 @@ export async function POST(r:Request){
  if(!user)return json({error:'Please sign in to use your desk.'},401);
  if(!samePublicOrigin(r))return json({error:'Invalid request origin'},403);
  try{
-  const body=JSON.parse(await r.text()) as {evidence?:RichEvidence[];inferredTopics?:RichTopic[]};
+  const body=JSON.parse(await r.text()) as {evidence?:RichEvidence[];inferredTopics?:RichTopic[];scanObservedAt?:unknown};
   const evidence=Array.isArray(body.evidence)?body.evidence.slice(0,250):[];
   const topics=Array.isArray(body.inferredTopics)?body.inferredTopics.slice(0,60):[];
-  const observed=Date.now();
+  const receivedAt=Date.now(),observed=stableObservationAt(body.scanObservedAt,receivedAt);
   const evidenceStatements:D1PreparedStatement[]=[];
   for(const item of evidence){
    const id=clean(item.id,220),platform=clean(item.platform,12),provenance=clean(item.provenance,500);
@@ -80,7 +82,7 @@ export async function POST(r:Request){
   }
   if(evidenceStatements.length)await runBatches(evidenceStatements);
   if(topicStatements.length)await runBatches(topicStatements);
-  return json({ok:true,evidenceSaved:evidenceStatements.length,topicsSaved:topicStatements.length,observed});
+  return json({ok:true,evidenceSaved:evidenceStatements.length,topicsSaved:topicStatements.length,observed,receivedAt});
  }catch(e){
   return json({error:e instanceof SyntaxError?'Invalid request':(e as Error).message},502);
  }

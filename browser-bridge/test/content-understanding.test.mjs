@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   applyUnderstanding,
+  ContentUnderstandingEngine,
   frameSchedule,
   parseUnderstandingJson,
   selectVideoCandidates,
@@ -59,4 +63,50 @@ test('low-confidence model output never rewrites evidence content',()=>{
   const row={id:'x:2',platform:'X',author:'a',url:'https://x.com/a/status/2',content:'source caption'};
   const enriched=applyUnderstanding(row,{summary:'Maybe something happens',confidence:.2});
   assert.equal(enriched.content,'source caption');
+});
+
+test('content health distinguishes successful and failed persistent cache entries after restart',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-content-health-'));
+  const previousModel=process.env.FRONT_OLLAMA_MODEL;
+  const previousProvider=process.env.FRONT_CONTENT_PROVIDER;
+  try{
+    process.env.FRONT_OLLAMA_MODEL='qwen-test';
+    process.env.FRONT_CONTENT_PROVIDER='ollama';
+    const now=Date.now();
+    const successRow={id:'ok',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/1000000000001'};
+    const failRow={id:'bad',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/1000000000002'};
+    fs.writeFileSync(path.join(dir,'content-understanding-v17.json'),JSON.stringify({
+      [`${successRow.platform}|${successRow.id}|${successRow.url}`]:{at:now-1000,ok:true,analysis:{summary:'A mascot falls while dancing.',confidence:.91,provider:'ollama',model:'qwen-test',frameCount:11,modelFrameCount:11,duration:8.4,captureType:'video-timeline',analyzedAt:now-1200}},
+      [`${failRow.platform}|${failRow.id}|${failRow.url}`]:{at:now,ok:false,error:'Content analysis timed out.',analysis:null},
+    }));
+    const engine=new ContentUnderstandingEngine({dataDir:dir});
+    const status=engine.status();
+    assert.equal(status.enabled,true);
+    assert.equal(status.cachedVideos,2);
+    assert.equal(status.successfulCachedVideos,1);
+    assert.equal(status.failedCachedVideos,1);
+    assert.equal(status.latestSuccess.captureType,'video-timeline');
+    assert.equal(status.latestSuccess.frameCount,11);
+    assert.equal(status.latestFailure.error,'Content analysis timed out.');
+    assert.equal(status.state,'cached-ready');
+  }finally{
+    if(previousModel===undefined)delete process.env.FRONT_OLLAMA_MODEL;else process.env.FRONT_OLLAMA_MODEL=previousModel;
+    if(previousProvider===undefined)delete process.env.FRONT_CONTENT_PROVIDER;else process.env.FRONT_CONTENT_PROVIDER=previousProvider;
+    fs.rmSync(dir,{recursive:true,force:true});
+  }
+});
+
+test('recent failed content analysis is cached for cooldown instead of immediately retrying Ollama',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-content-failure-'));
+  try{
+    const row={id:'bad',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/1000000000003',content:'',mediaType:'video'};
+    fs.writeFileSync(path.join(dir,'content-understanding-v17.json'),JSON.stringify({
+      [`${row.platform}|${row.id}|${row.url}`]:{at:Date.now(),ok:false,error:'Previous Ollama timeout',analysis:null},
+    }));
+    const engine=new ContentUnderstandingEngine({dataDir:dir});
+    const result=await engine.analyzeOne(null,row);
+    assert.equal(result.cachedFailure,true);
+    assert.equal(result.analysis,null);
+    assert.match(result.error,/Previous Ollama timeout/);
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

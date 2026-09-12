@@ -6,6 +6,7 @@ import FrontDesk from './front-desk';
 import styles from './front-live-shell.module.css';
 
 const BRIDGE = 'http://127.0.0.1:43981';
+const LIVE_SYNC_KEY='front.liveSync.v2';
 
 type LiveEvidence = {
   id:string;
@@ -50,6 +51,7 @@ type LiveState = {
 };
 
 type LiveFilter='all'|'X'|'TikTok'|'early'|'qualified'|'synced';
+type PersistedSync={scanAt:number;ids:string[];topics:string};
 
 const topicName=(topic:LiveTopic)=>String(topic.topic||topic.key||'').replace(/\s+/g,' ').trim();
 const topicFingerprint=(topics:LiveTopic[])=>topics.slice(0,30).map((topic)=>`${topic.key||topic.topic}:${topic.evidenceCount||0}:${topic.authorCount||0}:${topic.score||0}:${topic.tier||''}:${topic.corroborated===true?'1':'0'}`).join('|');
@@ -92,19 +94,31 @@ function evidenceMatchesTopics(row:LiveEvidence,topics:LiveTopic[]){
   });
 }
 
-async function saveLive(evidence:LiveEvidence[],inferredTopics:LiveTopic[]){
+function readPersistedSync(scanAt:number):PersistedSync|null{
+  try{
+    const parsed=JSON.parse(localStorage.getItem(LIVE_SYNC_KEY)||'null') as PersistedSync|null;
+    if(!parsed||parsed.scanAt!==scanAt||!Array.isArray(parsed.ids))return null;
+    return{scanAt,ids:parsed.ids.filter((id)=>typeof id==='string').slice(-250),topics:typeof parsed.topics==='string'?parsed.topics:''};
+  }catch{return null;}
+}
+function writePersistedSync(scanAt:number,ids:Set<string>,topics:string){
+  try{localStorage.setItem(LIVE_SYNC_KEY,JSON.stringify({scanAt,ids:[...ids].slice(-250),topics}));}catch{}
+}
+
+async function saveLive(evidence:LiveEvidence[],inferredTopics:LiveTopic[],scanObservedAt:number){
+  const payload={evidence,inferredTopics,scanObservedAt};
   const response=await fetch('/api/browser-evidence',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({evidence,inferredTopics}),
+    body:JSON.stringify(payload),
   });
-  const data=await response.json() as {accepted?:number;error?:string};
+  const data=await response.json() as {accepted?:number;newEvidence?:number;replayed?:number;error?:string};
   if(!response.ok)throw new Error(data.error||'Could not sync live scan findings.');
-  if(evidence.length){
+  if(evidence.length||inferredTopics.length){
     void fetch('/api/browser-rich',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({evidence,inferredTopics}),
+      body:JSON.stringify(payload),
     }).catch(()=>null);
   }
   return data;
@@ -123,6 +137,7 @@ export default function FrontLiveShell(){
   const lastTopics=useRef('');
   const syncing=useRef(false);
   const wasActive=useRef(false);
+  const scanAtRef=useRef<number|null>(null);
 
   useEffect(()=>{
     let stopped=false;
@@ -136,23 +151,33 @@ export default function FrontLiveShell(){
         if(stopped)return;
         setLive(next);
 
+        const scanAt=Number(next.startedAt||next.completedAt||0)||null;
+        const changed=Boolean(scanAt&&scanAtRef.current!==scanAt);
+        if(changed&&scanAt){
+          scanAtRef.current=scanAt;
+          const persisted=readPersistedSync(scanAt);
+          syncedIds.current=new Set(persisted?.ids||[]);
+          lastTopics.current=persisted?.topics||'';
+          setSynced(syncedIds.current.size);
+          setSyncedEvidenceIds(new Set(syncedIds.current));
+          setSyncError('');
+          setFilter('all');
+          setSelectedTopic('');
+          setExpanded(false);
+        }
+
         const fingerprint=topicFingerprint(next.inferredTopics||[]);
         const fresh=(next.evidence||[]).filter((row)=>row?.id&&!syncedIds.current.has(row.id)).slice(0,120);
         const topicsChanged=Boolean(fingerprint&&fingerprint!==lastTopics.current);
-        if((fresh.length||topicsChanged)&&!syncing.current){
+        if(scanAt&&(fresh.length||topicsChanged)&&!syncing.current){
           syncing.current=true;
           try{
-            await saveLive(fresh,next.inferredTopics||[]);
+            await saveLive(fresh,next.inferredTopics||[],scanAt);
             for(const row of fresh)syncedIds.current.add(row.id);
-            if(fresh.length){
-              setSyncedEvidenceIds((current)=>{
-                const updated=new Set(current);
-                for(const row of fresh)updated.add(row.id);
-                return updated;
-              });
-            }
+            if(fresh.length)setSyncedEvidenceIds(new Set(syncedIds.current));
             if(fingerprint)lastTopics.current=fingerprint;
-            if(fresh.length)setSynced((count)=>count+fresh.length);
+            setSynced(syncedIds.current.size);
+            writePersistedSync(scanAt,syncedIds.current,lastTopics.current);
             setSyncError('');
           }catch(error){
             setSyncError((error as Error).message);
@@ -164,16 +189,6 @@ export default function FrontLiveShell(){
         if(wasActive.current&&!next.active){
           setRefreshKey((value)=>value+1);
           if(next.observed>0||(next.inferredTopics||[]).length>0)setExpanded(true);
-        }
-        if(!wasActive.current&&next.active){
-          syncedIds.current.clear();
-          lastTopics.current='';
-          setSynced(0);
-          setSyncedEvidenceIds(new Set());
-          setSyncError('');
-          setFilter('all');
-          setSelectedTopic('');
-          setExpanded(false);
         }
         wasActive.current=next.active;
       }catch{

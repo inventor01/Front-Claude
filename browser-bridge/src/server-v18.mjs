@@ -2,6 +2,11 @@ import http from 'node:http';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  mergeRecoveryEvidence,
+  mergeRecoveryTopics,
+  visualRecoveryReason,
+} from './recovery-policy-v18.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
@@ -147,9 +152,9 @@ async function stopAndRestart() {
   clearTimeout(restartTimer);
   restartTimer = undefined;
 
-  // The regular v17/v16 path is one detached process group. Zero-result visual
-  // recovery is a second detached worker. Killing both makes Stop Scan immediate
-  // even if the local Ollama model is currently analyzing frames.
+  // The regular v17/v16 path is one detached process group. Visual recovery is
+  // a second detached worker. Killing both makes Stop Scan immediate even if
+  // the local Ollama model is currently analyzing timeline frames.
   killProcessGroup(fallbackWorker);
   fallbackWorker = undefined;
   killProcessGroup(inner);
@@ -164,14 +169,14 @@ async function stopAndRestart() {
   return ready;
 }
 
-function runFallbackWorker(scanBody) {
+function runFallbackWorker(scanBody, options = {}) {
   return new Promise((resolve, reject) => {
-    if (fallbackWorker) return reject(new Error('A zero-result recovery pass is already running.'));
+    if (fallbackWorker) return reject(new Error('A visual recovery pass is already running.'));
     const proc = spawn(process.execPath, [fallbackWorkerScript], {
       env: {
         ...process.env,
         FRONT_BRIDGE_CDP_PORT: String(CDP_PORT),
-        FRONT_V18_FALLBACK_REQUEST: JSON.stringify({ scanBody }),
+        FRONT_V18_FALLBACK_REQUEST: JSON.stringify({ scanBody, options }),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
@@ -199,15 +204,15 @@ function runFallbackWorker(scanBody) {
     });
     proc.on('exit', (code, signal) => {
       if (fallbackWorker === proc) fallbackWorker = undefined;
-      if (overflow) return reject(new Error('Zero-result recovery produced too much output.'));
+      if (overflow) return reject(new Error('Visual recovery produced too much output.'));
       const raw = Buffer.concat(stdout).toString('utf8').trim();
       let parsed;
       try { parsed = JSON.parse(raw || '{}'); }
       catch {
-        return reject(new Error(`Zero-result recovery returned invalid JSON${stderr.length ? `: ${clean(Buffer.concat(stderr).toString('utf8'), 240)}` : '.'}`));
+        return reject(new Error(`Visual recovery returned invalid JSON${stderr.length ? `: ${clean(Buffer.concat(stderr).toString('utf8'), 240)}` : '.'}`));
       }
       if (signal || code !== 0 || parsed.ok === false) {
-        return reject(new Error(parsed.error || `Zero-result recovery stopped (${signal || code || 'unknown'}).`));
+        return reject(new Error(parsed.error || `Visual recovery stopped (${signal || code || 'unknown'}).`));
       }
       resolve(parsed);
     });
@@ -217,20 +222,26 @@ function runFallbackWorker(scanBody) {
 function newestContentStatus(innerStatus) {
   if (!lastFallbackContentStatus) return innerStatus || null;
   if (!innerStatus) return lastFallbackContentStatus;
-  const innerAt = Number(innerStatus.lastRun || 0);
-  const fallbackAt = Number(lastFallbackContentStatus.lastRun || 0);
+  const innerAt = Number(innerStatus.lastRun || innerStatus.latestSuccess?.analyzedAt || 0);
+  const fallbackAt = Number(lastFallbackContentStatus.lastRun || lastFallbackContentStatus.latestSuccess?.analyzedAt || 0);
   return fallbackAt > innerAt ? lastFallbackContentStatus : innerStatus;
 }
 
-async function zeroResultFallback(scanBody, basePayload) {
-  const result = await runFallbackWorker(scanBody);
+async function visualRecovery(scanBody, basePayload, reason) {
+  const result = await runFallbackWorker(scanBody, { reason });
   if (result.contentUnderstanding) lastFallbackContentStatus = result.contentUnderstanding;
   return {
     ...basePayload,
-    evidence: Array.isArray(result.evidence) ? result.evidence : [],
-    inferredTopics: Array.isArray(result.inferredTopics) ? result.inferredTopics : [],
+    evidence: mergeRecoveryEvidence(
+      Array.isArray(basePayload.evidence) ? basePayload.evidence : [],
+      Array.isArray(result.evidence) ? result.evidence : [],
+    ),
+    inferredTopics: mergeRecoveryTopics(
+      Array.isArray(basePayload.inferredTopics) ? basePayload.inferredTopics : [],
+      Array.isArray(result.inferredTopics) ? result.inferredTopics : [],
+    ),
     errors: [...(Array.isArray(basePayload.errors) ? basePayload.errors : []), ...(Array.isArray(result.errors) ? result.errors : [])],
-    audit: { ...(basePayload.audit || {}), fallbackDiscovery: result.audit || { version: 18, triggered: true } },
+    audit: { ...(basePayload.audit || {}), fallbackDiscovery: result.audit || { version: 18, triggered: true, reason } },
     contentUnderstanding: result.contentUnderstanding || basePayload.contentUnderstanding || null,
     v18Fallback: true,
   };
@@ -249,6 +260,7 @@ function normalizeHealth(data) {
       ...(Array.isArray(data?.capabilities) ? data.capabilities : []),
       'manual-scan-stop',
       'zero-result-visual-fallback',
+      'thin-result-visual-recovery',
       'media-without-caption-discovery',
       'duplicate-scan-guard',
     ])],
@@ -343,14 +355,17 @@ async function handle(req, res) {
   }
 
   if (req.url === '/scan' && req.method === 'POST' && response.ok) {
-    if (!Array.isArray(data.evidence) || data.evidence.length === 0) {
-      try { data = await zeroResultFallback(scanBody, data); }
+    const reason = visualRecoveryReason(scanBody, data, {
+      thinEvidenceThreshold: Number(process.env.FRONT_V18_THIN_EVIDENCE || 12),
+    });
+    if (reason) {
+      try { data = await visualRecovery(scanBody, data, reason); }
       catch (error) {
         if (generation !== stopGeneration) return json(req, res, 499, { stopped: true, error: 'Scan stopped by user.' });
         data = {
           ...data,
-          errors: [...(Array.isArray(data.errors) ? data.errors : []), `v18 zero-result fallback failed: ${clean(error?.message || error, 300)}`],
-          audit: { ...(data.audit || {}), fallbackDiscovery: { version: 18, triggered: true, failed: true } },
+          errors: [...(Array.isArray(data.errors) ? data.errors : []), `v18 visual recovery failed (${reason}): ${clean(error?.message || error, 300)}`],
+          audit: { ...(data.audit || {}), fallbackDiscovery: { version: 18, triggered: true, failed: true, reason } },
         };
       }
     }
@@ -367,7 +382,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Front v18 supervisor listening on http://${HOST}:${PORT}`);
   console.log(`v17 content gateway runs internally on http://${HOST}:${V17_PORT}`);
-  console.log('v18 adds manual scan stop, duplicate-scan protection, and visual fallback when normal extraction returns zero evidence.');
+  console.log('v18 adds manual scan stop, duplicate protection, and media-first visual recovery for zero or thin text-only scans.');
 });
 startInner();
 

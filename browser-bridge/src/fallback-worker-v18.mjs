@@ -44,20 +44,24 @@ async function main() {
   try { input = JSON.parse(process.env.FRONT_V18_FALLBACK_REQUEST || '{}'); }
   catch { throw new Error('Invalid v18 fallback request.'); }
   const scanBody = input.scanBody && typeof input.scanBody === 'object' ? input.scanBody : {};
-  const target = Math.max(16, Math.min(40, Math.round(Number(scanBody.targetUniqueFeedItems || 60) / 2)));
-  const passes = Math.max(2, Math.min(6, Number(scanBody.maxAdaptiveScrolls || 5)));
+  const options = input.options && typeof input.options === 'object' ? input.options : {};
+  const defaultTarget = Math.max(16, Math.min(40, Math.round(Number(scanBody.targetUniqueFeedItems || 60) / 2)));
+  const target = Math.max(4, Math.min(60, Number(options.targetPerPlatform || defaultTarget)));
+  const defaultPasses = Math.max(2, Math.min(6, Number(scanBody.maxAdaptiveScrolls || 5)));
+  const passes = Math.max(1, Math.min(8, Number(options.scrollPasses || defaultPasses)));
   const browser = await chromium.connectOverCDP(frontCdpUrl(cdpPort));
   const context = browser.contexts()[0];
   if (!context) throw new Error('Front Chrome did not expose a browser context for fallback discovery.');
   const discovered = await collectFallbackEvidence(context, { targetPerPlatform: target, scrollPasses: passes });
   const mode = scanBody.mode === 'scout' ? 'scout' : 'deep';
   let rows = discovered.evidence;
-  let stats = { requested: 0, analyzed: 0, cached: 0, enriched: 0, failed: 0, skipped: 0, provider: detector.status().provider, model: detector.status().model };
+  let stats = { requested: 0, analyzed: 0, cached: 0, cachedFailures: 0, enriched: 0, failed: 0, skipped: 0, provider: detector.status().provider, model: detector.status().model };
 
   if (rows.length && detector.status().enabled) {
+    const defaultMaxVideos = mode === 'deep' ? Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 4) : Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 2);
     const enrichment = await detector.enrich(context, rows, {
       mode,
-      maxVideos: mode === 'deep' ? Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 4) : Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 2),
+      maxVideos: Math.max(1, Math.min(8, Number(options.maxVideos || defaultMaxVideos))),
     });
     rows = enrichment.rows;
     stats = enrichment.stats;
@@ -71,7 +75,7 @@ async function main() {
   const diagnostics = discovered.diagnostics || {};
   const errors = [...discovered.errors];
   if (!evidence.length) {
-    errors.push(`v18 fallback observed X=${diagnostics.x?.collected || 0} post(s), TikTok=${diagnostics.tiktok?.collected || 0} video(s). No grounded evidence survived; verify the dedicated Front Chrome is signed in and visibly shows X/TikTok posts.`);
+    errors.push(`v18 visual recovery observed X=${diagnostics.x?.collected || 0} post(s), TikTok=${diagnostics.tiktok?.collected || 0} video(s). No grounded evidence survived; verify the dedicated Front Chrome is signed in and visibly shows X/TikTok posts.`);
   }
 
   // Do not call browser.close() here. This process connected to the user's
@@ -85,7 +89,7 @@ async function main() {
     audit: {
       version: 18,
       triggered: true,
-      reason: 'inner-scanner-returned-zero-evidence',
+      reason: clean(options.reason || 'inner-scanner-returned-zero-evidence', 120),
       rawEvidence: discovered.evidence.length,
       groundedEvidence: evidence.length,
       inferredTopics: inferredTopics.length,

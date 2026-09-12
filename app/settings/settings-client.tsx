@@ -6,7 +6,7 @@ import styles from './settings-client.module.css';
 
 const BRIDGE='http://127.0.0.1:43981';
 const LOCAL_TIMEOUT_MS=30_000;
-const DEEP_TIMEOUT_MS=10*60_000;
+const DEEP_TIMEOUT_MS=20*60_000;
 const WATCH_KEY='front.launchWatches.v1';
 
 type BridgeConfig={
@@ -39,7 +39,7 @@ type Evidence={id:string;platform:'X'|'TikTok';author:string;url:string;content:
 type InferredTopic={topic:string;key:string;evidenceCount:number;authorCount:number;platforms:string[];evidenceIds:string[]};
 type BridgeHealth={config:BridgeConfig;version:number;scanner?:string;capabilities?:string[];running:boolean;pendingCount?:number;nextScheduledRun?:number|null;scanConnection?:string;lastError?:string|null};
 type ScanResult={evidence:Evidence[];errors:string[];inferredTopics?:InferredTopic[];at:number;config:BridgeConfig};
-type StoredResult={accepted?:number;inferredNarratives?:number;error?:string};
+type StoredResult={accepted?:number;newEvidence?:number;replayed?:number;inferredNarratives?:number;error?:string};
 type Watch={id:string;name:string;created:number};
 type Hit={mint:string;name:string;symbol?:string;seen:number};
 
@@ -81,16 +81,17 @@ async function local<T>(path:string,init?:RequestInit,timeoutMs=LOCAL_TIMEOUT_MS
     if(!response.ok)throw new Error(data.error||'Local browser bridge request failed.');
     return data;
   }catch(error){
-    if(error instanceof DOMException&&error.name==='AbortError')throw new Error(path==='/scan'?'The deep scan exceeded the panel timeout. The bridge may still be finishing.':'The local browser bridge timed out.');
+    if(error instanceof DOMException&&error.name==='AbortError')throw new Error(path==='/scan'?'The deep scan exceeded the 20-minute Settings wait window. The bridge may still be finishing; open Scan Ledger before starting another scan.':'The local browser bridge timed out.');
     throw error;
   }finally{window.clearTimeout(timer);}
 }
 
-async function saveEvidence(evidence:Evidence[],inferredTopics:InferredTopic[]=[]){
-  const response=await fetch('/api/browser-evidence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({evidence,inferredTopics})});
+async function saveEvidence(evidence:Evidence[],inferredTopics:InferredTopic[]=[],scanObservedAt?:number){
+  const payload={evidence,inferredTopics,...(scanObservedAt?{scanObservedAt}:{})};
+  const response=await fetch('/api/browser-evidence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const data=await response.json() as StoredResult;
   if(!response.ok)throw new Error(data.error||'Could not save browser evidence.');
-  try{await fetch('/api/browser-rich',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({evidence,inferredTopics})});}catch{}
+  try{await fetch('/api/browser-rich',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});}catch{}
   return data;
 }
 
@@ -166,7 +167,7 @@ export default function SettingsClient(){
       if(!pending.evidence.length){setMessage('No unsynced background finds.');return;}
       const stored=await saveEvidence(pending.evidence,pending.lastTopics||[]);
       await local('/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:pending.evidence.map((row)=>row.id)})});
-      setMessage(`Synced ${stored.accepted||0} evidence record(s) and ${stored.inferredNarratives||0} inferred narrative(s).`);
+      setMessage(`Synced ${stored.newEvidence??stored.accepted??0} new evidence record(s) and ${stored.inferredNarratives||0} inferred narrative(s).`);
       window.dispatchEvent(new CustomEvent('front-browser-evidence-saved'));
       await ping(true,false);
     }catch(e){setError((e as Error).message);}finally{setBusy('');}
@@ -179,13 +180,14 @@ export default function SettingsClient(){
       const result=await local<ScanResult>('/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...config,mode:'deep',xAccounts:lines(accounts).slice(0,30),keywords:lines(keywords)})},DEEP_TIMEOUT_MS);
       if(!result.evidence.length){
         const detail=(result.errors||[]).slice(-2).join(' ');
-        setMessage(`Deep scan finished with 0 usable evidence records.${detail?` ${detail}`:''}`);
+        setMessage(`Deep scan finished with 0 usable evidence records.${detail?` ${detail}`:''} Open Scan Ledger for extraction and video diagnostics.`);
         await ping(true,false);
         return;
       }
-      const stored=await saveEvidence(result.evidence,result.inferredTopics||[]);
+      const stored=await saveEvidence(result.evidence,result.inferredTopics||[],result.at);
       const warnings=result.errors.length?` ${result.errors.length} source warning(s).`:'';
-      setMessage(`Deep scan finished: ${result.evidence.length} evidence record(s), ${result.inferredTopics?.length||0} candidate topic(s), ${stored.accepted||0} saved.${warnings}`);
+      const replayed=stored.replayed?` ${stored.replayed} already-synced record(s) ignored.`:'';
+      setMessage(`Deep scan finished: ${result.evidence.length} evidence record(s), ${result.inferredTopics?.length||0} candidate topic(s), ${stored.newEvidence??stored.accepted??0} newly saved.${replayed}${warnings}`);
       window.dispatchEvent(new CustomEvent('front-browser-evidence-saved'));
       await ping(true,false);
     }catch(e){
@@ -285,14 +287,18 @@ export default function SettingsClient(){
           <button className={styles.primary} onClick={()=>void runDeepScan()} disabled={!!busy||stopping||!connected||Boolean(health?.running)}><Play size={14}/> {health?.running&&!busy?'Scanner busy':busy==='scan'?'Investigating…':'Run deep scan'}</button>
           <button className={styles.danger} onClick={()=>void stopScan()} disabled={!connected||stopping||(!health?.running&&busy!=='scan')}><Square size={14}/> {stopping?'Stopping…':'Stop scan'}</button>
           <button onClick={()=>void syncPending()} disabled={!!busy||stopping||!connected}><RefreshCw size={14}/> {busy==='sync'?'Syncing…':'Sync finds'}</button>
+          <a className={styles.actionLink} href="/settings/ledger">Scan Ledger</a>
         </div>
 
         <div className={styles.rule}/>
         <div className={styles.toggleGrid}>
           <label className={styles.toggle}><input type="checkbox" checked={config.enabled} onChange={(e)=>setConfig({...config,enabled:e.target.checked})}/><span><b>Background Scout</b><small>Run scheduled discovery while the local bridge is open.</small></span></label>
           <label className={styles.toggle}><input type="checkbox" checked={config.scanXForYou??true} onChange={(e)=>setConfig({...config,scanXForYou:e.target.checked})}/><span><b>X For You</b><small>Primary X discovery surface.</small></span></label>
+          <label className={styles.toggle}><input type="checkbox" checked={config.scanXHome} onChange={(e)=>setConfig({...config,scanXHome:e.target.checked})}/><span><b>X Home</b><small>Personalized X home-feed coverage.</small></span></label>
+          <label className={styles.toggle}><input type="checkbox" checked={config.scanXExplore} onChange={(e)=>setConfig({...config,scanXExplore:e.target.checked})}/><span><b>X Explore seeds</b><small>Use trend pages to seed investigations.</small></span></label>
           <label className={styles.toggle}><input type="checkbox" checked={config.scanTikTokForYou??true} onChange={(e)=>setConfig({...config,scanTikTokForYou:e.target.checked})}/><span><b>TikTok For You</b><small>Primary TikTok discovery surface.</small></span></label>
-          <label className={styles.toggle}><input type="checkbox" checked={config.scanXExplore} onChange={(e)=>setConfig({...config,scanXExplore:e.target.checked})}/><span><b>X Explore seeds</b><small>Use trend pages only to seed investigations.</small></span></label>
+          <label className={styles.toggle}><input type="checkbox" checked={config.scanTikTokTrends} onChange={(e)=>setConfig({...config,scanTikTokTrends:e.target.checked})}/><span><b>TikTok Trends</b><small>Trend discovery and seed coverage.</small></span></label>
+          <label className={styles.toggle}><input type="checkbox" checked={config.scanTikTokExplore} onChange={(e)=>setConfig({...config,scanTikTokExplore:e.target.checked})}/><span><b>TikTok Explore</b><small>Broaden discovery outside the For You feed.</small></span></label>
         </div>
 
         <div className={styles.fields}>
@@ -300,10 +306,12 @@ export default function SettingsClient(){
           <label><span>Unique feed target</span><div className={styles.number}><input type="number" min={30} max={180} value={config.targetUniqueFeedItems??90} onChange={(e)=>setConfig({...config,targetUniqueFeedItems:Number(e.target.value)})}/><small>items</small></div></label>
           <label><span>Feed time cap</span><div className={styles.number}><input type="number" min={20} max={120} value={config.maxFeedScanSeconds??70} onChange={(e)=>setConfig({...config,maxFeedScanSeconds:Number(e.target.value)})}/><small>seconds</small></div></label>
           <label><span>Adaptive scrolls</span><div className={styles.number}><input type="number" min={3} max={25} value={config.maxAdaptiveScrolls??14} onChange={(e)=>setConfig({...config,maxAdaptiveScrolls:Number(e.target.value)})}/><small>max</small></div></label>
+          <label><span>Stale pass limit</span><div className={styles.number}><input type="number" min={1} max={5} value={config.stalePassLimit??2} onChange={(e)=>setConfig({...config,stalePassLimit:Number(e.target.value)})}/><small>passes</small></div></label>
           <label><span>Search scrolls</span><div className={styles.number}><input type="number" min={1} max={6} value={config.searchScrollPasses??3} onChange={(e)=>setConfig({...config,searchScrollPasses:Number(e.target.value)})}/><small>passes</small></div></label>
           <label><span>Deep results/query</span><div className={styles.number}><input type="number" min={8} max={24} value={config.deepResultsPerQuery??14} onChange={(e)=>setConfig({...config,deepResultsPerQuery:Number(e.target.value)})}/><small>results</small></div></label>
           <label><span>Topics to expand</span><div className={styles.number}><input type="number" min={1} max={10} value={config.inferredTopicSearches} onChange={(e)=>setConfig({...config,inferredTopicSearches:Number(e.target.value)})}/><small>topics</small></div></label>
-          <label><span>Deep sentinels</span><div className={styles.number}><input type="number" min={0} max={30} value={config.sentinelAccountsPerDeep??10} onChange={(e)=>setConfig({...config,sentinelAccountsPerDeep:Number(e.target.value)})}/><small>accounts</small></div></label>
+          <label><span>Scout sentinels</span><div className={styles.number}><input type="number" min={0} max={15} value={config.sentinelAccountsPerScout??6} onChange={(e)=>setConfig({...config,sentinelAccountsPerScout:Number(e.target.value)})}/><small>accounts</small></div></label>
+          <label><span>Deep sentinels</span><div className={styles.number}><input type="number" min={0} max={20} value={config.sentinelAccountsPerDeep??10} onChange={(e)=>setConfig({...config,sentinelAccountsPerDeep:Number(e.target.value)})}/><small>accounts</small></div></label>
         </div>
       </section>
 
