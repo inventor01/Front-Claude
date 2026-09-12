@@ -72,7 +72,7 @@ function semanticCrossPlatform(rows,label){
 }
 function keepTopic(topic,display,rows){
  if(!display||genericLabel(display))return false;const support=exactSupport(display,rows),parts=tokens(display),creators=Number(topic.authorCount||0),evidenceCount=Number(topic.evidenceCount||0);if(creators<2||evidenceCount<2||support.creators<2)return false;
- if(parts.length===1){const required=topic.tier==='pre-breakout'?2:3;return specificWords(display)[0]?.length>=4&&support.creators>=required;}
+ if(parts.length===1)return specificWords(display)[0]?.length>=4&&support.creators>=2;
  return specificWords(display).length>=1;
 }
 function evidenceOverlap(a,b){const left=new Set(a.evidenceIds||[]),right=new Set(b.evidenceIds||[]);const shared=[...left].filter((id)=>right.has(id)).length;return{shared,ratio:shared/Math.max(1,Math.min(left.size,right.size))};}
@@ -81,7 +81,7 @@ function suppressFragments(rows){return rows.filter((candidate,index)=>!rows.som
 
 export function detectTopics(events=[],now=Date.now(),limit=15){
  const evidence=dedupeEvidence(events);const raw=baseDetectTopics(evidence,now,Math.max(limit*4,40));const repaired=[];
- for(const topic of raw){const rows=supportingRows(topic,evidence);const display=bestDisplayLabel(topic,rows);if(!keepTopic(topic,display,rows))continue;const labelEvidence=exactSupport(display,rows),crossPlatform=semanticCrossPlatform(rows,display);repaired.push({...topic,topic:display,key:stableIdentity(topic,display,evidence),aliases:[...new Set([display,topic.topic,...(topic.aliases||[])].map(cleanLabel).filter((value)=>value&&!genericLabel(value)))].filter((alias)=>tokens(alias).length>1||normalize(alias)===normalize(display)).slice(0,18),labelEvidence,crossPlatform,labelPolicy:'event-level-natural-phrase'});}
+ for(const topic of raw){const rows=supportingRows(topic,evidence);const display=bestDisplayLabel(topic,rows);if(!keepTopic(topic,display,rows))continue;const labelEvidence=exactSupport(display,rows),crossPlatform=semanticCrossPlatform(rows,display);const oneWord=tokens(display).length===1;const tier=oneWord&&labelEvidence.creators<3?'pre-breakout':topic.tier;repaired.push({...topic,tier,corroborated:tier==='candidate',topic:display,key:stableIdentity(topic,display,evidence),aliases:[...new Set([display,topic.topic,...(topic.aliases||[])].map(cleanLabel).filter((value)=>value&&!genericLabel(value)))].filter((alias)=>tokens(alias).length>1||normalize(alias)===normalize(display)).slice(0,18),labelEvidence,crossPlatform,labelPolicy:'event-level-natural-phrase'});}
  const out=[];for(const topic of suppressFragments(repaired)){const duplicate=out.find((item)=>sameTopicKey(item.key||item.topic,topic.key||topic.topic));if(!duplicate)out.push(topic);}
  return out.sort((a,b)=>(b.score||0)-(a.score||0)||(b.authorCount||0)-(a.authorCount||0)).slice(0,Math.max(0,limit));
 }
