@@ -1,6 +1,11 @@
 const cdpCompatUrl = new URL('./playwright-cdp-compat.mjs', import.meta.url).href;
 const scanFetchCompatUrl = new URL('./loopback-scan-fetch-compat.mjs', import.meta.url).href;
-const preloads = [`--import=${cdpCompatUrl}`, `--import=${scanFetchCompatUrl}`];
+const livePreviewCompatUrl = new URL('./live-preview-compat.mjs', import.meta.url).href;
+const preloads = [
+  `--import=${cdpCompatUrl}`,
+  `--import=${scanFetchCompatUrl}`,
+  `--import=${livePreviewCompatUrl}`,
+];
 const existing = String(process.env.NODE_OPTIONS || '').trim();
 const options = existing ? existing.split(/\s+/) : [];
 for (const preload of preloads) if (!options.includes(preload)) options.push(preload);
@@ -14,11 +19,13 @@ process.env.FRONT_BRIDGE_V17_PORT ||= '43991';
 process.env.FRONT_BRIDGE_INTERNAL_PORT ||= '43994';
 process.env.FRONT_BRIDGE_CDP_PORT ||= '43982';
 
-// Preload both compatibility layers in this process and every child process in
-// the v20 -> v19 -> v18 -> v17 -> v16 scanner tree. The CDP shim skips unsupported
-// default-context setup, while the loopback scan shim prevents Node's five-minute
-// fetch headers timeout from terminating a legitimate long deep scan and then
-// accidentally retrying the state-changing POST /scan request.
+// Preload compatibility layers in this process and every child process in the
+// v20 -> v19 -> v18 -> v17 -> v16 scanner tree. The CDP shim skips unsupported
+// default-context setup. The loopback transport prevents Node's five-minute
+// fetch headers timeout from terminating a legitimate deep scan and retrying
+// POST /scan. The preview shim strips TikTok activity/sidebar junk and
+// canonicalizes social post URLs before live findings can sync to the cloud.
 await import('./playwright-cdp-compat.mjs');
 await import('./loopback-scan-fetch-compat.mjs');
+await import('./live-preview-compat.mjs');
 await import('./server-v20.mjs');
