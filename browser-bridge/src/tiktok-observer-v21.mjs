@@ -7,6 +7,17 @@ import {
 
 const clean = (value, max = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
+export function shouldDriveTikTokFeed(urlValue, hasVideoAnchors = false) {
+  try {
+    const url = new URL(urlValue);
+    if (!/(^|\.)tiktok\.com$/i.test(url.hostname)) return false;
+    if (url.pathname === '/' && hasVideoAnchors) return true;
+    return /\/(?:foryou|explore|search)(?:\/|$)/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 async function extractTikTokAnchors(page, provenance) {
   const raw = await page.evaluate(() => {
     const links = [...document.querySelectorAll('a[href*="/video/"]')].slice(0, 700);
@@ -123,8 +134,9 @@ export class BroadTikTokObserver {
         try { host = new URL(url).hostname.toLowerCase(); } catch { continue; }
         if (!/(^|\.)tiktok\.com$/.test(host)) continue;
         sourcePages.push(url);
-        this.add(await extractTikTokAnchors(page, 'TikTok broad live observation'));
-        if (this.state.observed < this.state.target && /\/(?:foryou|explore|search)(?:\/|$|\?)/i.test(new URL(url).pathname + new URL(url).search)) {
+        const observations = await extractTikTokAnchors(page, 'TikTok broad live observation');
+        this.add(observations);
+        if (this.state.observed < this.state.target && shouldDriveTikTokFeed(url, observations.length > 0)) {
           await page.evaluate(() => window.scrollBy(0, Math.max(window.innerHeight * 1.05, 820))).catch(() => {});
         }
       }
