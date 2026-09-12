@@ -33,6 +33,15 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    files: ["app/settings/settings-client.tsx"],
+    rules: {
+      // The deployed vinext client router can leave the Settings -> Front Link
+      // as a no-op. This single control intentionally performs a document-level
+      // navigation so it remains reliable in the production runtime.
+      "@next/next/no-html-link-for-pages": "off",
+    },
+  },
+  {
     files: ["lib/narratives.ts", "lib/narratives-base.ts", "app/desk.tsx", "app/lab/page.tsx"],
     rules: {
       // narratives-base.ts is an immutable snapshot of the pre-v12 narrative

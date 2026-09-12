@@ -25,9 +25,9 @@ type OutputRow={id:string;title:string;aliases:string[];stage:string;creators:nu
 type FeedbackData={narrativeId?:string;label?:'useful'|'not-relevant'};
 
 function postVelocity(row:Evidence,now:number):HotPost{
- const views=numericOrNull(row.views),likes=numericOrNull(row.likes),published=Number(row.published||row.first_seen);const ageHours=published>0?Math.max(1/60,(now-published)/3600000):null;
+ const views=numericOrNull(row.views),likes=numericOrNull(row.likes),published=numericOrNull(row.published);const ageHours=published!=null&&published>0?Math.max(1/60,(now-published)/3600000):null;
  const snapshotRate=numericOrNull(row.viewsPerMinute),derived=views!=null&&ageHours!=null?views/ageHours:0,observed=snapshotRate!=null?snapshotRate*60:0;const viewsPerHour=Math.max(derived,observed),likesPerHour=likes!=null&&ageHours!=null?likes/ageHours:0;
- const viewHot=views!=null&&ageHours!=null&&views>=100000&&ageHours<=6||viewsPerHour>=100000;const engagementHot=likes!=null&&ageHours!=null&&likes>=10000&&ageHours<=6||likesPerHour>=5000;
+ const viewHot=(views!=null&&ageHours!=null&&views>=100000&&ageHours<=6)||viewsPerHour>=100000;const engagementHot=(likes!=null&&ageHours!=null&&likes>=10000&&ageHours<=6)||likesPerHour>=5000;
  const hot=viewHot||engagementHot;const rising=hot||(views!=null&&ageHours!=null&&views>=50000&&ageHours<=3)||viewsPerHour>=25000||(likes!=null&&ageHours!=null&&likes>=5000&&ageHours<=3)||likesPerHour>=2000;
  return{views,likes,ageHours:ageHours==null?null:Number(ageHours.toFixed(2)),viewsPerHour:Math.round(viewsPerHour),likesPerHour:Math.round(likesPerHour),hot,rising,url:row.url,platform:row.platform,author:row.author,content:row.content.slice(0,240),published:row.published};
 }

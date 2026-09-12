@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import {useEffect,useRef,useState} from 'react';
 import {Activity,ArrowLeft,Bell,CheckCircle2,LogIn,Play,Plus,Radio,RefreshCw,Save,Trash2,TriangleAlert} from 'lucide-react';
 import styles from './settings-client.module.css';
@@ -111,17 +110,21 @@ export default function SettingsClient(){
   const [hits,setHits]=useState<Hit[]>([]);
   const watchesRef=useRef<Watch[]>([]);
   const hydrated=useRef(false);
+  const configHydrated=useRef(false);
 
   const nextRun=health?.nextScheduledRun?new Date(health.nextScheduledRun).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—';
 
-  async function ping(silent=false){
+  async function ping(silent=false,hydrateConfig=false){
     try{
       const status=await local<BridgeHealth>('/health');
       setConnected(true);
       setHealth(status);
-      setConfig({...DEFAULT_CONFIG,...status.config});
-      setAccounts((status.config?.xAccounts||[]).join('\n'));
-      setKeywords((status.config?.keywords||[]).join('\n'));
+      if(hydrateConfig||!configHydrated.current){
+        setConfig({...DEFAULT_CONFIG,...status.config});
+        setAccounts((status.config?.xAccounts||[]).join('\n'));
+        setKeywords((status.config?.keywords||[]).join('\n'));
+        configHydrated.current=true;
+      }
       setError('');
       if(!silent)setMessage(`Connected to browser bridge v${status.version}${status.scanner?` · ${status.scanner}`:''}.`);
       return true;
@@ -141,6 +144,7 @@ export default function SettingsClient(){
       setConfig({...DEFAULT_CONFIG,...result.config});
       setAccounts((result.config.xAccounts||[]).join('\n'));
       setKeywords((result.config.keywords||[]).join('\n'));
+      configHydrated.current=true;
       setMessage(`Scanner settings saved. Background Scout runs every ${result.config.intervalMinutes} minutes while the bridge is running.`);
     }catch(e){setError((e as Error).message);}finally{setBusy('');}
   }
@@ -162,7 +166,7 @@ export default function SettingsClient(){
       await local('/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:pending.evidence.map((row)=>row.id)})});
       setMessage(`Synced ${stored.accepted||0} evidence record(s) and ${stored.inferredNarratives||0} inferred narrative(s).`);
       window.dispatchEvent(new CustomEvent('front-browser-evidence-saved'));
-      await ping(true);
+      await ping(true,false);
     }catch(e){setError((e as Error).message);}finally{setBusy('');}
   }
 
@@ -174,7 +178,7 @@ export default function SettingsClient(){
       const warnings=result.errors.length?` ${result.errors.length} source warning(s).`:'';
       setMessage(`Deep scan finished: ${result.evidence.length} evidence record(s), ${result.inferredTopics?.length||0} candidate topic(s), ${stored.accepted||0} saved.${warnings}`);
       window.dispatchEvent(new CustomEvent('front-browser-evidence-saved'));
-      await ping(true);
+      await ping(true,false);
     }catch(e){setError((e as Error).message);}finally{setBusy('');}
   }
 
@@ -195,8 +199,8 @@ export default function SettingsClient(){
   }
 
   useEffect(()=>{
-    const kickoff=window.setTimeout(()=>{void ping(true);try{const raw=JSON.parse(localStorage.getItem(WATCH_KEY)||'[]');if(Array.isArray(raw))setWatches(raw.filter((item)=>item&&typeof item.name==='string'));}catch{}hydrated.current=true;},0);
-    const interval=window.setInterval(()=>{void ping(true);},30_000);
+    const kickoff=window.setTimeout(()=>{void ping(true,true);try{const raw=JSON.parse(localStorage.getItem(WATCH_KEY)||'[]');if(Array.isArray(raw))setWatches(raw.filter((item)=>item&&typeof item.name==='string'));}catch{}hydrated.current=true;},0);
+    const interval=window.setInterval(()=>{void ping(true,false);},30_000);
     return()=>{window.clearTimeout(kickoff);window.clearInterval(interval);};
   },[]);
 
@@ -236,7 +240,7 @@ export default function SettingsClient(){
         <h1>Scanner control center</h1>
         <p>Configure the local X/TikTok intelligence bridge and Pump.fun creation alerts without opening floating tool panels.</p>
       </div>
-      <Link className={styles.back} href="/"><ArrowLeft size={15}/> Back to Front</Link>
+      <a className={styles.back} href="/"><ArrowLeft size={15}/> Back to Front</a>
     </header>
 
     {error&&<div className={styles.error}><TriangleAlert size={16}/><span>{error}</span></div>}
@@ -244,7 +248,7 @@ export default function SettingsClient(){
 
     <section className={styles.statusGrid}>
       <div className={styles.statusCard}><span>Browser bridge</span><b data-ok={connected}>{connected?'Connected':'Offline'}</b><small>{connected?`v${health?.version||'—'}${health?.scanner?` · ${health.scanner}`:''}`:'Start the local bridge on this Mac'}</small></div>
-      <div className={styles.statusCard}><span>Scanner</span><b>{health?.running?'Running':config.enabled?'Scheduled':'Paused'}</b><small>{health?.pendingCount||0} pending · next {nextRun}</small></div>
+      <div className={styles.statusCard}><span>Scanner</span><b>{!connected?'Offline':health?.running?'Running':config.enabled?'Scheduled':'Paused'}</b><small>{connected?`${health?.pendingCount||0} pending · next ${nextRun}`:'Connect the local bridge to read scanner state'}</small></div>
       <div className={styles.statusCard}><span>Pump.fun alerts</span><b>{listening?'Listening':'Off'}</b><small>{watches.length} exact-name watch{watches.length===1?'':'es'}</small></div>
     </section>
 
@@ -252,7 +256,7 @@ export default function SettingsClient(){
       <section className={`${styles.card} ${styles.span2}`}>
         <div className={styles.cardHead}><div><Activity size={18}/><div><h2>Browser scanner</h2><p>X + TikTok discovery and investigation settings</p></div></div><span className={connected?styles.good:styles.muted}>{connected?'● connected':'○ offline'}</span></div>
         <div className={styles.actions}>
-          <button onClick={()=>void ping()} disabled={!!busy}><RefreshCw size={14}/> Reconnect</button>
+          <button onClick={()=>void ping(false,true)} disabled={!!busy}><RefreshCw size={14}/> Reconnect</button>
           <button onClick={()=>void openLogin()} disabled={!!busy}><LogIn size={14}/> {busy==='login'?'Opening…':'Open X + TikTok login'}</button>
           <button className={styles.primary} onClick={()=>void runDeepScan()} disabled={!!busy||!connected}><Play size={14}/> {busy==='scan'?'Investigating…':'Run deep scan'}</button>
           <button onClick={()=>void syncPending()} disabled={!!busy||!connected}><RefreshCw size={14}/> {busy==='sync'?'Syncing…':'Sync finds'}</button>
