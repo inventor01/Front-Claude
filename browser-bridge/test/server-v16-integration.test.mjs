@@ -4,14 +4,42 @@ import fs from 'node:fs';
 
 const server=fs.readFileSync(new URL('../src/server-v16.mjs',import.meta.url),'utf8');
 const gateway=fs.readFileSync(new URL('../src/server-v17.mjs',import.meta.url),'utf8');
+const supervisor=fs.readFileSync(new URL('../src/server-v18.mjs',import.meta.url),'utf8');
+const fallback=fs.readFileSync(new URL('../src/fallback-discovery-v18.mjs',import.meta.url),'utf8');
+const worker=fs.readFileSync(new URL('../src/fallback-worker-v18.mjs',import.meta.url),'utf8');
 const pkg=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8'));
 
-test('v17 content gateway is default while v16 remains an explicit fallback',()=>{
-  assert.equal(pkg.scripts.start,'node src/server-v17.mjs');
+test('v18 supervisor is default while v17 and v16 remain explicit fallbacks',()=>{
+  assert.equal(pkg.scripts.start,'node src/server-v18.mjs');
+  assert.equal(pkg.scripts['start:v17'],'node src/server-v17.mjs');
   assert.equal(pkg.scripts['start:v16'],'node src/server-v16.mjs');
   assert.match(server,/version:\s*16/);
   assert.match(server,/scanner:\s*'viral-narrative-scout-v16'/);
   assert.match(gateway,/scanner:\s*'viral-narrative-content-scout-v17'/);
+  assert.match(supervisor,/scanner:\s*'viral-narrative-content-scout-v18'/);
+});
+
+test('v18 can stop the whole scan tree and guards duplicate manual scans',()=>{
+  assert.match(supervisor,/req\.url === '\/stop'/);
+  assert.match(supervisor,/process\.kill\(-pid, 'SIGKILL'\)/);
+  assert.match(supervisor,/killProcessGroup\(fallbackWorker\)/);
+  assert.match(supervisor,/A scan is already running\. Use Stop scan before starting another one\./);
+  assert.match(supervisor,/'manual-scan-stop'/);
+  assert.match(supervisor,/'duplicate-scan-guard'/);
+});
+
+test('v18 zero-result recovery admits caption-light videos before local grounding',()=>{
+  assert.match(fallback,/mediaType !== 'video'/);
+  assert.match(fallback,/visualCandidate: mediaType === 'video' && !content/);
+  assert.match(fallback,/visualCandidate: !content/);
+  assert.match(supervisor,/zeroResultFallback\(scanBody, data\)/);
+  assert.match(worker,/collectFallbackEvidence\(/);
+  assert.match(worker,/detector\.enrich\(/);
+  assert.match(worker,/rows\.filter\(\(row\) => clean\(row\.content, 8000\)\.length >= 3\)/);
+});
+
+test('visual fallback topics still require two independently understood creators',()=>{
+  assert.match(worker,/supported\.length >= 2 && creators\.size >= 2/);
 });
 
 test('adaptive scrolling can stop when the scout finds a qualified signal',()=>{
