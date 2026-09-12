@@ -72,9 +72,9 @@ fi
 # be invisible by default so scanning does not pop up disposable windows.
 export FRONT_BRIDGE_HEADLESS="${FRONT_BRIDGE_HEADLESS:-1}"
 
-echo "Starting Front browser bridge v18 on http://127.0.0.1:43981"
+echo "Starting Front browser bridge v19 on http://127.0.0.1:43981"
 echo "Keep this Terminal window open while you want browser intelligence running."
-echo "v18 adds Stop Scan, duplicate-scan protection, and a visual fallback if normal extraction returns zero evidence."
+echo "v19 adds a persistent scan ledger and a Chrome CDP compatibility layer, while keeping v18 Stop Scan and visual fallback behavior."
 echo "Browser scans and video-frame analysis run in the background; login still opens regular Chrome."
 if [ -n "${FRONT_CONTENT_API_KEY:-${OPENAI_API_KEY:-}}" ]; then
   echo "Video understanding: OpenAI provider configured."
