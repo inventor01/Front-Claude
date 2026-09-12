@@ -105,6 +105,26 @@ jobs:
           kill $BRIDGE_PID || true
           trap - EXIT
 
+      - name: Content understanding v17 gateway smoke test
+        run: |
+          rm -rf /tmp/front-v17-smoke
+          FRONT_BRIDGE_PORT=43995 FRONT_BRIDGE_INTERNAL_PORT=43998 FRONT_BRIDGE_DATA=/tmp/front-v17-smoke FRONT_CONTENT_PROVIDER=off node browser-bridge/src/server-v17.mjs > /tmp/front-bridge-v17.log 2>&1 &
+          BRIDGE_PID=$!
+          trap 'kill $BRIDGE_PID || true' EXIT
+          for i in {1..40}; do
+            if curl --fail --silent http://127.0.0.1:43995/health > /tmp/front-bridge-v17-health.json; then break; fi
+            sleep 0.25
+          done
+          cat /tmp/front-bridge-v17.log || true
+          node - <<'NODE'
+          const d=require('/tmp/front-bridge-v17-health.json');
+          const required=['timeline-video-frame-capture','multimodal-post-understanding','visual-event-grounding','caption-light-video-detection'];
+          if(!d.ok||d.service!=='front-browser-bridge'||d.version!==17||d.scanner!=='viral-narrative-content-scout-v17'||!required.every((x)=>d.capabilities.includes(x)))process.exit(1);
+          if(!d.contentUnderstanding||d.contentUnderstanding.version!==17||d.contentUnderstanding.enabled!==false)process.exit(1);
+          NODE
+          kill $BRIDGE_PID || true
+          trap - EXIT
+
       # verify.mjs replays the migrations through node:sqlite. This proves they
       # also apply through wrangler to a real D1, which is stricter (0002 uses
       # PRAGMA statements), and that the local dev database can be built at all.
