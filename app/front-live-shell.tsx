@@ -84,6 +84,7 @@ export default function FrontLiveShell(){
   const [live,setLive]=useState<LiveState|null>(null);
   const [refreshKey,setRefreshKey]=useState(0);
   const [synced,setSynced]=useState(0);
+  const [syncedEvidenceIds,setSyncedEvidenceIds]=useState<Set<string>>(()=>new Set());
   const [syncError,setSyncError]=useState('');
   const [expanded,setExpanded]=useState(false);
   const [filter,setFilter]=useState<LiveFilter>('all');
@@ -113,6 +114,13 @@ export default function FrontLiveShell(){
           try{
             await saveLive(fresh,next.inferredTopics||[]);
             for(const row of fresh)syncedIds.current.add(row.id);
+            if(fresh.length){
+              setSyncedEvidenceIds((current)=>{
+                const updated=new Set(current);
+                for(const row of fresh)updated.add(row.id);
+                return updated;
+              });
+            }
             if(fingerprint)lastTopics.current=fingerprint;
             if(fresh.length)setSynced((count)=>count+fresh.length);
             setSyncError('');
@@ -130,6 +138,7 @@ export default function FrontLiveShell(){
           syncedIds.current.clear();
           lastTopics.current='';
           setSynced(0);
+          setSyncedEvidenceIds(new Set());
           setSyncError('');
           setFilter('all');
           setSelectedTopic('');
@@ -164,11 +173,11 @@ export default function FrontLiveShell(){
         return needle.length>1&&row.content.toLowerCase().includes(needle);
       }
       if(filter==='X'||filter==='TikTok')return row.platform===filter;
-      if(filter==='synced')return syncedIds.current.has(row.id);
+      if(filter==='synced')return syncedEvidenceIds.has(row.id);
       if(filter==='candidates')return candidateIds.has(row.id);
       return true;
     }).slice().reverse().slice(0,80);
-  },[live?.evidence,filter,selectedTopic,topics,synced]);
+  },[live?.evidence,filter,selectedTopic,topics,syncedEvidenceIds]);
 
   function chooseFilter(next:LiveFilter){
     setFilter(next);
