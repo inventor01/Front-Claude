@@ -47,6 +47,8 @@ type HotPost = {
   rising:boolean;
 };
 
+type LearningReason = {label:string;points:number;examples:number};
+
 type Row = {
   id:string;
   title:string;
@@ -66,11 +68,15 @@ type Row = {
   coins:Coin[];
   possibleCoins:Coin[];
   topMarketCap:number|null;
+  learnedAdjustment:number;
+  learningReasons:LearningReason[];
 };
 
 type Feed = {
   rows:Row[];
   stats:{narratives:number;hot:number;verifiedCoins:number;lastSeen:number|null};
+  learning:{examples:number;feedback:number;positive:number;negative:number;outcomes:number;activeFeatures:number;minExamplesPerFeature:number;maxAdjustment:number};
+  feedback:Record<string,'useful'|'not-relevant'>;
   at:number;
   note:string;
 };
@@ -205,6 +211,7 @@ export default function FrontDesk(){
   const [expanded,setExpanded] = useState<string|null>(null);
   const [details,setDetails] = useState<Record<string,Detail>>({});
   const [busy,setBusy] = useState(false);
+  const [feedbackBusy,setFeedbackBusy] = useState<string|null>(null);
   const [status,setStatus] = useState('Connecting to scanner…');
   const [error,setError] = useState('');
 
@@ -273,6 +280,20 @@ export default function FrontDesk(){
     }
   }
 
+  async function rate(row:Row,label:'useful'|'not-relevant'){
+    setFeedbackBusy(row.id);
+    setError('');
+    try{
+      await post('/api/front-feed',{action:'feedback',narrativeId:row.id,label});
+      setStatus(label==='useful'?'Saved · Front will learn which signal patterns are useful':'Saved · Front will learn which signal patterns are noise');
+      await load();
+    }catch(e){
+      setError((e as Error).message);
+    }finally{
+      setFeedbackBusy(null);
+    }
+  }
+
   async function clearFresh(){
     if(!window.confirm('Clear active narrative results and start a brand-new scan? Your X/TikTok session, scanner settings, Pump.fun watches and private learning history stay intact.')) return;
     setBusy(true);
@@ -291,10 +312,11 @@ export default function FrontDesk(){
         }
       }catch{}
       const resetAt = Date.now();
-      setFeed({rows:[],stats:{narratives:0,hot:0,verifiedCoins:0,lastSeen:null},at:resetAt,note:''});
+      setFeed(null);
       setExpanded(null);
       setDetails({});
       setBusy(false);
+      setStatus(`Active intelligence cleared at ${new Date(resetAt).toLocaleTimeString()} · starting a fresh scan…`);
       await scan();
     }catch(e){
       setError((e as Error).message);
@@ -338,6 +360,7 @@ export default function FrontDesk(){
     <div className={styles.statusbar}>
       <Activity size={14}/><span>{status}</span><span className={styles.dot}/>
       <span>Last evidence {stats?.lastSeen?`${ago(stats.lastSeen,renderAt)} ago`:'—'}</span>
+      {feed?.learning&&<span>Private learning {feed.learning.examples} examples · {feed.learning.activeFeatures} active patterns</span>}
     </div>
 
     {error&&<div className={styles.error}>{error}</div>}
@@ -350,7 +373,7 @@ export default function FrontDesk(){
 
     <section className={styles.feed}>
       <div className={styles.feedHead}>
-        <div><h2>Priority feed</h2><p>Fast engagement + independent creators + same-event cross-platform spread + verified coin matches rise to the top.</p></div>
+        <div><h2>Priority feed</h2><p>Fast engagement + independent creators + same-event cross-platform spread + verified coin matches rise to the top. Your feedback can only tune ranking; it cannot weaken the quality gate.</p></div>
         <span>{feed?.rows.length??0} qualified</span>
       </div>
 
@@ -375,7 +398,10 @@ export default function FrontDesk(){
                 {row.maxViewsPerHour>0?<span><b>{compact(row.maxViewsPerHour)}</b> max views/hr</span>:row.maxLikesPerHour>0?<span><b>{compact(row.maxLikesPerHour)}</b> max likes/hr</span>:<span>velocity metrics pending</span>}
                 {row.crossPostedCreators>0&&<span><b>{row.crossPostedCreators}</b> cross-post creators</span>}
               </div>
-              <div className={styles.reasons}>{row.reasons.slice(0,5).map((reason)=><span key={reason}>{reason}</span>)}</div>
+              <div className={styles.reasons}>
+                {row.reasons.slice(0,5).map((reason)=><span key={reason}>{reason}</span>)}
+                {row.learnedAdjustment!==0&&<span>learned {row.learnedAdjustment>0?'+':''}{row.learnedAdjustment.toFixed(1)} rank</span>}
+              </div>
               {row.coins.length>0&&<div className={styles.coinRow}>{row.coins.slice(0,3).map((coin)=><CoinPill coin={coin} key={coin.mint}/>)}</div>}
             </div>
             <div className={styles.right}>
@@ -384,7 +410,7 @@ export default function FrontDesk(){
               {open?<ChevronUp size={18}/>:<ChevronDown size={18}/>}
             </div>
           </button>
-          {open&&<div className={styles.expanded}>{!detail?<div className={styles.loading}>Loading full intelligence…</div>:<Expanded detail={detail} row={row} now={renderAt}/>}</div>}
+          {open&&<div className={styles.expanded}>{!detail?<div className={styles.loading}>Loading full intelligence…</div>:<Expanded detail={detail} row={row} now={renderAt} feedbackLabel={feed?.feedback?.[row.id]} feedbackBusy={feedbackBusy===row.id} onFeedback={(label)=>void rate(row,label)}/>}</div>}
         </article>;
       })}
 
@@ -396,7 +422,7 @@ export default function FrontDesk(){
   </main>;
 }
 
-function Expanded({detail,row,now}:{detail:Detail;row:Row;now:number}){
+function Expanded({detail,row,now,feedbackLabel,feedbackBusy,onFeedback}:{detail:Detail;row:Row;now:number;feedbackLabel?:'useful'|'not-relevant';feedbackBusy:boolean;onFeedback:(label:'useful'|'not-relevant')=>void}){
   const launchByMint = new Map(detail.launches.map((launch)=>[launch.mint,launch]));
   const verified = detail.coins.filter((coin)=>launchByMint.has(coin.mint)&&coin.data.verifiedPumpfun===true);
   const coin = (mint:string) => verified.find((entry)=>entry.mint===mint)?.data||{};
@@ -410,6 +436,16 @@ function Expanded({detail,row,now}:{detail:Detail;row:Row;now:number}){
       <div><span>Momentum</span><b>{detail.latest?.momentum?.label||row.stage}</b></div>
       <div><span>Timing edge</span><b>{detail.edge.status==='before-launch'?'Before matching launch':detail.edge.status==='waiting'?'No match yet':detail.edge.status.replace('-',' ')}</b></div>
     </div>
+
+    <section className={styles.section}>
+      <h4>Teach Front</h4>
+      <p className={styles.hint}>Rate the result, not the prediction. Feedback is private and only tunes ranking after at least five comparable examples; narrative-quality and corroboration gates never self-relax.</p>
+      <div className={styles.actions}>
+        <button className={styles.secondary} disabled={feedbackBusy} onClick={()=>onFeedback('useful')}>{feedbackLabel==='useful'?'✓ Useful':'Useful'}</button>
+        <button className={styles.secondary} disabled={feedbackBusy} onClick={()=>onFeedback('not-relevant')}>{feedbackLabel==='not-relevant'?'✓ Not relevant':'Not relevant'}</button>
+      </div>
+      {row.learningReasons.length>0&&<p className={styles.hint}>Learned rank {row.learnedAdjustment>0?'+':''}{row.learnedAdjustment.toFixed(1)} from {row.learningReasons.map((reason)=>`${reason.label} (${reason.examples})`).join(' · ')}.</p>}
+    </section>
 
     {row.hotPosts.length>0&&<section className={styles.section}>
       <h4><Flame size={14}/> Fast posts</h4>
