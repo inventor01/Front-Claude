@@ -78,11 +78,13 @@ test('v18 can stop the whole scan tree and guards duplicate manual scans',()=>{
   assert.match(supervisor,/'duplicate-scan-guard'/);
 });
 
-test('v18 zero-result recovery admits caption-light videos before local grounding',()=>{
+test('v18 visual recovery admits caption-light videos and supplements thin scans before local grounding',()=>{
   assert.match(fallback,/mediaType !== 'video'/);
   assert.match(fallback,/visualCandidate: mediaType === 'video' && !content/);
   assert.match(fallback,/visualCandidate: !content/);
-  assert.match(supervisor,/zeroResultFallback\(scanBody, data\)/);
+  assert.match(supervisor,/visualRecoveryReason\(scanBody, data/);
+  assert.match(supervisor,/visualRecovery\(scanBody, data, reason\)/);
+  assert.match(supervisor,/'thin-result-visual-recovery'/);
   assert.match(worker,/collectFallbackEvidence\(/);
   assert.match(worker,/detector\.enrich\(/);
   assert.match(worker,/rows\.filter\(\(row\) => clean\(row\.content, 8000\)\.length >= 3\)/);
