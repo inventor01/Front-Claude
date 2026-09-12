@@ -11,7 +11,7 @@ export { semanticTextSimilarity, visualHashSimilarity };
 
 const norm = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
 const creatorKey = (row) => `${row.platform}:${String(row.author || '').toLowerCase()}`;
-const finite = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
+const finite = (value) => value === null || value === undefined || value === '' ? null : (Number.isFinite(Number(value)) ? Number(value) : null);
 
 function postRate(row, now = Date.now()) {
   const views = finite(row.views);
@@ -24,12 +24,29 @@ function postRate(row, now = Date.now()) {
   const saves = finite(row.saves) || 0;
   const published = finite(row.published);
   const ageHours = published && published > 0 ? Math.max(1 / 60, (now - published) / 3600000) : null;
-  const viewsPerHour = views != null && ageHours != null ? views / ageHours : null;
+  const derivedViewsPerHour = views != null && ageHours != null ? views / ageHours : null;
+  const measuredViewsPerMinute = finite(row.viewsPerMinute);
+  const measuredLikesPerMinute = finite(row.likesPerMinute);
+  const measuredViewsPerHour = measuredViewsPerMinute != null ? measuredViewsPerMinute * 60 : null;
+  const measuredLikesPerHour = measuredLikesPerMinute != null ? measuredLikesPerMinute * 60 : null;
+  const viewsPerHour = derivedViewsPerHour == null && measuredViewsPerHour == null ? null : Math.max(derivedViewsPerHour || 0, measuredViewsPerHour || 0);
   const weightedEngagement = likes + reposts * 2.2 + quotes * 2.4 + replies * 1.15 + comments * 1.15 + shares * 2.4 + saves * 1.5;
-  const engagementPerHour = ageHours != null ? weightedEngagement / ageHours : null;
+  const derivedEngagementPerHour = ageHours != null ? weightedEngagement / ageHours : null;
+  const engagementPerHour = derivedEngagementPerHour == null && measuredLikesPerHour == null ? null : Math.max(derivedEngagementPerHour || 0, measuredLikesPerHour || 0);
   const viewEngagementRate = views && views > 0 ? weightedEngagement / views : null;
-  const explosive = Boolean(ageHours != null && ((views != null && views >= 100000 && ageHours <= 6) || (viewsPerHour != null && viewsPerHour >= 100000)));
-  const hot = Boolean(explosive || (ageHours != null && views != null && views >= 50000 && ageHours <= 3) || (viewsPerHour != null && viewsPerHour >= 25000));
+  const explosive = Boolean(
+    (ageHours != null && views != null && views >= 100000 && ageHours <= 6)
+    || (viewsPerHour != null && viewsPerHour >= 100000)
+    || (ageHours != null && likes >= 10000 && ageHours <= 6)
+    || (measuredLikesPerHour != null && measuredLikesPerHour >= 5000)
+  );
+  const hot = Boolean(
+    explosive
+    || (ageHours != null && views != null && views >= 50000 && ageHours <= 3)
+    || (viewsPerHour != null && viewsPerHour >= 25000)
+    || (ageHours != null && likes >= 5000 && ageHours <= 3)
+    || (measuredLikesPerHour != null && measuredLikesPerHour >= 2000)
+  );
   let velocityScore = 0;
   if (viewsPerHour != null) velocityScore += Math.min(28, Math.log10(1 + viewsPerHour) * 5.2);
   if (views != null) velocityScore += Math.min(12, Math.log10(1 + views) * 1.7);
@@ -45,8 +62,10 @@ function postRate(row, now = Date.now()) {
     likes: finite(row.likes),
     ageHours: ageHours == null ? null : Number(ageHours.toFixed(3)),
     viewsPerHour: viewsPerHour == null ? null : Math.round(viewsPerHour),
+    likesPerHour: measuredLikesPerHour == null ? (ageHours != null ? Math.round(likes / ageHours) : null) : Math.round(Math.max(measuredLikesPerHour, ageHours != null ? likes / ageHours : 0)),
     engagementPerHour: engagementPerHour == null ? null : Math.round(engagementPerHour),
     engagementRate: viewEngagementRate == null ? null : Number((viewEngagementRate * 100).toFixed(2)),
+    measuredVelocity: measuredViewsPerMinute != null || measuredLikesPerMinute != null,
     explosive,
     hot,
     velocityScore: Number(velocityScore.toFixed(2)),
@@ -84,6 +103,7 @@ function attachPostPriority(topics = [], evidence = [], now = Date.now()) {
     const rates = rows.map((row) => postRate(row, now));
     const hotPosts = rates.filter((row) => row.hot).sort((a, b) => b.velocityScore - a.velocityScore || (b.views || 0) - (a.views || 0)).slice(0, 6);
     const maxViewsPerHour = Math.max(0, ...rates.map((row) => row.viewsPerHour || 0));
+    const maxLikesPerHour = Math.max(0, ...rates.map((row) => row.likesPerHour || 0));
     const maxViews = Math.max(0, ...rates.map((row) => row.views || 0));
     const crossPosted = new Set();
     for (let i = 0; i < rows.length; i++) {
@@ -100,16 +120,18 @@ function attachPostPriority(topics = [], evidence = [], now = Date.now()) {
     let priorityScore = baseNarrativeScore;
     priorityScore += Math.min(42, hotPosts.reduce((sum, row) => sum + Math.min(20, row.velocityScore * .55), 0));
     priorityScore += Math.min(18, Math.log10(1 + maxViewsPerHour) * 3.2);
+    priorityScore += Math.min(10, Math.log10(1 + maxLikesPerHour) * 2.2);
     priorityScore += Math.min(12, crossPostedCreators * 2.5);
     priorityScore += sameEventCrossPlatform ? 10 : 0;
     priorityScore += Math.min(10, authorCount * 1.4);
     if (hotPosts.some((row) => row.explosive)) priorityScore += 16;
     const priorityReasons = [];
-    if (hotPosts.some((row) => row.explosive)) priorityReasons.push('100K+ fast post');
+    if (hotPosts.some((row) => row.explosive)) priorityReasons.push('breakout velocity');
     else if (hotPosts.length) priorityReasons.push('fast engagement');
     if (crossPostedCreators >= 2) priorityReasons.push(`${crossPostedCreators} cross-post creators`);
     if (sameEventCrossPlatform) priorityReasons.push('X ↔ TikTok same event');
     if (maxViewsPerHour >= 100000) priorityReasons.push(`${Math.round(maxViewsPerHour / 1000)}K views/hr`);
+    else if (maxLikesPerHour >= 2000) priorityReasons.push(`${Math.round(maxLikesPerHour / 1000)}K likes/hr`);
     return {
       ...topic,
       baseNarrativeScore,
@@ -118,6 +140,7 @@ function attachPostPriority(topics = [], evidence = [], now = Date.now()) {
       priorityReasons,
       hotPosts,
       maxViewsPerHour: Math.round(maxViewsPerHour),
+      maxLikesPerHour: Math.round(maxLikesPerHour),
       maxViews: Math.round(maxViews),
       crossPostedCreators,
       postsAnalyzed: rows.length,
@@ -142,19 +165,21 @@ export function shouldAutoDeep(topics = [], audit = {}, now = Date.now()) {
     const creators = Number(topic.authorCount || 0);
     const hotPosts = Array.isArray(topic.hotPosts) ? topic.hotPosts : [];
     const explosive = hotPosts.find((post) => post.explosive || (Number(post.views || 0) >= 100000 && Number(post.ageHours || 99) <= 6));
-    const fast = Number(topic.maxViewsPerHour || 0) >= 50000;
+    const fastViews = Number(topic.maxViewsPerHour || 0) >= 50000;
+    const fastLikes = Number(topic.maxLikesPerHour || 0) >= 5000;
     const crossPostedCreators = Number(topic.crossPostedCreators || 0);
-    if (creators >= 2 && (explosive || (fast && crossPostedCreators >= 2))) {
+    if (creators >= 2 && (explosive || ((fastViews || fastLikes) && crossPostedCreators >= 2))) {
       const reasons = [];
-      if (explosive) reasons.push(`${Math.round(Number(explosive.views || 0) / 1000)}K views in ${Number(explosive.ageHours || 0).toFixed(1)}h`);
-      if (fast) reasons.push(`${Math.round(Number(topic.maxViewsPerHour || 0) / 1000)}K views/hr`);
+      if (explosive) reasons.push('breakout post velocity');
+      if (fastViews) reasons.push(`${Math.round(Number(topic.maxViewsPerHour || 0) / 1000)}K views/hr`);
+      if (fastLikes) reasons.push(`${Math.round(Number(topic.maxLikesPerHour || 0) / 1000)}K likes/hr`);
       if (crossPostedCreators >= 2) reasons.push(`${crossPostedCreators} creators cross-posting related media/text`);
       return { trigger: true, topic: topic.topic || topic.key, key: norm(topic.key || topic.topic), reasons, at: now, strength: Math.min(1, .62 + reasons.length * .11) };
     }
   }
   // The legacy deep-escalation engine used raw platform count as a shortcut for
-  // corroboration. Strip that shortcut unless v13 has verified that X and
-  // TikTok are discussing the same event.
+  // corroboration. Strip that shortcut unless the current quality layer has
+  // verified that X and TikTok are discussing the same event.
   const safeTopics = topics.map((topic) => topic.crossPlatform?.corroborated ? topic : { ...topic, platforms: (topic.platforms || []).slice(0, 1) });
   return baseShouldAutoDeep(safeTopics, audit, now);
 }

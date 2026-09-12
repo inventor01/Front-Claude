@@ -72,17 +72,38 @@ jobs:
       - name: Browser bridge unit tests
         run: npm test --prefix browser-bridge
 
-      - name: Browser bridge health smoke test
+      - name: Legacy browser bridge health smoke test
         run: |
-          node browser-bridge/src/server-v10.mjs > /tmp/front-bridge.log 2>&1 &
+          node browser-bridge/src/server-v10.mjs > /tmp/front-bridge-v10.log 2>&1 &
           BRIDGE_PID=$!
           trap 'kill $BRIDGE_PID || true' EXIT
           for i in {1..20}; do
-            if curl --fail --silent http://127.0.0.1:43981/health > /tmp/front-bridge-health.json; then break; fi
+            if curl --fail --silent http://127.0.0.1:43981/health > /tmp/front-bridge-v10-health.json; then break; fi
             sleep 0.25
           done
-          cat /tmp/front-bridge.log || true
-          node -e "const d=require('/tmp/front-bridge-health.json');if(!d.ok||d.service!=='front-browser-bridge'||d.version!==10||d.scanner!=='for-you-adaptive')process.exit(1)"
+          cat /tmp/front-bridge-v10.log || true
+          node -e "const d=require('/tmp/front-bridge-v10-health.json');if(!d.ok||d.service!=='front-browser-bridge'||d.version!==10||d.scanner!=='for-you-adaptive')process.exit(1)"
+          kill $BRIDGE_PID || true
+          trap - EXIT
+
+      - name: Viral Scout v16 health smoke test
+        run: |
+          rm -rf /tmp/front-v16-smoke
+          FRONT_BRIDGE_PORT=43991 FRONT_BRIDGE_DATA=/tmp/front-v16-smoke node browser-bridge/src/server-v16.mjs > /tmp/front-bridge-v16.log 2>&1 &
+          BRIDGE_PID=$!
+          trap 'kill $BRIDGE_PID || true' EXIT
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:43991/health > /tmp/front-bridge-v16-health.json; then break; fi
+            sleep 0.25
+          done
+          cat /tmp/front-bridge-v16.log || true
+          node - <<'NODE'
+          const d=require('/tmp/front-bridge-v16-health.json');
+          const required=['signal-stop-scroll','viral-scout-skill','focus-first-investigation','measured-snapshot-velocity'];
+          if(!d.ok||d.service!=='front-browser-bridge'||d.version!==16||d.scanner!=='viral-narrative-scout-v16'||!required.every((x)=>d.capabilities.includes(x)))process.exit(1);
+          NODE
+          kill $BRIDGE_PID || true
+          trap - EXIT
 
       # verify.mjs replays the migrations through node:sqlite. This proves they
       # also apply through wrangler to a real D1, which is stricter (0002 uses
