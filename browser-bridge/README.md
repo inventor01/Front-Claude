@@ -1,16 +1,20 @@
 # Front Browser Bridge
 
-This optional local companion makes X and TikTok usable without requiring their APIs for normal discovery. v17 also adds a content-understanding layer for promising social videos so Front can use what happens inside a clip, not only its caption and metadata.
+This optional local companion makes X and TikTok usable without requiring their APIs for normal discovery. v18 keeps the v17 video-content understanding layer and adds scan supervision, manual cancellation, duplicate-scan protection, and a visual recovery path for feeds where the normal text extractor returns no usable evidence.
 
 ## What it does
 
 - Opens X and TikTok sign-in pages in regular Google Chrome using a dedicated local Front profile stored at `~/.front-browser-bridge/chrome-profile`.
 - Reuses that authenticated local Chrome session for X/TikTok For You discovery, search, investigations, origin research, and trend/sentinel scans.
 - Extracts actual post-level evidence such as caption/text, creator, URL, publish time when available, engagement metrics, sounds, quoted/related posts, and visual context.
-- For high-value video posts, v17 seeks across the whole video timeline and captures ordered representative frames. Short clips receive dense sampling; longer clips receive evenly distributed coverage.
+- For high-value video posts, the v17 content layer seeks across the whole video timeline and captures ordered representative frames. Short clips receive dense sampling; longer clips receive evenly distributed coverage.
 - When a multimodal provider is configured, the frame sequence is interpreted into a grounded event summary, visible entities/objects, actions, on-screen text, visual motifs, confidence, uncertainties, and meme potential.
-- Re-runs the normal deterministic narrative detector over the enriched evidence. A visual model cannot bypass Front's independent-creator, junk-topic, corroboration, or Pump.fun provenance gates.
-- Caches successful video understanding for seven days so Front does not repeatedly pay to understand the same clip.
+- If the primary v16/v17 scan returns zero evidence, v18 performs a bounded recovery pass against the same authenticated Chrome session and can admit caption-light X/TikTok videos to local vision analysis before they are discarded.
+- Visual-only recovery rows never leave the Mac empty: they are uploaded only after the local vision model grounds them into meaningful semantic content. Brand-new visual narratives still need at least two grounded posts from two independent creators.
+- Re-runs the normal deterministic narrative detector over enriched evidence. A visual model cannot bypass Front's independent-creator, junk-topic, corroboration, or Pump.fun provenance gates.
+- Caches successful video understanding for seven days so Front does not repeatedly analyze the same clip.
+- Exposes **Stop scan** in Front Settings. v18 terminates the active scanner/vision worker and restarts the internal scanner without deleting the Chrome profile, logins, settings, reputation/history state, or Ollama configuration.
+- Rejects a duplicate manual scan before it reaches the older scanner, preventing a harmless collision from being recorded as the active scan error.
 - Sends only extracted evidence records to the Front web app when you run/sync a scan. X/TikTok cookies and passwords stay in the local browser profile.
 - Does not bypass CAPTCHAs, login challenges, rate limits, account restrictions, or platform blocks.
 
@@ -27,9 +31,19 @@ After it starts, open Front → **Settings**, click **Open X + TikTok login**, a
 
 If X or TikTok has temporarily limited login, do not repeatedly retry. Complete the platform's normal verification/recovery flow or wait for the restriction to clear, then use the same Front Chrome profile again.
 
+## Stop an active scan
+
+Use **Front → Settings → Stop scan**. The equivalent local endpoint is:
+
+```bash
+curl -X POST http://127.0.0.1:43981/stop
+```
+
+v18 supervises the v17/v16 scanner tree and its zero-result visual-recovery worker as separate local process groups. Stop Scan terminates whichever path is active and starts a fresh internal scanner. It does not reset local data or browser authentication.
+
 ## Enable semantic video understanding
 
-Frame capture is built into v17, but semantic interpretation requires either an OpenAI API key or a user-installed local Ollama vision model. Provider credentials are intentionally local-only; the Front cloud Settings page never receives the key.
+Frame capture is built into the content layer, but semantic interpretation requires either an OpenAI API key or a user-installed local Ollama vision model. Provider credentials are intentionally local-only; the Front cloud Settings page never receives the key.
 
 Run the setup helper:
 
@@ -49,7 +63,11 @@ By default, Front analyzes at most 4 selected videos during a deep scan and 2 du
 
 ## Why it does not send every raw frame
 
-A 30 fps, 20-second clip contains 600 frames, most of which are nearly identical to adjacent frames. Sending all 600 images would multiply latency and inference cost without meaningfully improving narrative recognition. v17 still covers the **entire video timeline**: it uses dense sampling on short clips and evenly distributed chronological samples on longer videos, with timestamps preserved. Up to 12 representative frames are sent to the multimodal model per analysis while local capture can be denser.
+A 30 fps, 20-second clip contains 600 frames, most of which are nearly identical to adjacent frames. Sending all 600 images would multiply latency and inference cost without meaningfully improving narrative recognition. The content layer still covers the **entire video timeline**: it uses dense sampling on short clips and evenly distributed chronological samples on longer videos, with timestamps preserved. Up to 12 representative frames are sent to the multimodal model per analysis while local capture can be denser.
+
+## Zero-result diagnostics
+
+The primary scanner remains the first path. If it returns no evidence, v18 records a `fallbackDiscovery` audit containing how many X posts and TikTok video links the recovery pass actually observed. If recovery also returns zero grounded rows, the scan message surfaces that fact instead of posting an empty batch to the cloud. In that case, verify that the dedicated Front Chrome window is still signed in and visibly loads real X/TikTok posts.
 
 ## Cost model
 

@@ -1,7 +1,7 @@
 'use client';
 
 import {useEffect,useRef,useState} from 'react';
-import {Activity,ArrowLeft,Bell,CheckCircle2,LogIn,Play,Plus,Radio,RefreshCw,Save,Trash2,TriangleAlert} from 'lucide-react';
+import {Activity,ArrowLeft,Bell,CheckCircle2,LogIn,Play,Plus,Radio,RefreshCw,Save,Square,Trash2,TriangleAlert} from 'lucide-react';
 import styles from './settings-client.module.css';
 
 const BRIDGE='http://127.0.0.1:43981';
@@ -101,6 +101,7 @@ export default function SettingsClient(){
   const [accounts,setAccounts]=useState('');
   const [keywords,setKeywords]=useState('');
   const [busy,setBusy]=useState('');
+  const [stopping,setStopping]=useState(false);
   const [message,setMessage]=useState('');
   const [error,setError]=useState('');
   const [watches,setWatches]=useState<Watch[]>([]);
@@ -111,6 +112,7 @@ export default function SettingsClient(){
   const watchesRef=useRef<Watch[]>([]);
   const hydrated=useRef(false);
   const configHydrated=useRef(false);
+  const stopRequested=useRef(false);
 
   const nextRun=health?.nextScheduledRun?new Date(health.nextScheduledRun).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—';
 
@@ -171,15 +173,37 @@ export default function SettingsClient(){
   }
 
   async function runDeepScan(){
+    stopRequested.current=false;
     setBusy('scan');setMessage('Running deep X + TikTok investigation…');setError('');
     try{
       const result=await local<ScanResult>('/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...config,mode:'deep',xAccounts:lines(accounts).slice(0,30),keywords:lines(keywords)})},DEEP_TIMEOUT_MS);
+      if(!result.evidence.length){
+        const detail=(result.errors||[]).slice(-2).join(' ');
+        setMessage(`Deep scan finished with 0 usable evidence records.${detail?` ${detail}`:''}`);
+        await ping(true,false);
+        return;
+      }
       const stored=await saveEvidence(result.evidence,result.inferredTopics||[]);
       const warnings=result.errors.length?` ${result.errors.length} source warning(s).`:'';
       setMessage(`Deep scan finished: ${result.evidence.length} evidence record(s), ${result.inferredTopics?.length||0} candidate topic(s), ${stored.accepted||0} saved.${warnings}`);
       window.dispatchEvent(new CustomEvent('front-browser-evidence-saved'));
       await ping(true,false);
-    }catch(e){setError((e as Error).message);}finally{setBusy('');}
+    }catch(e){
+      if(stopRequested.current){setError('');setMessage('Scan stopped.');}
+      else setError((e as Error).message);
+    }finally{setBusy('');}
+  }
+
+  async function stopScan(){
+    stopRequested.current=true;
+    setStopping(true);setError('');setMessage('Stopping current scan…');
+    try{
+      const result=await local<{message?:string;stopped?:boolean;restarted?:boolean}>('/stop',{method:'POST'},20_000);
+      setMessage(result.message||'Scan stopped.');
+      await ping(true,false);
+    }catch(e){
+      setError((e as Error).message);
+    }finally{setStopping(false);}
   }
 
   function addWatch(){
@@ -256,10 +280,11 @@ export default function SettingsClient(){
       <section className={`${styles.card} ${styles.span2}`}>
         <div className={styles.cardHead}><div><Activity size={18}/><div><h2>Browser scanner</h2><p>X + TikTok discovery and investigation settings</p></div></div><span className={connected?styles.good:styles.muted}>{connected?'● connected':'○ offline'}</span></div>
         <div className={styles.actions}>
-          <button onClick={()=>void ping(false,true)} disabled={!!busy}><RefreshCw size={14}/> Reconnect</button>
-          <button onClick={()=>void openLogin()} disabled={!!busy}><LogIn size={14}/> {busy==='login'?'Opening…':'Open X + TikTok login'}</button>
-          <button className={styles.primary} onClick={()=>void runDeepScan()} disabled={!!busy||!connected}><Play size={14}/> {busy==='scan'?'Investigating…':'Run deep scan'}</button>
-          <button onClick={()=>void syncPending()} disabled={!!busy||!connected}><RefreshCw size={14}/> {busy==='sync'?'Syncing…':'Sync finds'}</button>
+          <button onClick={()=>void ping(false,true)} disabled={!!busy||stopping}><RefreshCw size={14}/> Reconnect</button>
+          <button onClick={()=>void openLogin()} disabled={!!busy||stopping}><LogIn size={14}/> {busy==='login'?'Opening…':'Open X + TikTok login'}</button>
+          <button className={styles.primary} onClick={()=>void runDeepScan()} disabled={!!busy||stopping||!connected||Boolean(health?.running)}><Play size={14}/> {health?.running&&!busy?'Scanner busy':busy==='scan'?'Investigating…':'Run deep scan'}</button>
+          <button className={styles.danger} onClick={()=>void stopScan()} disabled={!connected||stopping||(!health?.running&&busy!=='scan')}><Square size={14}/> {stopping?'Stopping…':'Stop scan'}</button>
+          <button onClick={()=>void syncPending()} disabled={!!busy||stopping||!connected}><RefreshCw size={14}/> {busy==='sync'?'Syncing…':'Sync finds'}</button>
         </div>
 
         <div className={styles.rule}/>
@@ -295,7 +320,7 @@ export default function SettingsClient(){
       </section>
 
       <section className={`${styles.card} ${styles.span2}`}>
-        <div className={styles.saveRow}><div><h2>Save scanner settings</h2><p>Changes are written to the local bridge and persist across scans.</p></div><button className={styles.primary} onClick={()=>void saveConfig()} disabled={!!busy||!connected}><Save size={14}/> {busy==='save'?'Saving…':'Save changes'}</button></div>
+        <div className={styles.saveRow}><div><h2>Save scanner settings</h2><p>Changes are written to the local bridge and persist across scans.</p></div><button className={styles.primary} onClick={()=>void saveConfig()} disabled={!!busy||stopping||!connected}><Save size={14}/> {busy==='save'?'Saving…':'Save changes'}</button></div>
       </section>
 
       <section className={`${styles.card} ${styles.span2}`}>
