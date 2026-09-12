@@ -5,18 +5,41 @@ import fs from 'node:fs';
 const server=fs.readFileSync(new URL('../src/server-v16.mjs',import.meta.url),'utf8');
 const gateway=fs.readFileSync(new URL('../src/server-v17.mjs',import.meta.url),'utf8');
 const supervisor=fs.readFileSync(new URL('../src/server-v18.mjs',import.meta.url),'utf8');
+const ledgerSupervisor=fs.readFileSync(new URL('../src/server-v19.mjs',import.meta.url),'utf8');
+const launcher=fs.readFileSync(new URL('../src/launcher-v19.mjs',import.meta.url),'utf8');
+const compat=fs.readFileSync(new URL('../src/playwright-cdp-compat.mjs',import.meta.url),'utf8');
 const fallback=fs.readFileSync(new URL('../src/fallback-discovery-v18.mjs',import.meta.url),'utf8');
 const worker=fs.readFileSync(new URL('../src/fallback-worker-v18.mjs',import.meta.url),'utf8');
 const pkg=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8'));
 
-test('v18 supervisor is default while v17 and v16 remain explicit fallbacks',()=>{
-  assert.equal(pkg.scripts.start,'node src/server-v18.mjs');
+test('v19 ledger supervisor is default while v18/v17/v16 remain explicit fallbacks',()=>{
+  assert.equal(pkg.scripts.start,'node src/launcher-v19.mjs');
+  assert.equal(pkg.scripts['start:v18'],'node src/server-v18.mjs');
   assert.equal(pkg.scripts['start:v17'],'node src/server-v17.mjs');
   assert.equal(pkg.scripts['start:v16'],'node src/server-v16.mjs');
   assert.match(server,/version:\s*16/);
   assert.match(server,/scanner:\s*'viral-narrative-scout-v16'/);
   assert.match(gateway,/scanner:\s*'viral-narrative-content-scout-v17'/);
   assert.match(supervisor,/scanner:\s*'viral-narrative-content-scout-v18'/);
+  assert.match(ledgerSupervisor,/scanner:\s*'viral-narrative-content-scout-v19'/);
+});
+
+test('v19 preloads Playwright CDP noDefaults compatibility into the full child tree',()=>{
+  assert.match(launcher,/NODE_OPTIONS/);
+  assert.match(launcher,/playwright-cdp-compat\.mjs/);
+  assert.match(compat,/noDefaults:\s*options\.noDefaults \?\? true/);
+  assert.match(compat,/frontCdpNoDefaults = true/);
+});
+
+test('v19 persists a readable scan ledger with current status, diagnostics and samples',()=>{
+  assert.match(ledgerSupervisor,/scan-ledger-v19\.json/);
+  assert.match(ledgerSupervisor,/url\.pathname === '\/ledger'/);
+  assert.match(ledgerSupervisor,/url\.pathname === '\/ledger\/clear'/);
+  assert.match(ledgerSupervisor,/sourceCountsFrom\(payload/);
+  assert.match(ledgerSupervisor,/evidenceSamples\(evidence\)/);
+  assert.match(ledgerSupervisor,/'scan-ledger'/);
+  assert.match(ledgerSupervisor,/'live-scan-ledger'/);
+  assert.match(ledgerSupervisor,/'cdp-no-defaults-compat'/);
 });
 
 test('v18 can stop the whole scan tree and guards duplicate manual scans',()=>{
