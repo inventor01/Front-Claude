@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const source=fs.readFileSync(new URL('../app/settings/settings-client.tsx',import.meta.url),'utf8');
+const settingsPage=fs.readFileSync(new URL('../app/settings/page.tsx',import.meta.url),'utf8');
+const ledgerPage=fs.readFileSync(new URL('../app/settings/ledger/page.tsx',import.meta.url),'utf8');
+const ledgerClient=fs.readFileSync(new URL('../app/settings/ledger/ledger-client.tsx',import.meta.url),'utf8');
 
 test('settings Back to Front uses a hard navigation instead of client Link routing',()=>{
   assert.match(source,/<a className=\{styles\.back\} href="\/">/);
@@ -28,4 +31,12 @@ test('zero-result deep scan is surfaced locally instead of posting an empty evid
   assert(zeroGuard>0);
   assert(save>zeroGuard);
   assert.match(source,/Deep scan finished with 0 usable evidence records/);
+});
+
+test('settings exposes an authenticated live scan ledger',()=>{
+  assert.match(settingsPage,/href="\/settings\/ledger"/);
+  assert.match(ledgerPage,/requireChatGPTUser\('\/settings\/ledger'\)/);
+  assert.match(ledgerClient,/fetch\(`\$\{BRIDGE\}\/ledger`/);
+  assert.match(ledgerClient,/setInterval\(\(\)=>void refresh\(true\),2000\)/);
+  assert.match(ledgerClient,/Open scanned post/);
 });
