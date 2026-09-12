@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Activity, Eye, Radio, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, ChevronDown, ChevronUp, ExternalLink, Eye, Filter, Radio, Sparkles } from 'lucide-react';
 import FrontDesk from './front-desk';
 import styles from './front-live-shell.module.css';
 
@@ -26,6 +26,7 @@ type LiveTopic = {
   evidenceCount?:number;
   authorCount?:number;
   platforms?:string[];
+  evidenceIds?:string[];
   score?:number;
   corroborated?:boolean;
 };
@@ -48,8 +49,18 @@ type LiveState = {
   inferredTopics:LiveTopic[];
 };
 
+type LiveFilter='all'|'X'|'TikTok'|'candidates'|'synced';
+
 const topicName=(topic:LiveTopic)=>String(topic.topic||topic.key||'').replace(/\s+/g,' ').trim();
 const topicFingerprint=(topics:LiveTopic[])=>topics.slice(0,30).map((topic)=>`${topic.key||topic.topic}:${topic.evidenceCount||0}:${topic.authorCount||0}:${topic.score||0}`).join('|');
+const compact=(value:number|null|undefined)=>value==null?'—':new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1}).format(value);
+const ago=(value:number|null|undefined)=>{
+  if(!value)return 'time unknown';
+  const minutes=Math.max(0,Math.round((Date.now()-value)/60000));
+  if(minutes<60)return `${minutes}m ago`;
+  if(minutes<2880)return `${(minutes/60).toFixed(minutes<600?1:0)}h ago`;
+  return `${Math.round(minutes/1440)}d ago`;
+};
 
 async function saveLive(evidence:LiveEvidence[],inferredTopics:LiveTopic[]){
   const response=await fetch('/api/browser-evidence',{
@@ -74,6 +85,9 @@ export default function FrontLiveShell(){
   const [refreshKey,setRefreshKey]=useState(0);
   const [synced,setSynced]=useState(0);
   const [syncError,setSyncError]=useState('');
+  const [expanded,setExpanded]=useState(false);
+  const [filter,setFilter]=useState<LiveFilter>('all');
+  const [selectedTopic,setSelectedTopic]=useState('');
   const syncedIds=useRef(new Set<string>());
   const lastTopics=useRef('');
   const syncing=useRef(false);
@@ -110,9 +124,6 @@ export default function FrontLiveShell(){
         }
 
         if(wasActive.current&&!next.active){
-          // The live panel supplied incremental findings while the scan ran.
-          // Remount the canonical feed once at completion so final ranking,
-          // dedupe, visual understanding and coin matches replace the preview.
           setRefreshKey((value)=>value+1);
         }
         if(!wasActive.current&&next.active){
@@ -120,6 +131,9 @@ export default function FrontLiveShell(){
           lastTopics.current='';
           setSynced(0);
           setSyncError('');
+          setFilter('all');
+          setSelectedTopic('');
+          setExpanded(false);
         }
         wasActive.current=next.active;
       }catch{
@@ -134,22 +148,71 @@ export default function FrontLiveShell(){
   },[]);
 
   const show=Boolean(live?.active);
-  const topics=(live?.inferredTopics||[]).filter((topic)=>topicName(topic)).slice(0,6);
+  const topics=(live?.inferredTopics||[]).filter((topic)=>topicName(topic)).slice(0,12);
   const xCount=live?.platformCounts?.X||0;
   const tiktokCount=live?.platformCounts?.TikTok||0;
+
+  const evidence=useMemo(()=>{
+    const rows=live?.evidence||[];
+    const topic=selectedTopic?topics.find((item)=>String(item.key||item.topic)===selectedTopic):undefined;
+    const topicIds=new Set(topic?.evidenceIds||[]);
+    const candidateIds=new Set(topics.flatMap((item)=>item.evidenceIds||[]));
+    return rows.filter((row)=>{
+      if(topic){
+        if(topicIds.size)return topicIds.has(row.id);
+        const needle=topicName(topic).toLowerCase();
+        return needle.length>1&&row.content.toLowerCase().includes(needle);
+      }
+      if(filter==='X'||filter==='TikTok')return row.platform===filter;
+      if(filter==='synced')return syncedIds.current.has(row.id);
+      if(filter==='candidates')return candidateIds.has(row.id);
+      return true;
+    }).slice().reverse().slice(0,80);
+  },[live?.evidence,filter,selectedTopic,topics,synced]);
+
+  function chooseFilter(next:LiveFilter){
+    setFilter(next);
+    setSelectedTopic('');
+    setExpanded(true);
+  }
+
+  function chooseTopic(topic:LiveTopic){
+    setSelectedTopic(String(topic.key||topic.topic||''));
+    setFilter('candidates');
+    setExpanded(true);
+  }
 
   return <>
     {show&&live&&<section className={styles.livePanel} data-active={live.active||undefined}>
       <div className={styles.liveHead}>
-        <div className={styles.liveTitle}><Radio size={15}/><b>LIVE SCAN</b><span>{live.phase}</span></div>
+        <button className={styles.liveTitleButton} onClick={()=>setExpanded((value)=>!value)} aria-expanded={expanded}>
+          <span className={styles.liveTitle}><Radio size={15}/><b>LIVE SCAN</b><span>{live.phase}</span></span>
+          {expanded?<ChevronUp size={16}/>:<ChevronDown size={16}/>} 
+        </button>
         <div className={styles.liveNumbers}>
-          <span><Eye size={14}/><b>{live.observed}</b> observed</span>
-          <span><Sparkles size={14}/><b>{live.candidateTopics}</b> candidates</span>
-          <span><Activity size={14}/><b>{synced}</b> synced</span>
+          <button data-selected={filter==='all'&&!selectedTopic||undefined} onClick={()=>chooseFilter('all')}><Eye size={14}/><b>{live.observed}</b> observed</button>
+          <button data-selected={filter==='candidates'&&!selectedTopic||undefined} onClick={()=>chooseFilter('candidates')}><Sparkles size={14}/><b>{live.candidateTopics}</b> candidates</button>
+          <button data-selected={filter==='synced'&&!selectedTopic||undefined} onClick={()=>chooseFilter('synced')}><Activity size={14}/><b>{synced}</b> synced</button>
         </div>
       </div>
-      <div className={styles.platforms}><span>X {xCount}</span><span>TikTok {tiktokCount}</span><span className={styles.pulse}>dashboard updating every 3s</span></div>
-      {topics.length>0&&<div className={styles.topicRow}>{topics.map((topic)=><span className={styles.topic} key={`${topic.key||topic.topic}`}><b>{topicName(topic)}</b><small>{topic.authorCount||0} creators · {topic.evidenceCount||0} posts</small></span>)}</div>}
+      <div className={styles.platforms}>
+        <button data-selected={filter==='X'&&!selectedTopic||undefined} onClick={()=>chooseFilter('X')}>X {xCount}</button>
+        <button data-selected={filter==='TikTok'&&!selectedTopic||undefined} onClick={()=>chooseFilter('TikTok')}>TikTok {tiktokCount}</button>
+        <button className={styles.allFilter} data-selected={filter==='all'&&!selectedTopic||undefined} onClick={()=>chooseFilter('all')}><Filter size={11}/>All</button>
+        <span className={styles.pulse}>dashboard updating every 3s</span>
+      </div>
+      {topics.length>0&&<div className={styles.topicRow}>{topics.map((topic)=><button className={styles.topic} data-selected={selectedTopic===String(topic.key||topic.topic)||undefined} onClick={()=>chooseTopic(topic)} key={`${topic.key||topic.topic}`}><b>{topicName(topic)}</b><small>{topic.authorCount||0} creators · {topic.evidenceCount||0} posts</small></button>)}</div>}
+      {expanded&&<div className={styles.drawer}>
+        <div className={styles.drawerHead}>
+          <div><b>{selectedTopic?topicName(topics.find((item)=>String(item.key||item.topic)===selectedTopic)??{}):filter==='all'?'All live evidence':`${filter} evidence`}</b><span>{evidence.length} visible · click X, TikTok, candidates, synced, or a topic to filter</span></div>
+          <button onClick={()=>setExpanded(false)}>Collapse <ChevronUp size={13}/></button>
+        </div>
+        {evidence.length?<div className={styles.evidenceGrid}>{evidence.map((row)=><a key={row.id} href={row.url} target='_blank' rel='noreferrer' className={styles.evidenceCard}>
+          <div className={styles.evidenceMeta}><b>{row.platform} · @{row.author}</b><ExternalLink size={12}/></div>
+          <p>{row.content}</p>
+          <small>{[ago(row.published),row.views!=null?`${compact(row.views)} views`:null,row.likes!=null?`${compact(row.likes)} likes`:null].filter(Boolean).join(' · ')}</small>
+        </a>)}</div>:<div className={styles.noEvidence}>No live evidence matches this filter yet.</div>}
+      </div>}
       {syncError&&<div className={styles.liveError}>{syncError}</div>}
     </section>}
     <FrontDesk key={refreshKey}/>
