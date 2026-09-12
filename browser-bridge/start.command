@@ -56,7 +56,7 @@ if [ ! -f "$QUALITY_MARKER" ]; then
   echo "Front v13: archived old active scanner state and started with a clean feed."
 fi
 
-# v17 content understanding uses a private local env file when present. The file
+# v17+ content understanding uses a private local env file when present. The file
 # is never uploaded by Front and its values are never printed. This supports an
 # OpenAI vision key or a local Ollama vision model without putting secrets into
 # the cloud Settings page.
@@ -72,8 +72,9 @@ fi
 # be invisible by default so scanning does not pop up disposable windows.
 export FRONT_BRIDGE_HEADLESS="${FRONT_BRIDGE_HEADLESS:-1}"
 
-echo "Starting Front browser bridge v17 on http://127.0.0.1:43981"
+echo "Starting Front browser bridge v18 on http://127.0.0.1:43981"
 echo "Keep this Terminal window open while you want browser intelligence running."
+echo "v18 adds Stop Scan, duplicate-scan protection, and a visual fallback if normal extraction returns zero evidence."
 echo "Browser scans and video-frame analysis run in the background; login still opens regular Chrome."
 if [ -n "${FRONT_CONTENT_API_KEY:-${OPENAI_API_KEY:-}}" ]; then
   echo "Video understanding: OpenAI provider configured."
