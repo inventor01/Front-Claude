@@ -18,6 +18,17 @@ export function shouldDriveTikTokFeed(urlValue, hasVideoAnchors = false) {
   }
 }
 
+export function isTikTokDiscoveryPage(urlValue) {
+  try {
+    const url = new URL(urlValue);
+    if (!/(^|\.)tiktok\.com$/i.test(url.hostname)) return false;
+    if (url.pathname === '/') return true;
+    return /\/(?:foryou|explore|search)(?:\/|$)/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 async function extractTikTokAnchors(page, provenance) {
   const raw = await page.evaluate(() => {
     const links = [...document.querySelectorAll('a[href*="/video/"]')].slice(0, 700);
@@ -59,6 +70,7 @@ export class BroadTikTokObserver {
     this.intervalMs = Math.max(600, Number(intervalMs) || 850);
     this.browser = null;
     this.context = null;
+    this.discoveryPage = null;
     this.timer = null;
     this.polling = false;
     this.rows = [];
@@ -85,8 +97,29 @@ export class BroadTikTokObserver {
     this.browser = await chromium.connectOverCDP(this.cdpUrl, { noDefaults: true });
     this.context = this.browser.contexts()[0];
     if (!this.context) throw new Error('Front Chrome did not expose a context for broad TikTok observation.');
-    this.browser.on('disconnected', () => { this.browser = null; this.context = null; });
+    this.browser.on('disconnected', () => {
+      this.browser = null;
+      this.context = null;
+      this.discoveryPage = null;
+    });
     return this.context;
+  }
+
+  async ensureDiscoveryPage() {
+    const context = await this.ensureContext();
+    if (this.discoveryPage && !this.discoveryPage.isClosed()) return this.discoveryPage;
+    const page = await context.newPage();
+    this.discoveryPage = page;
+    try {
+      await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'commit', timeout: 20000 });
+      await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(2200);
+      return page;
+    } catch (error) {
+      await page.close().catch(() => {});
+      if (this.discoveryPage === page) this.discoveryPage = null;
+      throw error;
+    }
   }
 
   start(request = {}) {
@@ -112,6 +145,9 @@ export class BroadTikTokObserver {
 
   stop(status = 'complete') {
     this.stopTimer();
+    const page = this.discoveryPage;
+    this.discoveryPage = null;
+    if (page && !page.isClosed()) void page.close().catch(() => {});
     this.state = { ...this.state, active: false, status, completedAt: Date.now(), updatedAt: Date.now() };
   }
 
@@ -125,22 +161,20 @@ export class BroadTikTokObserver {
     if (!this.state.active || this.polling) return;
     this.polling = true;
     try {
-      const context = await this.ensureContext();
-      const pages = context.pages();
-      const sourcePages = [];
-      for (const page of pages) {
-        let host = '';
-        const url = page.url();
-        try { host = new URL(url).hostname.toLowerCase(); } catch { continue; }
-        if (!/(^|\.)tiktok\.com$/.test(host)) continue;
-        sourcePages.push(url);
-        const observations = await extractTikTokAnchors(page, 'TikTok broad live observation');
-        this.add(observations);
-        if (this.state.observed < this.state.target && shouldDriveTikTokFeed(url, observations.length > 0)) {
-          await page.evaluate(() => window.scrollBy(0, Math.max(window.innerHeight * 1.05, 820))).catch(() => {});
-        }
+      const page = await this.ensureDiscoveryPage();
+      const url = page.url();
+      if (!isTikTokDiscoveryPage(url)) {
+        await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'commit', timeout: 20000 });
+        await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+        await page.waitForTimeout(1800);
       }
-      this.state = { ...this.state, sourcePages: [...new Set(sourcePages)].slice(0, 16), updatedAt: Date.now() };
+      const sourceUrl = page.url();
+      const observations = await extractTikTokAnchors(page, 'TikTok dedicated discovery observation');
+      this.add(observations);
+      if (this.state.observed < this.state.target && shouldDriveTikTokFeed(sourceUrl, observations.length > 0)) {
+        await page.evaluate(() => window.scrollBy(0, Math.max(window.innerHeight * 1.05, 820))).catch(() => {});
+      }
+      this.state = { ...this.state, sourcePages: [sourceUrl], updatedAt: Date.now() };
     } catch (error) {
       const errors = [...this.state.errors, clean(error?.message || error, 500)].slice(-8);
       this.state = { ...this.state, errors, updatedAt: Date.now() };
