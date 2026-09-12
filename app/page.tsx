@@ -1,7 +1,7 @@
 import { requireChatGPTUser } from './chatgpt-auth';
-import FrontDesk from './front-desk';
+import FrontLiveShell from './front-live-shell';
 
 export default async function Home() {
   await requireChatGPTUser('/');
-  return <FrontDesk/>;
+  return <FrontLiveShell/>;
 }
