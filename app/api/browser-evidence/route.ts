@@ -12,6 +12,7 @@ const NUMERIC_ONLY=/^\s*\d+(?:[.,]\d+)?\s*[KMB]?\s*$/i;
 const SOCIAL_TAG_ONLY=new Set('fyp fy foryou foryoupage viral viralvideo viralvideos trending trend tiktok tiktokviral tiktoktrend tiktoktrending capcut edit edits funny comedy humor explore explorepage xyzbca xyzabc'.split(' '));
 function asMetric(value:unknown){if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)&&n>=0?Math.trunc(n):null;}
 function asTimestamp(value:unknown){if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)&&n>0?Math.trunc(n):null;}
+function stableObservationAt(value:unknown,receivedAt:number){const parsed=asTimestamp(value);if(!parsed)return receivedAt;const min=receivedAt-7*86400000,max=receivedAt+5*60000;return parsed>=min&&parsed<=max?parsed:receivedAt;}
 function safeUrl(platform:'X'|'TikTok',raw:unknown){if(typeof raw!=='string'||raw.length>2048)return null;let url:URL;try{url=new URL(raw);}catch{return null;}if(url.protocol!=='https:')return null;const host=url.hostname.toLowerCase();const allowed=platform==='X'?new Set(['x.com','www.x.com','twitter.com','www.twitter.com']):new Set(['tiktok.com','www.tiktok.com','ads.tiktok.com']);if(!allowed.has(host))return null;url.hash='';return url.toString();}
 function normalizeLoose(value:string){return value.normalize('NFKC').toLowerCase().replace(/^@/,'').replace(/[^\p{L}\p{N}]+/gu,' ').trim();}
 function compactLoose(value:string){return normalizeLoose(value).replace(/\s+/g,'');}
@@ -22,8 +23,6 @@ function normalizedNarrativeId(value:string){return normalizeNarrativeText(value
 function narrativeKey(value:unknown,authorCount=0,tier:'pre-breakout'|'candidate'='candidate'){
  if(typeof value!=='string')return null;const clean=value.replace(/^#/,'').replace(/\s+/g,' ').trim().slice(0,80);const normalized=normalizedNarrativeId(clean);if(normalized.length<2||JUNK_LABEL.test(clean)||NUMERIC_ONLY.test(clean)||lowValueSocialTopic(clean)||isBroadNarrativeTitle(clean)||isNarrativeLabelJunk(clean))return null;
  const words=normalized.split(' ').filter(Boolean),specific=specificNarrativeTerms(clean);if(!specific.length)return null;
- // Two independent creators can remain in private pre-breakout learning, but a
- // one-word topic needs three independent creators before it can be promoted.
  if(words.length===1&&((tier==='candidate'&&authorCount<3)||authorCount<2||specific[0].length<4))return null;
  return clean;
 }
@@ -55,4 +54,28 @@ async function saveTopicSnapshots(owner:string,topics:InferredTopic[],at:number)
 async function queueCoinMatches(owner:string,narratives:string[],at:number){if(!narratives.length)return;await db().batch(narratives.map((id)=>db().prepare("INSERT INTO coin_match_queue(owner,narrative,queued,attempts,last_error,status) VALUES(?,?,?,0,NULL,'queued') ON CONFLICT(owner,narrative) DO UPDATE SET queued=excluded.queued,status='queued'").bind(owner,id,at)));}
 async function processCoinQueue(owner:string,limit=8){const queued=await db().prepare("SELECT narrative FROM coin_match_queue WHERE owner=? AND status='queued' ORDER BY queued ASC LIMIT ?").bind(owner,limit).all<{narrative:string}>();let matched=0,failed=0;for(const row of queued.results){await db().prepare("UPDATE coin_match_queue SET status='running',attempts=attempts+1 WHERE owner=? AND narrative=?").bind(owner,row.narrative).run();try{await matchNarrative(db(),owner,row.narrative);await db().prepare("UPDATE coin_match_queue SET status='done',last_error=NULL WHERE owner=? AND narrative=?").bind(owner,row.narrative).run();matched++;}catch(error){await db().prepare("UPDATE coin_match_queue SET status='queued',last_error=? WHERE owner=? AND narrative=?").bind(String((error as Error).message).slice(0,300),owner,row.narrative).run();failed++;}}return{processed:queued.results.length,matched,failed};}
 
-export async function POST(request:Request){const user=await getChatGPTUser();if(!user)return json({error:'Please sign in to save browser evidence.'},401);if(!samePublicOrigin(request))return json({error:'Invalid request origin.'},403);try{const body=await request.json() as {evidence?:unknown[];inferredTopics?:unknown};if(!Array.isArray(body.evidence))return json({error:'Evidence must be an array.'},400);if(body.evidence.length>250)return json({error:'A browser batch is limited to 250 evidence records.'},400);const accepted=body.evidence.map(evidenceFrom).filter((row):row is Evidence=>Boolean(row));if(!accepted.length&&body.evidence.length)return json({error:'No valid X or TikTok evidence records were supplied.'},400);const at=Date.now(),inferred=inferredTopics(body.inferredTopics);await saveTopicSnapshots(user.userId,inferred,at);const promotedIds:string[]=[];for(const topic of inferred){if(topic.tier==='pre-breakout')continue;const id=await ensureNarrative(user.userId,topic,at);promotedIds.push(id);await saveRelationships(user.userId,id,topic.related,at);}for(const row of accepted)await saveEvidence(db(),user.userId,row,at);await queueCoinMatches(user.userId,promotedIds,at);const queue=await processCoinQueue(user.userId,8);const updated=await narrativeFeed(db(),user.userId,{limit:100});const freshNarratives=updated.cards.filter((card:{lastSeen:number})=>card.lastSeen>=at-2000).length;const freshCoins=updated.coins.filter((coin:{observed:number})=>coin.observed>=at-120000).length;return json({ok:true,accepted:accepted.length,rejected:body.evidence.length-accepted.length,at,freshNarratives,matchedNarratives:queue.matched,freshCoins,inferredNarratives:promotedIds.length,preBreakout:inferred.filter((x)=>x.tier==='pre-breakout').length,relationshipsSaved:inferred.reduce((sum,x)=>sum+x.related.length,0),coinQueue:queue});}catch(error){return json({error:error instanceof SyntaxError?'Invalid request.':(error as Error).message},500);}}
+export async function POST(request:Request){
+ const user=await getChatGPTUser();if(!user)return json({error:'Please sign in to save browser evidence.'},401);if(!samePublicOrigin(request))return json({error:'Invalid request origin.'},403);
+ try{
+  const body=await request.json() as {evidence?:unknown[];inferredTopics?:unknown;scanObservedAt?:unknown};
+  if(!Array.isArray(body.evidence))return json({error:'Evidence must be an array.'},400);if(body.evidence.length>250)return json({error:'A browser batch is limited to 250 evidence records.'},400);
+  const accepted=body.evidence.map(evidenceFrom).filter((row):row is Evidence=>Boolean(row));if(!accepted.length&&body.evidence.length)return json({error:'No valid X or TikTok evidence records were supplied.'},400);
+  const receivedAt=Date.now(),observedAt=stableObservationAt(body.scanObservedAt,receivedAt),inferred=inferredTopics(body.inferredTopics);
+  const priorObservations=await db().prepare('SELECT id FROM observations WHERE owner=? AND observed=? LIMIT 1000').bind(user.userId,observedAt).all<{id:string}>();
+  const priorIds=new Set(priorObservations.results.map((row)=>row.id));
+  const freshEvidence=accepted.filter((row)=>!priorIds.has(row.id));
+  const priorTopics=await db().prepare('SELECT topic_key,tier FROM topic_snapshots WHERE owner=? AND observed=? LIMIT 200').bind(user.userId,observedAt).all<{topic_key:string;tier:string}>();
+  const priorTier=new Map(priorTopics.results.map((row)=>[normalizedNarrativeId(row.topic_key),row.tier]));
+  await saveTopicSnapshots(user.userId,inferred,observedAt);
+  const promotedIds:string[]=[],queueIds:string[]=[];
+  for(const topic of inferred){
+   if(topic.tier==='pre-breakout')continue;
+   const id=await ensureNarrative(user.userId,topic,observedAt);promotedIds.push(id);await saveRelationships(user.userId,id,topic.related,observedAt);
+   if(priorTier.get(normalizedNarrativeId(topic.key))!=='candidate')queueIds.push(id);
+  }
+  for(const row of freshEvidence)await saveEvidence(db(),user.userId,row,observedAt);
+  await queueCoinMatches(user.userId,queueIds,observedAt);const queue=await processCoinQueue(user.userId,8);
+  const updated=await narrativeFeed(db(),user.userId,{limit:100});const promotedSet=new Set(promotedIds);const freshNarratives=updated.cards.filter((card:{id:string})=>promotedSet.has(card.id)).length;const freshCoins=updated.coins.filter((coin:{observed:number})=>coin.observed>=receivedAt-120000).length;
+  return json({ok:true,accepted:accepted.length,newEvidence:freshEvidence.length,replayed:accepted.length-freshEvidence.length,rejected:body.evidence.length-accepted.length,at:receivedAt,observedAt,freshNarratives,matchedNarratives:queue.matched,freshCoins,inferredNarratives:promotedIds.length,preBreakout:inferred.filter((x)=>x.tier==='pre-breakout').length,relationshipsSaved:inferred.reduce((sum,x)=>sum+x.related.length,0),coinQueue:queue});
+ }catch(error){return json({error:error instanceof SyntaxError?'Invalid request.':(error as Error).message},500);}
+}
