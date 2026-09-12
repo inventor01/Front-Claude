@@ -316,7 +316,7 @@ function analysisPrompt(row, capture) {
     `Page title: ${capture.pageTitle || 'unknown'}`,
     `Video duration: ${Number(capture.duration || 0).toFixed(2)} seconds`,
     capture.transcript ? `Available caption track text: ${capture.transcript}` : 'Available caption track text: none',
-    `Frames are ordered from early to late and labeled with timestamps.`,
+    'Frames are ordered from early to late and labeled with timestamps.',
   ].join('\n');
 }
 
@@ -353,6 +353,27 @@ export function applyUnderstanding(row, analysis) {
   };
 }
 
+function latestByAt(entries = []) {
+  return [...entries].sort((a, b) => Number(b?.[1]?.at || 0) - Number(a?.[1]?.at || 0))[0] || null;
+}
+
+function successfulAnalysisSnapshot(entry) {
+  if (!entry?.ok || !entry.analysis?.summary) return null;
+  const analysis = entry.analysis;
+  return {
+    cachedAt: Number(entry.at || 0) || null,
+    analyzedAt: Number(analysis.analyzedAt || 0) || null,
+    summary: clean(analysis.summary, 420),
+    confidence: finite(analysis.confidence),
+    provider: analysis.provider || null,
+    model: analysis.model || null,
+    frameCount: Number(analysis.frameCount || 0),
+    modelFrameCount: Number(analysis.modelFrameCount || 0),
+    duration: Number(analysis.duration || 0),
+    captureType: analysis.captureType || null,
+  };
+}
+
 export class ContentUnderstandingEngine {
   constructor({ dataDir }) {
     this.dataDir = dataDir;
@@ -365,13 +386,29 @@ export class ContentUnderstandingEngine {
   }
 
   status() {
+    const entries = Object.entries(this.cache || {});
+    const successes = entries.filter(([, entry]) => entry?.ok === true && entry?.analysis?.summary);
+    const failures = entries.filter(([, entry]) => entry?.ok === false);
+    const latestSuccessEntry = latestByAt(successes)?.[1] || null;
+    const latestFailureEntry = latestByAt(failures)?.[1] || null;
+    let state = 'configured-not-run';
+    if (!this.provider.available) state = 'inactive';
+    else if (this.lastStats && Number(this.lastStats.failed || 0) > 0 && Number(this.lastStats.enriched || 0) === 0 && Number(this.lastStats.cached || 0) === 0) state = 'failed';
+    else if (this.lastError) state = 'degraded';
+    else if (this.lastRun && (Number(this.lastStats?.enriched || 0) > 0 || Number(this.lastStats?.cached || 0) > 0)) state = 'healthy';
+    else if (successes.length) state = 'cached-ready';
     return {
       version: CONTENT_UNDERSTANDING_VERSION,
       enabled: this.provider.available,
       provider: this.provider.provider,
       model: this.provider.model || null,
       reason: this.provider.reason || null,
-      cachedVideos: Object.keys(this.cache || {}).length,
+      state,
+      cachedVideos: entries.length,
+      successfulCachedVideos: successes.length,
+      failedCachedVideos: failures.length,
+      latestSuccess: successfulAnalysisSnapshot(latestSuccessEntry),
+      latestFailure: latestFailureEntry ? { cachedAt: Number(latestFailureEntry.at || 0) || null, error: clean(latestFailureEntry.error, 300) || 'Unknown content-analysis failure' } : null,
       lastRun: this.lastRun,
       lastError: this.lastError,
       lastStats: this.lastStats,
@@ -380,12 +417,17 @@ export class ContentUnderstandingEngine {
 
   cacheKey(row) { return `${row.platform}|${row.id}|${row.url}`; }
 
-  cached(row) {
+  cacheEntry(row) {
     const entry = this.cache[this.cacheKey(row)];
     if (!entry) return null;
     const ttl = entry.ok === false ? FAILURE_TTL_MS : CACHE_TTL_MS;
     if (Date.now() - Number(entry.at || 0) > ttl) return null;
-    return entry.analysis || null;
+    return entry;
+  }
+
+  cached(row) {
+    const entry = this.cacheEntry(row);
+    return entry?.ok === true ? (entry.analysis || null) : null;
   }
 
   applyCached(rows = []) {
@@ -402,8 +444,9 @@ export class ContentUnderstandingEngine {
   }
 
   async analyzeOne(context, row, { maxFrames = 16, timeoutMs = 45000 } = {}) {
-    const existing = this.cached(row);
-    if (existing?.summary) return { analysis: existing, cached: true };
+    const cachedEntry = this.cacheEntry(row);
+    if (cachedEntry?.ok === true && cachedEntry.analysis?.summary) return { analysis: cachedEntry.analysis, cached: true };
+    if (cachedEntry?.ok === false) return { analysis: null, cached: false, cachedFailure: true, error: clean(cachedEntry.error, 300) || 'Recent content-analysis failure is cooling down.' };
     if (!this.provider.available) return { analysis: null, cached: false, skipped: this.provider.reason || 'provider-unavailable' };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -443,10 +486,11 @@ export class ContentUnderstandingEngine {
     const limit = Math.max(0, Math.min(8, Number(maxVideos ?? (mode === 'deep' ? 4 : 2)) || 0));
     const selected = selectVideoCandidates(rows, { limit });
     const byKey = new Map(rows.map((row) => [this.cacheKey(row), row]));
-    const stats = { requested: selected.length, analyzed: 0, cached: 0, enriched: 0, failed: 0, skipped: 0, provider: this.provider.provider, model: this.provider.model || null };
+    const stats = { requested: selected.length, analyzed: 0, cached: 0, cachedFailures: 0, enriched: 0, failed: 0, skipped: 0, provider: this.provider.provider, model: this.provider.model || null };
     for (const row of selected) {
       const result = await this.analyzeOne(context, row, { maxFrames: mode === 'deep' ? 16 : 10, timeoutMs: mode === 'deep' ? 45000 : 30000 });
       if (result.cached) stats.cached++;
+      else if (result.cachedFailure) { stats.cachedFailures++; stats.failed++; }
       else if (result.analysis) stats.analyzed++;
       else if (result.skipped) stats.skipped++;
       else stats.failed++;
