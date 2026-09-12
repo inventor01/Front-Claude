@@ -1,6 +1,6 @@
 const normalize = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
 const creatorKey = (row) => `${row.platform}:${String(row.author || '').toLowerCase()}`;
-const finite = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
+const finite = (value) => value === null || value === undefined || value === '' ? null : (Number.isFinite(Number(value)) ? Number(value) : null);
 
 export const SCOUT_SKILL_VERSION = 16;
 
