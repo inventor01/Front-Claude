@@ -67,7 +67,11 @@ test('low-confidence model output never rewrites evidence content',()=>{
 
 test('content health distinguishes successful and failed persistent cache entries after restart',()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-content-health-'));
+  const previousModel=process.env.FRONT_OLLAMA_MODEL;
+  const previousProvider=process.env.FRONT_CONTENT_PROVIDER;
   try{
+    process.env.FRONT_OLLAMA_MODEL='qwen-test';
+    process.env.FRONT_CONTENT_PROVIDER='ollama';
     const now=Date.now();
     const successRow={id:'ok',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/1000000000001'};
     const failRow={id:'bad',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/1000000000002'};
@@ -77,6 +81,7 @@ test('content health distinguishes successful and failed persistent cache entrie
     }));
     const engine=new ContentUnderstandingEngine({dataDir:dir});
     const status=engine.status();
+    assert.equal(status.enabled,true);
     assert.equal(status.cachedVideos,2);
     assert.equal(status.successfulCachedVideos,1);
     assert.equal(status.failedCachedVideos,1);
@@ -84,7 +89,11 @@ test('content health distinguishes successful and failed persistent cache entrie
     assert.equal(status.latestSuccess.frameCount,11);
     assert.equal(status.latestFailure.error,'Content analysis timed out.');
     assert.equal(status.state,'cached-ready');
-  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+  }finally{
+    if(previousModel===undefined)delete process.env.FRONT_OLLAMA_MODEL;else process.env.FRONT_OLLAMA_MODEL=previousModel;
+    if(previousProvider===undefined)delete process.env.FRONT_CONTENT_PROVIDER;else process.env.FRONT_CONTENT_PROVIDER=previousProvider;
+    fs.rmSync(dir,{recursive:true,force:true});
+  }
 });
 
 test('recent failed content analysis is cached for cooldown instead of immediately retrying Ollama',async()=>{
