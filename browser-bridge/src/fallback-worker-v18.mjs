@@ -47,59 +47,56 @@ async function main() {
   const target = Math.max(16, Math.min(40, Math.round(Number(scanBody.targetUniqueFeedItems || 60) / 2)));
   const passes = Math.max(2, Math.min(6, Number(scanBody.maxAdaptiveScrolls || 5)));
   const browser = await chromium.connectOverCDP(frontCdpUrl(cdpPort));
-  try {
-    const context = browser.contexts()[0];
-    if (!context) throw new Error('Front Chrome did not expose a browser context for fallback discovery.');
-    const discovered = await collectFallbackEvidence(context, { targetPerPlatform: target, scrollPasses: passes });
-    const mode = scanBody.mode === 'scout' ? 'scout' : 'deep';
-    let rows = discovered.evidence;
-    let stats = { requested: 0, analyzed: 0, cached: 0, enriched: 0, failed: 0, skipped: 0, provider: detector.status().provider, model: detector.status().model };
+  const context = browser.contexts()[0];
+  if (!context) throw new Error('Front Chrome did not expose a browser context for fallback discovery.');
+  const discovered = await collectFallbackEvidence(context, { targetPerPlatform: target, scrollPasses: passes });
+  const mode = scanBody.mode === 'scout' ? 'scout' : 'deep';
+  let rows = discovered.evidence;
+  let stats = { requested: 0, analyzed: 0, cached: 0, enriched: 0, failed: 0, skipped: 0, provider: detector.status().provider, model: detector.status().model };
 
-    if (rows.length && detector.status().enabled) {
-      const enrichment = await detector.enrich(context, rows, {
-        mode,
-        maxVideos: mode === 'deep' ? Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 4) : Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 2),
-      });
-      rows = enrichment.rows;
-      stats = enrichment.stats;
-    }
-
-    // Empty-caption video rows are intentionally allowed into local visual
-    // understanding, but never leave the Mac until a grounded summary gives
-    // them real semantic content that the cloud evidence validator can accept.
-    const evidence = rows.filter((row) => clean(row.content, 8000).length >= 3);
-    const inferredTopics = detector.status().enabled ? deriveFallbackTopics(evidence, Date.now()) : [];
-    const diagnostics = discovered.diagnostics || {};
-    const errors = [...discovered.errors];
-    if (!evidence.length) {
-      errors.push(`v18 fallback observed X=${diagnostics.x?.collected || 0} post(s), TikTok=${diagnostics.tiktok?.collected || 0} video(s). No grounded evidence survived; verify the dedicated Front Chrome is signed in and visibly shows X/TikTok posts.`);
-    }
-
-    process.stdout.write(JSON.stringify({
-      ok: true,
-      evidence,
-      inferredTopics,
-      errors,
-      audit: {
-        version: 18,
-        triggered: true,
-        reason: 'inner-scanner-returned-zero-evidence',
-        rawEvidence: discovered.evidence.length,
-        groundedEvidence: evidence.length,
-        inferredTopics: inferredTopics.length,
-        diagnostics,
-      },
-      contentUnderstanding: {
-        ...detector.status(),
-        scan: stats,
-        visuallyUnderstood: evidence.filter((row) => row.contentSummary).length,
-      },
-    }));
-  } finally {
-    // connectOverCDP.close() only detaches Playwright from the already-running
-    // user Chrome; it does not delete the profile/session used by Front.
-    await browser.close().catch(() => {});
+  if (rows.length && detector.status().enabled) {
+    const enrichment = await detector.enrich(context, rows, {
+      mode,
+      maxVideos: mode === 'deep' ? Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 4) : Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 2),
+    });
+    rows = enrichment.rows;
+    stats = enrichment.stats;
   }
+
+  // Empty-caption video rows are intentionally allowed into local visual
+  // understanding, but never leave the Mac until a grounded summary gives
+  // them real semantic content that the cloud evidence validator can accept.
+  const evidence = rows.filter((row) => clean(row.content, 8000).length >= 3);
+  const inferredTopics = detector.status().enabled ? deriveFallbackTopics(evidence, Date.now()) : [];
+  const diagnostics = discovered.diagnostics || {};
+  const errors = [...discovered.errors];
+  if (!evidence.length) {
+    errors.push(`v18 fallback observed X=${diagnostics.x?.collected || 0} post(s), TikTok=${diagnostics.tiktok?.collected || 0} video(s). No grounded evidence survived; verify the dedicated Front Chrome is signed in and visibly shows X/TikTok posts.`);
+  }
+
+  // Do not call browser.close() here. This process connected to the user's
+  // already-running authenticated Chrome over CDP; exiting the worker releases
+  // the socket without issuing Browser.close against that persistent session.
+  process.stdout.write(JSON.stringify({
+    ok: true,
+    evidence,
+    inferredTopics,
+    errors,
+    audit: {
+      version: 18,
+      triggered: true,
+      reason: 'inner-scanner-returned-zero-evidence',
+      rawEvidence: discovered.evidence.length,
+      groundedEvidence: evidence.length,
+      inferredTopics: inferredTopics.length,
+      diagnostics,
+    },
+    contentUnderstanding: {
+      ...detector.status(),
+      scan: stats,
+      visuallyUnderstood: evidence.filter((row) => row.contentSummary).length,
+    },
+  }));
 }
 
 main().catch((error) => {
