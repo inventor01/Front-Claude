@@ -232,6 +232,7 @@ async function handle(req, res) {
       return {
         ...data,
         observed: Math.max(Number(data.observed || 0), mergedEvidence.length, broad.observed),
+        platformCounts: { ...(data.platformCounts || {}), TikTok: Math.max(Number(data.platformCounts?.TikTok || 0), broad.observed) },
         evidence: mergedEvidence,
         tiktokDiscovery: {
           observed: broad.observed,
