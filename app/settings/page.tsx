@@ -1,8 +1,7 @@
-import { requireChatGPTUser } from '../chatgpt-auth';
-import BrowserIntelligence from '../browser-intelligence';
-import FrontLiveTools from '../front-live-tools';
+import {requireChatGPTUser} from '../chatgpt-auth';
+import SettingsClient from './settings-client';
 
 export default async function SettingsPage(){
   await requireChatGPTUser('/settings');
-  return <><BrowserIntelligence/><FrontLiveTools/></>;
+  return <SettingsClient/>;
 }
