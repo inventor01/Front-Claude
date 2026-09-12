@@ -133,7 +133,7 @@ export default function FrontLiveShell(){
     return()=>{stopped=true;if(timer)clearTimeout(timer);};
   },[]);
 
-  const show=Boolean(live&&(live.active||(live.completedAt&&Date.now()-live.completedAt<15000)));
+  const show=Boolean(live?.active);
   const topics=(live?.inferredTopics||[]).filter((topic)=>topicName(topic)).slice(0,6);
   const xCount=live?.platformCounts?.X||0;
   const tiktokCount=live?.platformCounts?.TikTok||0;
@@ -141,14 +141,14 @@ export default function FrontLiveShell(){
   return <>
     {show&&live&&<section className={styles.livePanel} data-active={live.active||undefined}>
       <div className={styles.liveHead}>
-        <div className={styles.liveTitle}><Radio size={15}/><b>{live.active?'LIVE SCAN':'SCAN COMPLETE'}</b><span>{live.phase}</span></div>
+        <div className={styles.liveTitle}><Radio size={15}/><b>LIVE SCAN</b><span>{live.phase}</span></div>
         <div className={styles.liveNumbers}>
           <span><Eye size={14}/><b>{live.observed}</b> observed</span>
           <span><Sparkles size={14}/><b>{live.candidateTopics}</b> candidates</span>
           <span><Activity size={14}/><b>{synced}</b> synced</span>
         </div>
       </div>
-      <div className={styles.platforms}><span>X {xCount}</span><span>TikTok {tiktokCount}</span>{live.active&&<span className={styles.pulse}>dashboard updating every 3s</span>}</div>
+      <div className={styles.platforms}><span>X {xCount}</span><span>TikTok {tiktokCount}</span><span className={styles.pulse}>dashboard updating every 3s</span></div>
       {topics.length>0&&<div className={styles.topicRow}>{topics.map((topic)=><span className={styles.topic} key={`${topic.key||topic.topic}`}><b>{topicName(topic)}</b><small>{topic.authorCount||0} creators · {topic.evidenceCount||0} posts</small></span>)}</div>}
       {syncError&&<div className={styles.liveError}>{syncError}</div>}
     </section>}
