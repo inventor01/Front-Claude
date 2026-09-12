@@ -7,6 +7,7 @@ import {
   normalizeTikTokObservation,
   parseTikTokVideoUrl,
 } from '../src/tiktok-observation-v21.mjs';
+import { shouldDriveTikTokFeed } from '../src/tiktok-observer-v21.mjs';
 
 test('TikTok observer has no four-video ceiling and retains broad unique discovery', () => {
   const rows = Array.from({ length: 90 }, (_, index) => normalizeTikTokObservation({
@@ -53,4 +54,13 @@ test('broad grounded TikTok rows augment final scan evidence without duplicating
   assert.equal(merged.length, 1);
   assert.equal(merged[0].contentSummary, 'Visual summary');
   assert.equal(merged[0].firstObserved, 100);
+});
+
+test('TikTok root feed is scroll-driven after /foryou redirects to / when video cards are present', () => {
+  assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/', true), true);
+  assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/', false), false);
+  assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/foryou', false), true);
+  assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/explore', false), true);
+  assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/search?q=meme', false), true);
+  assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/@creator', true), false);
 });
