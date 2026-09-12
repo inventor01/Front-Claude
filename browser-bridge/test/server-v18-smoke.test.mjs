@@ -54,8 +54,8 @@ test('v18 supervisor exposes health and can hard-stop/restart the scan tree',asy
   assert(before.capabilities.includes('media-without-caption-discovery'),logs);
 
   const stopResponse=await fetch(`http://127.0.0.1:${port}/stop`,{method:'POST'});
-  assert.equal(stopResponse.ok,true,await stopResponse.text());
   const stopped=await stopResponse.json();
+  assert.equal(stopResponse.ok,true,JSON.stringify(stopped));
   assert.equal(stopped.stopped,true,logs);
 
   const after=await waitJson(`http://127.0.0.1:${port}/health`,{timeoutMs:10000});
