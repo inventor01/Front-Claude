@@ -1,7 +1,10 @@
-const compatUrl = new URL('./playwright-cdp-compat.mjs', import.meta.url).href;
-const preload = `--import=${compatUrl}`;
+const cdpCompatUrl = new URL('./playwright-cdp-compat.mjs', import.meta.url).href;
+const scanFetchCompatUrl = new URL('./loopback-scan-fetch-compat.mjs', import.meta.url).href;
+const preloads = [`--import=${cdpCompatUrl}`, `--import=${scanFetchCompatUrl}`];
 const existing = String(process.env.NODE_OPTIONS || '').trim();
-if (!existing.split(/\s+/).includes(preload)) process.env.NODE_OPTIONS = [existing, preload].filter(Boolean).join(' ');
+const options = existing ? existing.split(/\s+/) : [];
+for (const preload of preloads) if (!options.includes(preload)) options.push(preload);
+process.env.NODE_OPTIONS = options.join(' ');
 
 // Keep the established v19 scanner-tree ports stable for local diagnostics.
 // v20 owns 43981, Chrome CDP stays on 43982, and v19 moves behind v20 to 43987.
@@ -11,7 +14,11 @@ process.env.FRONT_BRIDGE_V17_PORT ||= '43991';
 process.env.FRONT_BRIDGE_INTERNAL_PORT ||= '43994';
 process.env.FRONT_BRIDGE_CDP_PORT ||= '43982';
 
-// Keep the v19 CDP compatibility shim active in this process and every child
-// process spawned by the v20 -> v19 -> v18 -> v17 -> v16 scanner tree.
+// Preload both compatibility layers in this process and every child process in
+// the v20 -> v19 -> v18 -> v17 -> v16 scanner tree. The CDP shim skips unsupported
+// default-context setup, while the loopback scan shim prevents Node's five-minute
+// fetch headers timeout from terminating a legitimate long deep scan and then
+// accidentally retrying the state-changing POST /scan request.
 await import('./playwright-cdp-compat.mjs');
+await import('./loopback-scan-fetch-compat.mjs');
 await import('./server-v20.mjs');
