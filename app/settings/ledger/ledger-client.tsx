@@ -60,9 +60,9 @@ export default function LedgerClient(){
   }
 
   useEffect(()=>{
-    void refresh();
+    const kickoff=window.setTimeout(()=>{void refresh();},0);
     const timer=window.setInterval(()=>void refresh(true),2000);
-    return()=>window.clearInterval(timer);
+    return()=>{window.clearTimeout(kickoff);window.clearInterval(timer);};
   },[]);
 
   const current=ledger?.current;
