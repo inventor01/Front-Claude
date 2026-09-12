@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import {Activity,ArrowLeft,Bell,CheckCircle2,LogIn,Play,Plus,Radio,RefreshCw,Save,Trash2,TriangleAlert} from 'lucide-react';
 import styles from './settings-client.module.css';
 
@@ -112,7 +112,7 @@ export default function SettingsClient(){
   const watchesRef=useRef<Watch[]>([]);
   const hydrated=useRef(false);
 
-  const nextRun=useMemo(()=>health?.nextScheduledRun?new Date(health.nextScheduledRun).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—',[health?.nextScheduledRun]);
+  const nextRun=health?.nextScheduledRun?new Date(health.nextScheduledRun).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—';
 
   async function ping(silent=false){
     try{
@@ -198,7 +198,7 @@ export default function SettingsClient(){
     const kickoff=window.setTimeout(()=>{void ping(true);try{const raw=JSON.parse(localStorage.getItem(WATCH_KEY)||'[]');if(Array.isArray(raw))setWatches(raw.filter((item)=>item&&typeof item.name==='string'));}catch{}hydrated.current=true;},0);
     const interval=window.setInterval(()=>{void ping(true);},30_000);
     return()=>{window.clearTimeout(kickoff);window.clearInterval(interval);};
-  },[]); // eslint-disable-line react-hooks/exhaustive-deps
+  },[]);
 
   useEffect(()=>{watchesRef.current=watches;if(hydrated.current)localStorage.setItem(WATCH_KEY,JSON.stringify(watches));},[watches]);
 
