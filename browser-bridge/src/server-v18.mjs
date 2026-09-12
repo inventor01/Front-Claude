@@ -1,26 +1,16 @@
 import http from 'node:http';
 import path from 'node:path';
-import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
-import { detectTopics } from './topic-engine.mjs';
-import { attachSoundSignals, consolidateTopicAliases } from './adaptive-intelligence.mjs';
-import { attachVisualSignals, semanticConsolidateTopics } from './advanced-intelligence.mjs';
-import { frontCdpUrl } from './system-browser.mjs';
-import { ContentUnderstandingEngine } from './content-understanding.mjs';
-import { collectFallbackEvidence } from './fallback-discovery-v18.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
 const V17_PORT = Number(process.env.FRONT_BRIDGE_V17_PORT || (PORT + 10));
 const V16_PORT = Number(process.env.FRONT_BRIDGE_INTERNAL_PORT || (V17_PORT + 3));
 const CDP_PORT = Number(process.env.FRONT_BRIDGE_CDP_PORT || 43982);
-const dataDir = process.env.FRONT_BRIDGE_DATA || path.join(os.homedir(), '.front-browser-bridge');
-const cdpUrl = frontCdpUrl(CDP_PORT);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const innerGateway = path.join(here, 'server-v17.mjs');
-const detector = new ContentUnderstandingEngine({ dataDir });
+const fallbackWorkerScript = path.join(here, 'fallback-worker-v18.mjs');
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://believable-inspiration-production-a68b.up.railway.app',
   'https://front-narrative-desk.austinrock2000.chatgpt.site',
@@ -31,14 +21,14 @@ const allowedOrigins = new Set((process.env.FRONT_ALLOWED_ORIGINS || DEFAULT_ALL
   .split(',').map((value) => value.trim()).filter(Boolean));
 
 let inner;
+let fallbackWorker;
 let restartTimer;
 let restarting = false;
 let shuttingDown = false;
 let stopGeneration = 0;
 let lastStop = null;
-let fallbackBrowser;
-let fallbackContext;
 let lastSupervisorError = null;
+let lastFallbackContentStatus = null;
 
 const clean = (value, max = 300) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -115,14 +105,14 @@ function startInner() {
   });
 }
 
-function killInnerGroup() {
-  const pid = inner?.pid;
+function killProcessGroup(proc) {
+  const pid = proc?.pid;
   if (!pid) return false;
   try {
     process.kill(-pid, 'SIGKILL');
     return true;
   } catch {
-    try { inner.kill('SIGKILL'); return true; } catch { return false; }
+    try { proc.kill('SIGKILL'); return true; } catch { return false; }
   }
 }
 
@@ -156,8 +146,15 @@ async function stopAndRestart() {
   restarting = true;
   clearTimeout(restartTimer);
   restartTimer = undefined;
-  killInnerGroup();
+
+  // The regular v17/v16 path is one detached process group. Zero-result visual
+  // recovery is a second detached worker. Killing both makes Stop Scan immediate
+  // even if the local Ollama model is currently analyzing frames.
+  killProcessGroup(fallbackWorker);
+  fallbackWorker = undefined;
+  killProcessGroup(inner);
   inner = undefined;
+
   await sleep(550);
   restarting = false;
   startInner();
@@ -167,101 +164,70 @@ async function stopAndRestart() {
   return ready;
 }
 
-async function getFallbackContext() {
-  if (fallbackContext && fallbackBrowser?.isConnected?.()) return fallbackContext;
-  fallbackBrowser = await chromium.connectOverCDP(cdpUrl);
-  fallbackContext = fallbackBrowser.contexts()[0];
-  if (!fallbackContext) throw new Error('Front Chrome did not expose a browser context for fallback discovery.');
-  fallbackBrowser.on('disconnected', () => { fallbackBrowser = undefined; fallbackContext = undefined; });
-  return fallbackContext;
-}
-
-function sanitizeAnalysisPrefixes(value) {
-  return String(value || '')
-    .replace(/\bVisual summary:\s*/gi, '')
-    .replace(/\bEvent:\s*/gi, '')
-    .replace(/\bEntities:\s*/gi, '')
-    .replace(/\bActions:\s*/gi, '')
-    .replace(/\bOn-screen text:\s*/gi, '')
-    .replace(/\bVisual motifs:\s*/gi, '')
-    .replace(/\s+/g, ' ').trim();
-}
-
-function deriveFallbackTopics(evidence = [], at = Date.now()) {
-  const sanitized = evidence.map((row) => ({ ...row, content: sanitizeAnalysisPrefixes(row.content) }));
-  let topics = detectTopics(sanitized, at, 24);
-  topics = attachSoundSignals(topics, sanitized);
-  topics = attachVisualSignals(topics, sanitized, at);
-  topics = semanticConsolidateTopics(topics, sanitized, at);
-  topics = consolidateTopicAliases(topics);
-  return topics.filter((topic) => {
-    const ids = new Set(topic.evidenceIds || []);
-    const supported = evidence.filter((row) => ids.has(row.id) && row.contentSummary && Number(row.contentConfidence || 0) >= 0.5);
-    const creators = new Set(supported.map((row) => `${row.platform}:${String(row.author || '').toLowerCase()}`));
-    return supported.length >= 2 && creators.size >= 2;
+function runFallbackWorker(scanBody) {
+  return new Promise((resolve, reject) => {
+    if (fallbackWorker) return reject(new Error('A zero-result recovery pass is already running.'));
+    const proc = spawn(process.execPath, [fallbackWorkerScript], {
+      env: {
+        ...process.env,
+        FRONT_BRIDGE_CDP_PORT: String(CDP_PORT),
+        FRONT_V18_FALLBACK_REQUEST: JSON.stringify({ scanBody }),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    });
+    fallbackWorker = proc;
+    const stdout = [];
+    const stderr = [];
+    let size = 0;
+    let overflow = false;
+    proc.stdout?.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > 8_000_000) { overflow = true; killProcessGroup(proc); return; }
+      stdout.push(chunk);
+    });
+    proc.stderr?.on('data', (chunk) => {
+      if (stderr.reduce((sum, part) => sum + part.length, 0) < 20000) stderr.push(chunk);
+    });
+    proc.on('error', (error) => {
+      if (fallbackWorker === proc) fallbackWorker = undefined;
+      reject(error);
+    });
+    proc.on('exit', (code, signal) => {
+      if (fallbackWorker === proc) fallbackWorker = undefined;
+      if (overflow) return reject(new Error('Zero-result recovery produced too much output.'));
+      const raw = Buffer.concat(stdout).toString('utf8').trim();
+      let parsed;
+      try { parsed = JSON.parse(raw || '{}'); }
+      catch {
+        return reject(new Error(`Zero-result recovery returned invalid JSON${stderr.length ? `: ${clean(Buffer.concat(stderr).toString('utf8'), 240)}` : '.'}`));
+      }
+      if (signal || code !== 0 || parsed.ok === false) {
+        return reject(new Error(parsed.error || `Zero-result recovery stopped (${signal || code || 'unknown'}).`));
+      }
+      resolve(parsed);
+    });
   });
 }
 
 function newestContentStatus(innerStatus) {
-  const outer = detector.status();
-  if (!innerStatus) return outer;
+  if (!lastFallbackContentStatus) return innerStatus || null;
+  if (!innerStatus) return lastFallbackContentStatus;
   const innerAt = Number(innerStatus.lastRun || 0);
-  const outerAt = Number(outer.lastRun || 0);
-  return outerAt > innerAt ? outer : innerStatus;
+  const fallbackAt = Number(lastFallbackContentStatus.lastRun || 0);
+  return fallbackAt > innerAt ? lastFallbackContentStatus : innerStatus;
 }
 
 async function zeroResultFallback(scanBody, basePayload) {
-  const context = await getFallbackContext();
-  const target = Math.max(16, Math.min(40, Math.round(Number(scanBody.targetUniqueFeedItems || 60) / 2)));
-  const passes = Math.max(2, Math.min(6, Number(scanBody.maxAdaptiveScrolls || 5)));
-  const discovered = await collectFallbackEvidence(context, { targetPerPlatform: target, scrollPasses: passes });
-  const mode = scanBody.mode === 'scout' ? 'scout' : 'deep';
-  let rows = discovered.evidence;
-  let stats = { requested: 0, analyzed: 0, cached: 0, enriched: 0, failed: 0, skipped: 0, provider: detector.status().provider, model: detector.status().model };
-
-  if (rows.length && detector.status().enabled) {
-    const enrichment = await detector.enrich(context, rows, {
-      mode,
-      maxVideos: mode === 'deep' ? Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 4) : Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 2),
-    });
-    rows = enrichment.rows;
-    stats = enrichment.stats;
-  }
-
-  // The cloud evidence endpoint intentionally rejects empty caption-only rows.
-  // Keep visual-only posts only after the local model has grounded them into
-  // meaningful content; ordinary text rows remain valid as-is.
-  const evidence = rows.filter((row) => clean(row.content, 8000).length >= 3);
-  const inferredTopics = detector.status().enabled ? deriveFallbackTopics(evidence, Date.now()) : [];
-  const diagnostics = discovered.diagnostics || {};
-  const diagnosticSummary = `v18 fallback observed X=${diagnostics.x?.collected || 0} post(s), TikTok=${diagnostics.tiktok?.collected || 0} video(s)`;
-  const errors = [...(Array.isArray(basePayload.errors) ? basePayload.errors : []), ...discovered.errors];
-  if (!evidence.length) {
-    errors.push(`${diagnosticSummary}. No grounded evidence survived; verify the dedicated Front Chrome is signed in and visibly shows X/TikTok posts.`);
-  }
-
+  const result = await runFallbackWorker(scanBody);
+  if (result.contentUnderstanding) lastFallbackContentStatus = result.contentUnderstanding;
   return {
     ...basePayload,
-    evidence,
-    inferredTopics,
-    errors,
-    audit: {
-      ...(basePayload.audit || {}),
-      fallbackDiscovery: {
-        version: 18,
-        triggered: true,
-        reason: 'inner-scanner-returned-zero-evidence',
-        rawEvidence: discovered.evidence.length,
-        groundedEvidence: evidence.length,
-        inferredTopics: inferredTopics.length,
-        diagnostics,
-      },
-    },
-    contentUnderstanding: {
-      ...detector.status(),
-      scan: stats,
-      visuallyUnderstood: evidence.filter((row) => row.contentSummary).length,
-    },
+    evidence: Array.isArray(result.evidence) ? result.evidence : [],
+    inferredTopics: Array.isArray(result.inferredTopics) ? result.inferredTopics : [],
+    errors: [...(Array.isArray(basePayload.errors) ? basePayload.errors : []), ...(Array.isArray(result.errors) ? result.errors : [])],
+    audit: { ...(basePayload.audit || {}), fallbackDiscovery: result.audit || { version: 18, triggered: true } },
+    contentUnderstanding: result.contentUnderstanding || basePayload.contentUnderstanding || null,
     v18Fallback: true,
   };
 }
@@ -316,14 +282,15 @@ async function handle(req, res) {
 
   let scanBody = {};
   if (req.url === '/scan' && req.method === 'POST' && body.length) {
-    try { scanBody = JSON.parse(body.toString('utf8') || '{}'); } catch { return json(req, res, 400, { error: 'Invalid scan request.' }); }
+    try { scanBody = JSON.parse(body.toString('utf8') || '{}'); }
+    catch { return json(req, res, 400, { error: 'Invalid scan request.' }); }
     // Do not forward a duplicate manual scan into v16: v16 historically wrote
     // the collision message into lastError even though the original scan was healthy.
     try {
       const healthResponse = await innerFetch('/health', {}, 4);
       if (healthResponse.ok) {
         const health = await healthResponse.json();
-        if (health.running) return json(req, res, 409, { error: 'A scan is already running. Use Stop scan before starting another one.' });
+        if (health.running || fallbackWorker) return json(req, res, 409, { error: 'A scan is already running. Use Stop scan before starting another one.' });
       }
     } catch {}
   }
@@ -365,13 +332,14 @@ async function handle(req, res) {
 
   if (req.url === '/content-health' && req.method === 'GET' && response.ok) {
     const merged = newestContentStatus(data);
-    return json(req, res, 200, { ok: true, ...merged, gatewayVersion: 18, lastStop, lastGatewayError: lastSupervisorError || null });
+    return json(req, res, 200, { ok: true, ...(merged || data), gatewayVersion: 18, lastStop, lastGatewayError: lastSupervisorError || null });
   }
 
   if (req.url === '/scan' && req.method === 'POST' && response.ok) {
     if (!Array.isArray(data.evidence) || data.evidence.length === 0) {
       try { data = await zeroResultFallback(scanBody, data); }
       catch (error) {
+        if (generation !== stopGeneration) return json(req, res, 499, { stopped: true, error: 'Scan stopped by user.' });
         data = {
           ...data,
           errors: [...(Array.isArray(data.errors) ? data.errors : []), `v18 zero-result fallback failed: ${clean(error?.message || error, 300)}`],
@@ -400,7 +368,8 @@ function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   clearTimeout(restartTimer);
-  killInnerGroup();
+  killProcessGroup(fallbackWorker);
+  killProcessGroup(inner);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500).unref?.();
 }
