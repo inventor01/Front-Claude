@@ -60,6 +60,9 @@ jobs:
       - name: Request origin regression tests
         run: node --test tests/request-origin.test.mjs
 
+      - name: Front learning regression tests
+        run: node --test tests/front-learning.test.mjs
+
       - name: Browser bridge unit tests
         run: npm test --prefix browser-bridge
 

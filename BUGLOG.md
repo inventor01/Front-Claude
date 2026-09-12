@@ -1,5 +1,24 @@
 # Front Bug / Fix Log
 
+## 2026-09-11 — Ranking could not learn from verified outcomes
+
+### Root cause
+Front's detector and cleanup gates had become much stricter, but the final priority score was still a fixed hand-written formula. The existing `learning_archive` only preserved reset summaries, so useful human judgments and real post-detection outcomes were not feeding back into future ranking. Simply letting Front train on its own predictions would create a dangerous self-reinforcing loop: a bad signal could rank highly, be treated as a success because Front ranked it highly, and then receive even more weight.
+
+### Permanent fix
+- Keep narrative extraction, junk rejection, independent-creator corroboration and semantic cross-platform quality gates fixed; the learning system cannot relax them.
+- Reuse the private `learning_archive` as an append-only source of explicit relevance feedback and externally verified outcomes instead of creating another database silo.
+- Add `Useful` / `Not relevant` feedback to the expanded Front Desk narrative view. One current label is stored per narrative and can be changed later.
+- Learn only from early social-signal features: cross-platform presence, same-event X↔TikTok corroboration, cross-post repetition, 3+ independent creators, acceleration, fast engagement, 50K/100K hourly velocity and freshness under three hours. Coin presence is deliberately excluded from the feature vector.
+- Treat human feedback as the strongest supervision. A verified PumpPortal `subscribeNewToken` creation observed after Front detected the narrative is a weak positive label; later $25K, $100K and $500K market-cap thresholds add progressively stronger external outcome evidence.
+- Require at least five comparable examples for a feature before it can affect ranking, increase confidence gradually through twenty examples, and cap the total learned adjustment to ±15 priority points.
+- Keep automatic coin-outcome rewards materially weaker than explicit human feedback so one lucky launch cannot teach Front a bad general rule.
+- Show the learned adjustment and the signal patterns responsible for it so every adaptive ranking change remains inspectable.
+- Preserve the learning archive when `Clear & new scan` resets active evidence/results.
+
+### Regression / release gate
+The release adds a dedicated learning regression suite that verifies: no adjustment before the minimum sample size; useful feedback raises similar qualified signals; not-relevant feedback lowers them; verified coin creation is weaker than human feedback; market outcomes cannot create unbounded adjustments; and unrelated archive records cannot train the ranker. The full migration, browser scanner, mounted D1 persistence, typecheck, lint and production build gates must also pass.
+
 ## 2026-09-11 — Narrative results regressed into basic TikTok hashtags
 
 ### Root cause
@@ -96,7 +115,7 @@ Detection tests now cover:
 - Astra recovery,
 - Daejon/Dejon variant clustering,
 - 100 junk/UI/metric samples producing zero topics,
-- mixed real-topic and one-off replay.
+- mixed real-topic and one-off-noise replay.
 
 ## 2026-09-11 — Detection Engine v2
 
