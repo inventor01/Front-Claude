@@ -5,7 +5,8 @@
   "type": "module",
   "engines": { "node": ">=22.13.0" },
   "scripts": {
-    "start": "node src/launcher-v20.mjs",
+    "start": "node src/launcher-v21.mjs",
+    "start:v20": "node src/launcher-v20.mjs",
     "start:v19": "node src/launcher-v19.mjs",
     "start:v18": "node src/server-v18.mjs",
     "start:v17": "node src/server-v17.mjs",

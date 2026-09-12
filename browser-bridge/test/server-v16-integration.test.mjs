@@ -7,15 +7,19 @@ const gateway=fs.readFileSync(new URL('../src/server-v17.mjs',import.meta.url),'
 const supervisor=fs.readFileSync(new URL('../src/server-v18.mjs',import.meta.url),'utf8');
 const ledgerSupervisor=fs.readFileSync(new URL('../src/server-v19.mjs',import.meta.url),'utf8');
 const liveSupervisor=fs.readFileSync(new URL('../src/server-v20.mjs',import.meta.url),'utf8');
+const breadthSupervisor=fs.readFileSync(new URL('../src/server-v21.mjs',import.meta.url),'utf8');
+const broadTikTokObserver=fs.readFileSync(new URL('../src/tiktok-observer-v21.mjs',import.meta.url),'utf8');
 const liveObserver=fs.readFileSync(new URL('../src/live-observer-v20.mjs',import.meta.url),'utf8');
 const launcher=fs.readFileSync(new URL('../src/launcher-v20.mjs',import.meta.url),'utf8');
+const launcherV21=fs.readFileSync(new URL('../src/launcher-v21.mjs',import.meta.url),'utf8');
 const compat=fs.readFileSync(new URL('../src/playwright-cdp-compat.mjs',import.meta.url),'utf8');
 const fallback=fs.readFileSync(new URL('../src/fallback-discovery-v18.mjs',import.meta.url),'utf8');
 const worker=fs.readFileSync(new URL('../src/fallback-worker-v18.mjs',import.meta.url),'utf8');
 const pkg=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8'));
 
-test('v20 live supervisor is default while v19/v18/v17/v16 remain explicit fallbacks',()=>{
-  assert.equal(pkg.scripts.start,'node src/launcher-v20.mjs');
+test('v21 TikTok breadth supervisor is default while v20/v19/v18/v17/v16 remain explicit fallbacks',()=>{
+  assert.equal(pkg.scripts.start,'node src/launcher-v21.mjs');
+  assert.equal(pkg.scripts['start:v20'],'node src/launcher-v20.mjs');
   assert.equal(pkg.scripts['start:v19'],'node src/launcher-v19.mjs');
   assert.equal(pkg.scripts['start:v18'],'node src/server-v18.mjs');
   assert.equal(pkg.scripts['start:v17'],'node src/server-v17.mjs');
@@ -26,13 +30,28 @@ test('v20 live supervisor is default while v19/v18/v17/v16 remain explicit fallb
   assert.match(supervisor,/scanner:\s*'viral-narrative-content-scout-v18'/);
   assert.match(ledgerSupervisor,/scanner:\s*'viral-narrative-content-scout-v19'/);
   assert.match(liveSupervisor,/scanner:\s*'viral-narrative-content-scout-v20'/);
+  assert.match(breadthSupervisor,/scanner:\s*'viral-narrative-content-scout-v21'/);
 });
 
-test('v20 preloads Playwright CDP noDefaults compatibility into the full child tree',()=>{
+test('v21 retains v20 compatibility preloads and raises only the ranked visual-analysis budget',()=>{
+  assert.match(launcherV21,/NODE_OPTIONS/);
+  assert.match(launcherV21,/playwright-cdp-compat\.mjs/);
+  assert.match(launcherV21,/FRONT_CONTENT_DEEP_VIDEOS \|\|= '8'/);
+  assert.match(launcherV21,/FRONT_CONTENT_SCOUT_VIDEOS \|\|= '4'/);
   assert.match(launcher,/NODE_OPTIONS/);
-  assert.match(launcher,/playwright-cdp-compat\.mjs/);
   assert.match(compat,/noDefaults:\s*options\.noDefaults \?\? true/);
   assert.match(compat,/frontCdpNoDefaults = true/);
+});
+
+test('v21 observes broad TikTok URLs separately from grounded evidence',()=>{
+  assert.match(breadthSupervisor,/url\.pathname === '\/live'/);
+  assert.match(breadthSupervisor,/tiktokDiscovery:/);
+  assert.match(breadthSupervisor,/'broad-tiktok-observation'/);
+  assert.match(breadthSupervisor,/'caption-light-tiktok-discovery'/);
+  assert.match(broadTikTokObserver,/a\[href\*="\/video\/"\]/);
+  assert.match(broadTikTokObserver,/observed:/);
+  assert.match(broadTikTokObserver,/grounded:/);
+  assert.match(broadTikTokObserver,/groundedTikTokEvidence/);
 });
 
 test('v20 observes live browser pages and exposes progressive evidence without changing quality gates',()=>{
@@ -58,7 +77,7 @@ test('v20 distinguishes a ready Chrome CDP endpoint from an attached Playwright 
   assert.match(liveSupervisor,/'cdp-ready-status'/);
 });
 
-test('v19 persists a readable scan ledger with current status, diagnostics and samples',()=>{
+test('v21 persists TikTok breadth diagnostics on top of the readable v19 ledger',()=>{
   assert.match(ledgerSupervisor,/scan-ledger-v19\.json/);
   assert.match(ledgerSupervisor,/url\.pathname === '\/ledger'/);
   assert.match(ledgerSupervisor,/url\.pathname === '\/ledger\/clear'/);
@@ -67,6 +86,9 @@ test('v19 persists a readable scan ledger with current status, diagnostics and s
   assert.match(ledgerSupervisor,/'scan-ledger'/);
   assert.match(ledgerSupervisor,/'live-scan-ledger'/);
   assert.match(ledgerSupervisor,/'cdp-no-defaults-compat'/);
+  assert.match(breadthSupervisor,/tiktok-breadth-v21\.json/);
+  assert.match(breadthSupervisor,/pathname === '\/ledger'/);
+  assert.match(breadthSupervisor,/broadTikTok:/);
 });
 
 test('v18 can stop the whole scan tree and guards duplicate manual scans',()=>{
