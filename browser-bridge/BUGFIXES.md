@@ -1,5 +1,23 @@
 # Browser Bridge Bug Fix Log
 
+## 2026-09-12 — v19 Chrome CDP compatibility and scan ledger
+
+### Dedicated Front Chrome connected, but every scan still returned zero
+
+**Root cause:** the dedicated Chrome debug endpoint itself was reachable, but Playwright attempted its normal `Browser.setDownloadBehavior` setup while attaching to the already-owned default Chrome context. The current Chrome/Playwright combination rejected that setup with `Browser context management is not supported`, so X, TikTok, the v18 fallback collector, and the video-understanding layer all disconnected before any post could be inspected. This was why scans could report zero even while the login Chrome window was visibly open.
+
+**Permanent fix:** v19 preloads a Playwright CDP compatibility shim into the entire local scanner process tree. All `connectOverCDP` calls now use Playwright's `noDefaults: true` compatibility mode, which skips unsupported default-context setup while retaining the already-authenticated default Chrome context. The shim is inherited by v18, v17, v16, and fallback workers, so the fix applies consistently instead of patching only one scan path.
+
+### No proof of what a scan actually inspected
+
+**Root cause:** prior versions exposed only final counts and error strings. A user could see `0 results` but could not distinguish no browser connection, zero DOM candidates, filtering, visual fallback, or model-grounding failure.
+
+**Permanent fix:** v19 adds a local persistent scan ledger at `~/.front-browser-bridge/scan-ledger-v19.json`, a `GET /ledger` endpoint, live current-scan state, and a `/settings/ledger` UI. Every completed scan records start/end time, mode, observed and usable evidence counts, source/platform counts, fallback diagnostics, Ollama/video-understanding stats, errors, and up to 30 sample scanned post URLs. The ledger stays local and retains the most recent 100 scans. `POST /ledger/clear` clears historical entries without touching login state or scanner configuration.
+
+### Regression protection
+
+Coverage verifies the v19 launcher preloads the CDP compatibility layer, v19 is the default local bridge, ledger capabilities are reported, the ledger endpoint boots cleanly, and the existing v18 stop/fallback plus v17/v16 quality gates remain intact.
+
 ## 2026-09-12 — v18 zero-result recovery and scan cancellation
 
 ### Zero results despite active X/TikTok sessions
