@@ -7,7 +7,7 @@ import {
   normalizeTikTokObservation,
   parseTikTokVideoUrl,
 } from '../src/tiktok-observation-v21.mjs';
-import { shouldDriveTikTokFeed } from '../src/tiktok-observer-v21.mjs';
+import { isTikTokDiscoveryPage, shouldDriveTikTokFeed } from '../src/tiktok-observer-v21.mjs';
 
 test('TikTok observer has no four-video ceiling and retains broad unique discovery', () => {
   const rows = Array.from({ length: 90 }, (_, index) => normalizeTikTokObservation({
@@ -63,4 +63,16 @@ test('TikTok root feed is scroll-driven after /foryou redirects to / when video 
   assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/explore', false), true);
   assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/search?q=meme', false), true);
   assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/@creator', true), false);
+});
+
+test('TikTok discovery excludes account activity and personal surfaces', () => {
+  assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/'), true);
+  assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/foryou'), true);
+  assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/explore'), true);
+  assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/search?q=meme'), true);
+  assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/inbox'), false);
+  assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/messages'), false);
+  assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/notification'), false);
+  assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/@creator'), false);
+  assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/@creator/video/1000000000000000009'), false);
 });
