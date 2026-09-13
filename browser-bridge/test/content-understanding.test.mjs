@@ -11,6 +11,8 @@ import {
   selectVideoCandidates,
 } from '../src/content-understanding.mjs';
 
+const cacheKey=(row)=>`${row.platform}|${row.id}|${row.url}|timeline-sheet-v1`;
+
 test('frame schedule covers the whole short-video timeline without exploding frame count',()=>{
   const times=frameSchedule(9,16);
   assert(times.length>=10&&times.length<=16);
@@ -76,8 +78,8 @@ test('content health distinguishes successful and failed persistent cache entrie
     const successRow={id:'ok',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/1000000000001'};
     const failRow={id:'bad',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/1000000000002'};
     fs.writeFileSync(path.join(dir,'content-understanding-v17.json'),JSON.stringify({
-      [`${successRow.platform}|${successRow.id}|${successRow.url}`]:{at:now-1000,ok:true,analysis:{summary:'A mascot falls while dancing.',confidence:.91,provider:'ollama',model:'qwen-test',frameCount:11,modelFrameCount:11,duration:8.4,captureType:'video-timeline',analyzedAt:now-1200}},
-      [`${failRow.platform}|${failRow.id}|${failRow.url}`]:{at:now,ok:false,error:'Content analysis timed out.',analysis:null},
+      [cacheKey(successRow)]:{at:now-1000,ok:true,analysis:{summary:'A mascot falls while dancing.',confidence:.91,provider:'ollama',model:'qwen-test',frameCount:11,modelFrameCount:11,duration:8.4,captureType:'video-timeline',analyzedAt:now-1200}},
+      [cacheKey(failRow)]:{at:now,ok:false,error:'Content analysis timed out.',analysis:null},
     }));
     const engine=new ContentUnderstandingEngine({dataDir:dir});
     const status=engine.status();
@@ -101,7 +103,7 @@ test('recent failed content analysis is cached for cooldown instead of immediate
   try{
     const row={id:'bad',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/1000000000003',content:'',mediaType:'video'};
     fs.writeFileSync(path.join(dir,'content-understanding-v17.json'),JSON.stringify({
-      [`${row.platform}|${row.id}|${row.url}`]:{at:Date.now(),ok:false,error:'Previous Ollama timeout',analysis:null},
+      [cacheKey(row)]:{at:Date.now(),ok:false,error:'Previous Ollama timeout',analysis:null},
     }));
     const engine=new ContentUnderstandingEngine({dataDir:dir});
     const result=await engine.analyzeOne(null,row);
