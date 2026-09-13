@@ -32,6 +32,15 @@ type LiveTopic = {
   corroborated?:boolean;
 };
 
+type LiveStage = {
+  status?:string;
+  active?:boolean;
+  observed?:number;
+  grounded?:number;
+  target?:number;
+  updatedAt?:number;
+};
+
 type LiveState = {
   ok:boolean;
   version:number;
@@ -48,6 +57,8 @@ type LiveState = {
   errors:string[];
   evidence:LiveEvidence[];
   inferredTopics:LiveTopic[];
+  stages?:Record<string,LiveStage>;
+  tiktokDiscovery?:LiveStage;
 };
 
 type LiveFilter='all'|'X'|'TikTok'|'early'|'qualified'|'synced';
@@ -163,7 +174,7 @@ export default function FrontLiveShell(){
           setSyncError('');
           setFilter('all');
           setSelectedTopic('');
-          setExpanded(false);
+          setExpanded(true);
         }
 
         const fingerprint=topicFingerprint(next.inferredTopics||[]);
@@ -188,7 +199,9 @@ export default function FrontLiveShell(){
 
         if(wasActive.current&&!next.active){
           setRefreshKey((value)=>value+1);
-          if(next.observed>0||(next.inferredTopics||[]).length>0)setExpanded(true);
+          const xObserved=Number(next.stages?.xDiscovery?.observed||0);
+          const ttObserved=Number(next.tiktokDiscovery?.observed||next.stages?.tiktokDiscovery?.observed||0);
+          if(next.observed>0||xObserved>0||ttObserved>0||(next.inferredTopics||[]).length>0)setExpanded(true);
         }
         wasActive.current=next.active;
       }catch{
@@ -205,9 +218,12 @@ export default function FrontLiveShell(){
   const topics=(live?.inferredTopics||[]).filter((topic)=>topicName(topic)).slice(0,24);
   const qualifiedTopics=topics.filter(qualifiesTopic);
   const earlyTopics=topics.filter((topic)=>!qualifiesTopic(topic));
-  const xCount=live?.platformCounts?.X||0;
-  const tiktokCount=live?.platformCounts?.TikTok||0;
-  const show=Boolean(live&&(live.active||live.observed>0||topics.length>0||(live.status&&live.status!=='idle')));
+  const xStageCount=Number(live?.stages?.xDiscovery?.observed||0);
+  const tiktokStageCount=Number(live?.tiktokDiscovery?.observed||live?.stages?.tiktokDiscovery?.observed||0);
+  const xCount=Math.max(Number(live?.platformCounts?.X||0),xStageCount);
+  const tiktokCount=Math.max(Number(live?.platformCounts?.TikTok||0),tiktokStageCount);
+  const observed=Math.max(Number(live?.observed||0),xCount+tiktokCount);
+  const show=Boolean(live&&(live.active||observed>0||topics.length>0||(live.status&&live.status!=='idle')));
 
   const evidence=useMemo(()=>{
     const rows=live?.evidence||[];
@@ -240,7 +256,7 @@ export default function FrontLiveShell(){
   }
 
   const selected=selectedTopic?topics.find((item)=>String(item.key||item.topic)===selectedTopic):undefined;
-  const emptyCandidateMessage=live&&live.observed>0&&!topics.length;
+  const emptyCandidateMessage=Boolean(live&&observed>0&&!topics.length);
   const panelTitle=live?.active?'LIVE SCAN':'RECENT SCAN RESULTS';
   const panelStatus=live?.active?live.phase:(live?.status||live?.phase||'complete');
 
@@ -252,7 +268,7 @@ export default function FrontLiveShell(){
           {expanded?<ChevronUp size={16}/>:<ChevronDown size={16}/>} 
         </button>
         <div className={styles.liveNumbers}>
-          <button data-selected={filter==='all'&&!selectedTopic||undefined} onClick={()=>chooseFilter('all')}><Eye size={14}/><b>{live.observed}</b> observed</button>
+          <button data-selected={filter==='all'&&!selectedTopic||undefined} onClick={()=>chooseFilter('all')}><Eye size={14}/><b>{observed}</b> observed</button>
           <button data-selected={filter==='early'&&!selectedTopic||undefined} onClick={()=>chooseFilter('early')}><Sparkles size={14}/><b>{earlyTopics.length}</b> early</button>
           <button data-selected={filter==='qualified'&&!selectedTopic||undefined} onClick={()=>chooseFilter('qualified')}><CheckCircle2 size={14}/><b>{qualifiedTopics.length}</b> qualified</button>
           <button data-selected={filter==='synced'&&!selectedTopic||undefined} onClick={()=>chooseFilter('synced')}><Activity size={14}/><b>{synced}</b> synced</button>
@@ -262,7 +278,7 @@ export default function FrontLiveShell(){
         <button data-selected={filter==='X'&&!selectedTopic||undefined} onClick={()=>chooseFilter('X')}>X {xCount}</button>
         <button data-selected={filter==='TikTok'&&!selectedTopic||undefined} onClick={()=>chooseFilter('TikTok')}>TikTok {tiktokCount}</button>
         <button className={styles.allFilter} data-selected={filter==='all'&&!selectedTopic||undefined} onClick={()=>chooseFilter('all')}><Filter size={11}/>All</button>
-        <span className={styles.pulse}>{live.active?'dashboard updating every 3s':'last scan stays visible until the next scan'}</span>
+        <span className={styles.pulse}>{live.active?`${panelStatus} · live counters updating every 3s`:'last scan stays visible until the next scan'}</span>
       </div>
       {topics.length>0&&<div className={styles.topicRow}>{topics.map((topic)=>{
         const qualified=qualifiesTopic(topic);
@@ -273,18 +289,18 @@ export default function FrontLiveShell(){
       })}</div>}
       {expanded&&<div className={styles.drawer}>
         <div className={styles.drawerHead}>
-          <div><b>{selected?topicName(selected):filter==='all'?'Observed posts':filter==='early'?'Early candidates':filter==='qualified'?'Qualified narratives':`${filter} evidence`}</b><span>{evidence.length} visible · raw observations stay inspectable even when nothing qualifies</span></div>
+          <div><b>{selected?topicName(selected):filter==='all'?'Observed posts':filter==='early'?'Early candidates':filter==='qualified'?'Qualified narratives':`${filter} evidence`}</b><span>{evidence.length} visible · {live.active&&evidence.length===0?`${observed} discovered so far; evidence cards appear as grounded rows stream in`:'raw observations stay inspectable even when nothing qualifies'}</span></div>
           <button onClick={()=>setExpanded(false)}>Collapse <ChevronUp size={13}/></button>
         </div>
         {selected&&<div className={styles.qualificationNote} data-qualified={qualifiesTopic(selected)||undefined}><b>{qualifiesTopic(selected)?'Qualified narrative':'Not promoted yet'}</b><span>{qualificationReason(selected)}</span></div>}
-        {emptyCandidateMessage&&<div className={styles.qualificationNote}><b>No repeated candidate topic yet</b><span>Front still found posts. They remain under Observed while the scanner waits for repeated, specific evidence from independent creators instead of inventing a narrative.</span></div>}
-        {filter==='early'&&!selected&&earlyTopics.length===0&&live.observed>0&&<div className={styles.qualificationNote}><b>No early candidate currently survives grouping</b><span>The observed posts are still available under Observed, X, and TikTok. A candidate needs repeated topic evidence instead of a single unrelated post.</span></div>}
-        {filter==='qualified'&&!selected&&qualifiedTopics.length===0&&live.observed>0&&<div className={styles.qualificationNote}><b>No narrative qualified yet</b><span>This is different from finding nothing. Front has {live.observed} observed post{live.observed===1?'':'s'}, but none currently clear the promotion gates.</span></div>}
+        {emptyCandidateMessage&&<div className={styles.qualificationNote}><b>No repeated candidate topic yet</b><span>Front has discovered {observed} post{observed===1?'':'s'} so far. It waits for repeated, specific evidence from independent creators instead of inventing a narrative.</span></div>}
+        {filter==='early'&&!selected&&earlyTopics.length===0&&observed>0&&<div className={styles.qualificationNote}><b>No early candidate currently survives grouping</b><span>The observed posts are still available under Observed, X, and TikTok once grounded evidence arrives. A candidate needs repeated topic evidence instead of a single unrelated post.</span></div>}
+        {filter==='qualified'&&!selected&&qualifiedTopics.length===0&&observed>0&&<div className={styles.qualificationNote}><b>No narrative qualified yet</b><span>This is different from finding nothing. Front has discovered {observed} post{observed===1?'':'s'}, but none currently clear the promotion gates.</span></div>}
         {evidence.length?<div className={styles.evidenceGrid}>{evidence.map((row)=><a key={row.id} href={row.url} target='_blank' rel='noreferrer' className={styles.evidenceCard}>
           <div className={styles.evidenceMeta}><b>{row.platform} · @{row.author}</b><ExternalLink size={12}/></div>
           <p>{row.content}</p>
           <small>{[ago(row.published),row.views!=null?`${compact(row.views)} views`:null,row.likes!=null?`${compact(row.likes)} likes`:null].filter(Boolean).join(' · ')}</small>
-        </a>)}</div>:<div className={styles.noEvidence}>No scan evidence matches this filter yet.</div>}
+        </a>)}</div>:<div className={styles.noEvidence}>{live.active&&observed>0?`Discovery is active (${observed} observed). Grounded evidence cards will appear as the scanner publishes them.`:'No scan evidence matches this filter yet.'}</div>}
       </div>}
       {syncError&&<div className={styles.liveError}>{syncError}</div>}
     </section>}
