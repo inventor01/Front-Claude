@@ -64,16 +64,17 @@ test('v26 exposes age, lifecycle, velocity, and pre-coin classification', () => 
   assert(['EMERGING','EARLY BREAKOUT','VIRAL'].includes(topic.lifecycleStage));
 });
 
- test('legacy lexical candidates cannot bypass semantic corroboration',()=>{
+test('legacy lexical candidates cannot bypass semantic corroboration',()=>{
  const rows=[{id:'1',platform:'X',author:'a',content:'Office opening'},{id:'2',platform:'X',author:'b',content:'Office opening'}];
  assert.deepEqual(enhanceNarrativesV26([{topic:'Office opening',key:'office opening',evidenceIds:['1','2']}],rows),[]);
- });
- test('semantic event needs independent creators and confidence',()=>{
+});
+
+test('semantic event needs independent creators and confidence',()=>{
  const row={platform:'X',author:'a',postSubject:'Mascot halftime fall',semanticNarrativeKey:'mascot halftime fall',postUnderstandingConfidence:0.9};
  assert.equal(enhanceNarrativesV26([],[{...row,id:'1'},{...row,id:'2'}]).length,0);
  assert.equal(enhanceNarrativesV26([],[{...row,id:'1'},{...row,id:'2',author:'b',postUnderstandingConfidence:0.4}]).length,0);
  assert.equal(enhanceNarrativesV26([],[{...row,id:'1'},{...row,id:'2',author:'b'}]).length,1);
- });
+});
 
 test('malformed semantic responses report failures and do not cache fallback as success',async()=>{
  const {PostUnderstandingEngineV26}=await import('../src/post-understanding-v26.mjs');
@@ -86,8 +87,51 @@ test('malformed semantic responses report failures and do not cache fallback as 
   globalThis.fetch=async()=>Response.json({message:{content:'not JSON'}});
   const rows=[{id:'1',platform:'X',url:'https://x.com/a/status/1',content:'Mascot halftime fall'}];
   const result=await engine.enrich(rows);assert.equal(result.stats.failed,1);assert.equal(result.stats.fallback,1);assert.equal(engine.cached(rows[0]),null);
+  assert.match(result.stats.errors.join(' '),/unreadable JSON array/i);
   const key=engine.key(rows[0]);assert.notEqual(engine.key({...rows[0],contentSummary:'A new grounded visual summary'}),key);
  }finally{globalThis.fetch=original;if(env===undefined)delete process.env.FRONT_CONTEXT_PROVIDER;else process.env.FRONT_CONTEXT_PROVIDER=env;fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('semantic batching keeps Ollama warm and defaults to four posts per request',async()=>{
+ const {PostUnderstandingEngineV26}=await import('../src/post-understanding-v26.mjs');
+ const fs=await import('node:fs');const os=await import('node:os');const path=await import('node:path');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-context-batches-'));
+ const original=globalThis.fetch;
+ try{
+  const engine=new PostUnderstandingEngineV26({dataDir:dir});
+  engine.provider={available:true,provider:'ollama',endpoint:'http://model.test',model:'qwen-test'};
+  const sizes=[];
+  globalThis.fetch=async(_url,{body})=>{
+    const payload=JSON.parse(body);
+    assert.equal(payload.keep_alive,'30m');
+    assert.equal(payload.options.num_predict,900);
+    const input=JSON.parse(payload.messages[0].content.split('\n').at(-1));
+    sizes.push(input.length);
+    const result=input.map((row,index)=>({index,subject:`Specific subject ${row.index}`,event:`specific event ${row.index}`,entities:[],action:'observed',object:'event',context:'social post',narrativeKey:`specific subject ${row.index}`,confidence:.9}));
+    return Response.json({message:{content:JSON.stringify(result)}});
+  };
+  const rows=Array.from({length:5},(_,i)=>({id:String(i+1),platform:'X',author:`a${i}`,url:`https://x.com/a${i}/status/${i+1}`,content:`Specific event caption ${i+1}`}));
+  const result=await engine.enrich(rows);
+  assert.deepEqual(sizes,[4,1]);
+  assert.equal(result.stats.modeled,5);
+  assert.equal(result.stats.failed,0);
+  assert.deepEqual(result.stats.errors,[]);
+ }finally{globalThis.fetch=original;fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('semantic timeout is surfaced in stage diagnostics instead of failing silently',async()=>{
+ const {PostUnderstandingEngineV26}=await import('../src/post-understanding-v26.mjs');
+ const fs=await import('node:fs');const os=await import('node:os');const path=await import('node:path');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-context-timeout-'));
+ const original=globalThis.fetch;
+ try{
+  const engine=new PostUnderstandingEngineV26({dataDir:dir});engine.provider={available:true,provider:'ollama',endpoint:'http://model.test',model:'test'};
+  globalThis.fetch=async(_url,{signal})=>new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(Object.assign(new Error('aborted'),{name:'AbortError'})),{once:true}));
+  const rows=[{id:'1',platform:'X',author:'a',url:'https://x.com/a/status/1',content:'Mascot halftime fall'}];
+  const result=await engine.enrich(rows,{batchSize:1,timeoutMs:20});
+  assert.equal(result.stats.failed,1);
+  assert.match(result.stats.errors.join(' '),/timed out after 20ms/i);
+ }finally{globalThis.fetch=original;fs.rmSync(dir,{recursive:true,force:true});}
 });
 
 test('same creator handle across platforms and missing creators cannot corroborate',()=>{
