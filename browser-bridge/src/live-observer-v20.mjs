@@ -14,6 +14,10 @@ const hasText = (value) => {
 };
 const hashId = (platform, url) => `live:${platform.toLowerCase()}:${createHash('sha1').update(url).digest('hex').slice(0, 28)}`;
 
+export function shouldObserveTikTokLivePreview(portValue = process.env.FRONT_BRIDGE_PORT || 43981) {
+  return Number(portValue || 43981) === 43981;
+}
+
 function normalizeUrl(raw, platform) {
   try {
     const url = new URL(raw, platform === 'X' ? 'https://x.com' : 'https://www.tiktok.com');
@@ -148,6 +152,7 @@ export class LiveScanObserver {
     this.timer = null;
     this.polling = false;
     this.rows = new Map();
+    this.includeTikTok = shouldObserveTikTokLivePreview();
     this.state = this.emptyState();
   }
 
@@ -267,7 +272,7 @@ export class LiveScanObserver {
         if (/(^|\.)(x\.com|twitter\.com)$/.test(host)) {
           sourcePages.push(pageUrl);
           this.addRows(await extractX(page));
-        } else if (/(^|\.)tiktok\.com$/.test(host)) {
+        } else if (this.includeTikTok && /(^|\.)tiktok\.com$/.test(host)) {
           sourcePages.push(pageUrl);
           this.addRows(await extractTikTok(page));
         }
