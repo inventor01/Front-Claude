@@ -10,11 +10,17 @@ const read=(file)=>fs.readFileSync(path.join(root,file),'utf8');
 test('local vision defaults match the proven 8 GB Mac profile and do not cap discovery',()=>{
   const env=read('browser-bridge/content.env');
   const example=read('browser-bridge/content.env.example');
+  const start=read('browser-bridge/start.command');
   assert.match(env,/FRONT_OLLAMA_MODEL=qwen3-vl:4b-instruct/);
   assert.match(env,/FRONT_CONTENT_DEEP_VIDEOS=4/);
   assert.match(env,/FRONT_CONTENT_SCOUT_VIDEOS=2/);
   assert.match(env,/FRONT_CONTENT_BACKGROUND_VIDEOS=1/);
   assert.match(example,/cap EXPENSIVE visual analysis, not X\/TikTok discovery/);
+  assert.match(start,/DEFAULT_CONTENT_ENV=.*content\.env/);
+  assert.match(start,/FRONT_OLLAMA_MODEL:-qwen3-vl:4b-instruct/);
+  assert.match(start,/FRONT_CONTENT_DEEP_VIDEOS:-4/);
+  assert.match(start,/FRONT_CONTENT_SCOUT_VIDEOS:-2/);
+  assert.match(start,/replacing stale qwen3-vl:8b local default/);
 });
 
 test('settings does not own a PumpPortal websocket and legacy no-op trend toggles are disabled',()=>{
@@ -46,9 +52,18 @@ test('one root-mounted browser lifecycle watcher subscribes to launches and migr
 
 test('migration alerts remain distinct from creation alerts',()=>{
   const watcher=read('app/narrative-creation-watcher.tsx');
+  const background=read('scripts/pumpportal-watcher.mjs');
+  const route=read('app/api/internal/launch-watch/route.ts');
   assert.match(watcher,/event:'create'/);
   assert.match(watcher,/event:'migrate'/);
   assert.match(watcher,/Migration observed/);
   assert.match(watcher,/Pump\.fun creation observed/);
   assert.match(watcher,/if\(!priorMatch&&!priorHit\)return/);
+  assert.match(background,/method:'subscribeNewToken'/);
+  assert.match(background,/method:'subscribeMigration'/);
+  assert.match(background,/data\?\.txType==='migrate'/);
+  assert.match(route,/raw\.txType==='migrate'/);
+  assert.match(route,/migrationObservedAt:seen/);
+  assert.match(route,/Only PumpPortal create and migrate events are accepted/);
+  assert.match(route,/creationObservedAt:seen/);
 });
