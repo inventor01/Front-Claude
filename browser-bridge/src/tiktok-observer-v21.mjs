@@ -31,31 +31,43 @@ export function isTikTokDiscoveryPage(urlValue) {
 
 async function extractTikTokAnchors(page, provenance) {
   const raw = await page.evaluate(() => {
+    const feedContainerSelector = [
+      '[data-e2e*="recommend-list-item-container"]',
+      '[data-e2e*="recommend-item"]',
+      '[data-e2e*="feed-item"]',
+      '[data-e2e*="search-card"]',
+      'article',
+    ].join(', ');
+    const activitySelector = [
+      '[data-e2e*="inbox"]',
+      '[data-e2e*="notification"]',
+      '[data-e2e*="activity"]',
+      '[data-e2e*="message"]',
+      '[role="dialog"]',
+    ].join(', ');
     const links = [...document.querySelectorAll('a[href*="/video/"]')].slice(0, 700);
     const rows = [];
     const seen = new Set();
     for (const link of links) {
       const href = link.href || link.getAttribute('href') || '';
       if (!href || seen.has(href)) continue;
+      if (link.closest(activitySelector)) continue;
+      const container = link.closest(feedContainerSelector);
+      if (!container) continue;
+      if (container.closest(activitySelector)) continue;
+      const e2e = String(container.getAttribute('data-e2e') || '').toLowerCase();
+      if (/user-post-item|profile|inbox|notification|activity|message/.test(e2e)) continue;
+      const containerText = (container.innerText || '').trim();
+      if (/\b(?:liked your video|liked your post|liked your comment|commented on your video|commented on your post|replied to your comment|shared your video|reposted your video|viewed your profile|mentioned you|tagged you|followed you|started following you|sent you a message)\b/i.test(containerText)) continue;
       seen.add(href);
-      const preferred = link.closest('[data-e2e*="recommend-list-item-container"], [data-e2e*="search-card"], [data-e2e*="user-post-item"], article');
-      let container = preferred;
-      if (!container) {
-        let cursor = link.parentElement;
-        for (let depth = 0; cursor && depth < 7; depth += 1, cursor = cursor.parentElement) {
-          const text = (cursor.innerText || '').trim();
-          const videoLinks = cursor.querySelectorAll?.('a[href*="/video/"]')?.length || 0;
-          if (text.length >= 3 && text.length <= 1800 && videoLinks <= 2) { container = cursor; break; }
-        }
-      }
-      const image = link.querySelector('img') || container?.querySelector?.('img');
+      const image = link.querySelector('img') || container.querySelector?.('img');
       rows.push({
         href,
         aria: link.getAttribute('aria-label') || '',
         title: link.getAttribute('title') || '',
         alt: image?.getAttribute('alt') || '',
         coverUrl: image?.getAttribute('src') || '',
-        containerText: (container?.innerText || '').slice(0, 8000),
+        containerText: containerText.slice(0, 8000),
       });
     }
     return rows;
