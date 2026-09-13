@@ -28,22 +28,29 @@ async function refreshNarratives(){
 function overlapScore(a,b){const left=new Set(words(a)),right=new Set(words(b));if(!left.size||!right.size)return 0;const overlap=[...left].filter((word)=>right.has(word)).length;return overlap/Math.max(1,Math.min(left.size,right.size));}
 function aliasCandidate(name,symbol,alias){const target=normalize(name),ticker=normalize(symbol||''),candidate=normalize(alias);if(!target||!candidate)return null;if(target===candidate||ticker===candidate)return{type:'exact',score:1};const candidateWords=words(candidate),overlap=overlapScore(`${name} ${symbol||''}`,alias),containment=candidate.length>=5&&(target.includes(candidate)||candidate.includes(target));if(containment&&candidateWords.length>=1)return{type:'strong',score:.91};if(candidateWords.length>=2&&overlap>=.66)return{type:'strong',score:.78+Math.min(.12,overlap*.12)};if(candidateWords.length>=1&&overlap>=.5&&candidate.length>=5)return{type:'possible',score:.52+Math.min(.12,overlap*.12)};return null;}
 function candidateMatch(name,symbol){const rank={exact:3,strong:2,possible:1};let best=null;for(const narrative of narratives)for(const alias of Array.isArray(narrative.aliases)?narrative.aliases:[]){const hit=aliasCandidate(name,symbol,alias);if(!hit)continue;if(!best||rank[hit.type]>rank[best.type]||(rank[hit.type]===rank[best.type]&&hit.score>best.score))best={narrative,type:hit.type,score:hit.score};}return best;}
-function allowedRaw(event){const fields=['txType','signature','marketCapSol','vSolInBondingCurve','vTokensInBondingCurve','initialBuy','traderPublicKey','uri','pool'];return Object.fromEntries(fields.filter((key)=>event[key]!==undefined).map((key)=>[key,event[key]]));}
+function allowedRaw(event){const fields=['txType','signature','marketCapSol','vSolInBondingCurve','vTokensInBondingCurve','initialBuy','traderPublicKey','uri','pool','poolId','timestamp'];return Object.fromEntries(fields.filter((key)=>event[key]!==undefined).map((key)=>[key,event[key]]));}
 
-async function saveMatch(event,match){
+async function postLifecycle(body,label){
  try{
-  const response=await fetch(`${base}/api/internal/launch-watch`,{method:'POST',headers:{'content-type':'application/json','x-front-internal-key':internalKey},body:JSON.stringify({mint:event.mint,name:event.name,symbol:event.symbol,seen:Date.now(),raw:{...allowedRaw(event),candidateMatchType:match.type,candidateMatchScore:match.score,narrativeHint:match.narrative.title}})});
+  const response=await fetch(`${base}/api/internal/launch-watch`,{method:'POST',headers:{'content-type':'application/json','x-front-internal-key':internalKey},body:JSON.stringify(body)});
   if(!response.ok)throw new Error(`HTTP ${response.status}`);
-  const data=await response.json();
-  if(data.matched)console.log(`[front-launch] ${String(data.matchType||match.type).toUpperCase()} MATCH ${event.name} -> ${data.narrative?.title||match.narrative.title}`);
- }catch(error){console.warn(`[front-launch] could not persist match: ${error instanceof Error?error.message:String(error)}`);}
+  return await response.json();
+ }catch(error){console.warn(`[front-launch] could not persist ${label}: ${error instanceof Error?error.message:String(error)}`);return null;}
+}
+async function saveMatch(event,match){
+ const data=await postLifecycle({mint:event.mint,name:event.name,symbol:event.symbol,seen:Date.now(),raw:{...allowedRaw(event),candidateMatchType:match.type,candidateMatchScore:match.score,narrativeHint:match.narrative.title}},'creation');
+ if(data?.matched)console.log(`[front-launch] ${String(data.matchType||match.type).toUpperCase()} MATCH ${event.name} -> ${data.narrative?.title||match.narrative.title}`);
+}
+async function saveMigration(event){
+ const data=await postLifecycle({mint:event.mint,seen:Date.now(),raw:allowedRaw(event)},'migration');
+ if(data?.tracked)console.log(`[front-launch] MIGRATED ${event.mint}${event.pool?` -> ${event.pool}`:''}`);
 }
 function connect(){
  if(stopped||!internalKey||!owner)return;
  if(typeof WebSocket!=='function'){console.warn('[front-launch] WebSocket is unavailable in this Node runtime.');return;}
  socket=new WebSocket('wss://pumpportal.fun/api/data');
- socket.addEventListener('open',()=>{attempt=0;console.log('[front-launch] PumpPortal connected · subscribeNewToken');socket.send(JSON.stringify({method:'subscribeNewToken'}));});
- socket.addEventListener('message',(message)=>{try{const data=JSON.parse(String(message.data));if(data?.txType!=='create'||typeof data?.mint!=='string'||typeof data?.name!=='string')return;const match=candidateMatch(data.name,data.symbol);void saveMatch(data,match||{type:'unmatched',score:0,narrative:{title:''}});}catch{}});
+ socket.addEventListener('open',()=>{attempt=0;console.log('[front-launch] PumpPortal connected · subscribeNewToken + subscribeMigration');socket.send(JSON.stringify({method:'subscribeNewToken'}));socket.send(JSON.stringify({method:'subscribeMigration'}));});
+ socket.addEventListener('message',(message)=>{try{const data=JSON.parse(String(message.data));if(data?.txType==='create'&&typeof data?.mint==='string'&&typeof data?.name==='string'){const match=candidateMatch(data.name,data.symbol);void saveMatch(data,match||{type:'unmatched',score:0,narrative:{title:''}});return;}if(data?.txType==='migrate'&&typeof data?.mint==='string')void saveMigration(data);}catch{}});
  socket.addEventListener('error',()=>console.warn('[front-launch] PumpPortal websocket error'));
  socket.addEventListener('close',()=>{if(stopped)return;const delay=Math.min(30000,1000*2**attempt++);console.warn(`[front-launch] disconnected; retrying in ${delay}ms`);reconnectTimer=setTimeout(connect,delay);});
 }
