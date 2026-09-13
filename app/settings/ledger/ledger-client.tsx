@@ -10,6 +10,7 @@ type Sample={platform?:string|null;author?:string|null;url?:string|null;mediaTyp
 type VisionScan={requested?:number;analyzed?:number;cached?:number;cachedFailures?:number;enriched?:number;failed?:number;skipped?:number;provider?:string|null;model?:string|null};
 type ContentStatus={enabled?:boolean;provider?:string|null;model?:string|null;state?:string|null;cachedVideos?:number;successfulCachedVideos?:number;failedCachedVideos?:number;lastRun?:number|null;lastError?:string|null;lastStats?:VisionScan|null;latestSuccess?:{analyzedAt?:number|null;summary?:string|null;confidence?:number|null;frameCount?:number;modelFrameCount?:number;duration?:number;captureType?:string|null}|null;latestFailure?:{cachedAt?:number|null;error?:string|null}|null};
 type Vision={enabled?:boolean;provider?:string|null;model?:string|null;visuallyUnderstood?:number;scan?:VisionScan|null;lastError?:string|null};
+type Stage={status?:string;requested?:number;analyzed?:number;cached?:number;cachedFailures?:number;enriched?:number;failed?:number;skipped?:number;engine?:ContentStatus|null;[key:string]:unknown};
 type ScanEntry={
   id:string;
   startedAt:number;
@@ -18,14 +19,17 @@ type ScanEntry={
   status:string;
   phase?:string|null;
   scanConnection?:string|null;
-  request?:{mode?:string;targetUniqueFeedItems?:number|null;keywordCount?:number;sentinelCount?:number;xForYou?:boolean;tiktokForYou?:boolean;xExplore?:boolean;tiktokTrends?:boolean};
+  request?:{mode?:string;targetUniqueFeedItems?:number|null;keywordCount?:number;sentinelCount?:number;xForYou?:boolean;tiktokForYou?:boolean;xExplore?:boolean;tiktokTrends?:boolean;scanXForYou?:boolean;scanTikTokForYou?:boolean};
   usableEvidence?:number;
   observed?:number;
   inferredTopics?:number;
+  candidateTopics?:number;
   uniqueCreators?:number|null;
   sourceCounts?:Record<string,number>;
+  sourcePages?:string[];
   platformCounts?:Record<string,number>;
   errors?:string[];
+  stages?:Record<string,Stage>;
   fallback?:{triggered?:boolean;failed?:boolean;rawEvidence?:number;groundedEvidence?:number;diagnostics?:unknown}|null;
   vision?:Vision|null;
   contentUnderstanding?:ContentStatus|null;
@@ -41,9 +45,44 @@ function duration(ms?:number|null){if(!ms)return'—';if(ms<1000)return`${ms} ms
 function counts(value?:Record<string,number>){const entries=Object.entries(value||{}).filter(([,n])=>Number(n)>0);return entries.length?entries.map(([k,n])=>`${k}: ${n}`).join(' · '):'None';}
 function statusClass(status:string){return status==='complete'?styles.success:status==='running'?styles.running:status==='stopped'?styles.stopped:styles.warning;}
 const n=(value:unknown)=>Number.isFinite(Number(value))?Number(value):0;
+function hasNumber(value:unknown){return value!==null&&value!==undefined&&Number.isFinite(Number(value));}
+
+function usableCount(scan:ScanEntry){
+  if(hasNumber(scan.usableEvidence))return n(scan.usableEvidence);
+  // v26 ledger entries before the schema-alignment fix stored the final canonical
+  // evidence count as `observed` and kept up to 30 samples, but omitted
+  // `usableEvidence`. Only use this compatibility fallback when samples prove
+  // canonical evidence really existed.
+  return scan.samples?.length?Math.max(n(scan.observed),scan.samples.length):0;
+}
+function topicCount(scan:ScanEntry){return hasNumber(scan.inferredTopics)?n(scan.inferredTopics):n(scan.candidateTopics);}
+function sampleCreators(scan:ScanEntry){return new Set((scan.samples||[]).map(sample=>`${sample.platform||''}|${(sample.author||'').toLowerCase()}`).filter(key=>!key.endsWith('|'))).size;}
+function sourceCounts(scan:ScanEntry){
+  if(scan.sourceCounts&&Object.keys(scan.sourceCounts).length)return scan.sourceCounts;
+  const derived:Record<string,number>={};
+  for(const sample of scan.samples||[]){const key=sample.provenance?.trim();if(key)derived[key]=(derived[key]||0)+1;}
+  if(Object.keys(derived).length)return derived;
+  for(const page of scan.sourcePages||[]){try{const host=new URL(page).hostname.replace(/^www\./,'');derived[host]=(derived[host]||0)+1;}catch{}}
+  return derived;
+}
+function derivedVision(scan:ScanEntry):Vision|null{
+  if(scan.vision)return scan.vision;
+  const stage=scan.stages?.visualUnderstanding;
+  if(!stage)return null;
+  const engine=stage.engine||null;
+  const enabled=engine?.enabled??stage.status!=='inactive';
+  return{
+    enabled,
+    provider:engine?.provider||null,
+    model:engine?.model||null,
+    visuallyUnderstood:n(stage.enriched),
+    scan:{requested:n(stage.requested),analyzed:n(stage.analyzed),cached:n(stage.cached),cachedFailures:n(stage.cachedFailures),enriched:n(stage.enriched),failed:n(stage.failed),skipped:n(stage.skipped),provider:engine?.provider||null,model:engine?.model||null},
+    lastError:engine?.lastError||null,
+  };
+}
 
 function scanHealth(scan:ScanEntry):HealthVerdict{
-  const observed=n(scan.observed),usable=n(scan.usableEvidence),ratio=observed>0?Math.min(1,usable/observed):null;
+  const observed=n(scan.observed),usable=usableCount(scan),ratio=observed>0?Math.min(1,usable/observed):null;
   let score=100;
   const notes:string[]=[];
   if(scan.status==='failed'){score=Math.min(score,20);notes.push('Scan ended in failed state.');}
@@ -54,14 +93,14 @@ function scanHealth(scan:ScanEntry):HealthVerdict{
   else if(ratio!==null&&ratio<.25){score-=18;notes.push(`Only ${Math.round(ratio*100)}% of observed posts became usable evidence.`);}
   else if(ratio!==null&&ratio<.5){score-=9;notes.push(`${Math.round(ratio*100)}% extraction yield is lower than ideal.`);}
   else if(ratio!==null){notes.push(`${Math.round(ratio*100)}% of observed posts became usable evidence.`);}
-  const wantedX=scan.request?.xForYou!==false||scan.request?.xExplore!==false;
-  const wantedTikTok=scan.request?.tiktokForYou!==false||scan.request?.tiktokTrends!==false;
+  const wantedX=scan.request?.scanXForYou??scan.request?.xForYou??scan.request?.xExplore??true;
+  const wantedTikTok=scan.request?.scanTikTokForYou??scan.request?.tiktokForYou??scan.request?.tiktokTrends??true;
   if(observed>0&&wantedX&&!n(scan.platformCounts?.X)){score-=10;notes.push('X was requested but contributed no usable evidence.');}
   if(observed>0&&wantedTikTok&&!n(scan.platformCounts?.TikTok)){score-=10;notes.push('TikTok was requested but contributed no usable evidence.');}
   if(scan.fallback?.failed){score-=15;notes.push('Media-first visual recovery failed.');}
   const errorCount=scan.errors?.length||0;
   if(errorCount){score-=Math.min(20,errorCount*5);notes.push(`${errorCount} scanner warning/error${errorCount===1?'':'s'} recorded.`);}
-  const vision=videoHealth(scan.vision);
+  const vision=videoHealth(derivedVision(scan));
   if(vision.label==='FAILED'){score-=15;notes.push('Selected video understanding failed.');}
   else if(vision.label==='DEGRADED'){score-=7;notes.push('Video understanding only partially succeeded.');}
   score=Math.max(0,Math.min(100,Math.round(score)));
@@ -154,9 +193,10 @@ export default function LedgerClient(){
     </section>
 
     <section className={styles.history}>
-      <div className={styles.sectionHead}><h2>Recent scans</h2><p>Newest first. Scan health measures collection/extraction health, not whether the internet produced a qualifying narrative.</p></div>
+      <div className={styles.sectionHead}><h2>Recent scans</h2><p>Newest first. Scan health measures collection/extraction health, not whether the internet produced a qualifying narrative. Older v26 rows are interpreted from their stored samples/stages when richer audit fields are absent.</p></div>
       {!ledger?.scans.length?<div className={styles.empty}>No completed scans recorded yet.</div>:ledger.scans.map((scan)=>{
-        const health=scanHealth(scan),video=videoHealth(scan.vision);
+        const usable=usableCount(scan),topics=topicCount(scan),creators=hasNumber(scan.uniqueCreators)?n(scan.uniqueCreators):sampleCreators(scan),sources=sourceCounts(scan),health=scanHealth(scan),vision=derivedVision(scan),video=videoHealth(vision);
+        const creatorsApprox=!hasNumber(scan.uniqueCreators)&&creators>0;
         return <article className={styles.scanCard} key={scan.id}>
           <div className={styles.cardHead}><div><h3>{scan.request?.mode==='scout'?'Scout':'Deep'} scan · {time(scan.startedAt)}</h3><p>{duration(scan.durationMs)} · {scan.id}</p></div><span className={statusClass(scan.status)}>{scan.status}</span></div>
           <div className={styles.qaRow}>
@@ -165,16 +205,16 @@ export default function LedgerClient(){
           </div>
           <div className={styles.metrics}>
             <div><span>Observed</span><b>{scan.observed??0}</b></div>
-            <div><span>Usable evidence</span><b>{scan.usableEvidence??0}{health.ratio!==null?<small className={styles.metricSub}>{Math.round(health.ratio*100)}% yield</small>:null}</b></div>
-            <div><span>Topics</span><b>{scan.inferredTopics??0}</b></div>
-            <div><span>Creators</span><b>{scan.uniqueCreators??0}</b></div>
+            <div><span>Usable evidence</span><b>{usable}{health.ratio!==null?<small className={styles.metricSub}>{Math.round(health.ratio*100)}% yield</small>:null}</b></div>
+            <div><span>Topics</span><b>{topics}</b></div>
+            <div><span>Creators</span><b>{creatorsApprox?'≥':''}{creators}</b></div>
           </div>
-          <div className={styles.detail}><b>Sources</b><span>{counts(scan.sourceCounts)}</span></div>
+          <div className={styles.detail}><b>Sources</b><span>{counts(sources)}</span></div>
           <div className={styles.detail}><b>Platforms</b><span>{counts(scan.platformCounts)}</span></div>
           {scan.fallback?.triggered&&<div className={styles.detail}><b>Visual recovery</b><span>{scan.fallback.failed?'Failed':`Observed ${scan.fallback.rawEvidence||0}; grounded ${scan.fallback.groundedEvidence||0}`}</span></div>}
-          {scan.vision&&<div className={styles.detail}><b>Video understanding</b><span>{scan.vision.enabled?`${scan.vision.provider||'provider'} · ${scan.vision.model||'model'} · understood ${scan.vision.visuallyUnderstood||0}`:'inactive'}{scan.vision.lastError?` · ${scan.vision.lastError}`:''}</span></div>}
+          {vision&&<div className={styles.detail}><b>Video understanding</b><span>{vision.enabled?`${vision.provider||'provider'} · ${vision.model||'model'} · understood ${vision.visuallyUnderstood||0}`:'inactive'}{vision.lastError?` · ${vision.lastError}`:''}</span></div>}
           {!!health.notes.length&&<details className={styles.details}><summary>Why this scan scored {health.score}/100</summary><div className={styles.noteList}>{health.notes.map((item,i)=><p key={i}>{item}</p>)}</div></details>}
-          {!!scan.errors?.length&&<details className={styles.details} open={(scan.usableEvidence||0)===0}><summary>{scan.errors.length} warning/error{scan.errors.length===1?'':'s'}</summary><div className={styles.errorList}>{scan.errors.map((item,i)=><p key={i}>{item}</p>)}</div></details>}
+          {!!scan.errors?.length&&<details className={styles.details} open={usable===0}><summary>{scan.errors.length} warning/error{scan.errors.length===1?'':'s'}</summary><div className={styles.errorList}>{scan.errors.map((item,i)=><p key={i}>{item}</p>)}</div></details>}
           {!!scan.samples?.length&&<details className={styles.details}><summary>{scan.samples.length} scanned evidence sample{scan.samples.length===1?'':'s'}</summary><div className={styles.samples}>{scan.samples.map((sample,i)=><div className={styles.sample} key={`${sample.url}-${i}`}><div><b>{sample.platform||'Post'}{sample.author?` · @${sample.author}`:''}{sample.mediaType?` · ${sample.mediaType}`:''}</b><small>{sample.provenance||'Local browser scan'}</small></div>{sample.content&&<p>{sample.content}</p>}{sample.url&&<a href={sample.url} target="_blank" rel="noreferrer">Open scanned post</a>}</div>)}</div></details>}
         </article>;
       })}
