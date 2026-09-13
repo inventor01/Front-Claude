@@ -9,6 +9,8 @@ import { attachSoundSignals, consolidateTopicAliases, mergeRichEvidence, normali
 import { attachVisualSignals, semanticConsolidateTopics } from './advanced-intelligence.mjs';
 import { rankInvestigationCandidates } from './scout-skill.mjs';
 import { ContentUnderstandingEngine } from './content-understanding.mjs';
+import { PostUnderstandingEngineV26 } from './post-understanding-v26.mjs';
+import { enhanceNarrativesV26 } from './narrative-intelligence-v26.mjs';
 import { BroadTikTokObserver } from './tiktok-observer-v21.mjs';
 import {
   findSystemChrome,
@@ -19,15 +21,15 @@ import {
   waitForCdp,
 } from './system-browser.mjs';
 
-export const V25_VERSION = 25;
+export const V25_VERSION = 26;
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
 const CDP_PORT = Number(process.env.FRONT_BRIDGE_CDP_PORT || 43982);
 const CDP_URL = frontCdpUrl(CDP_PORT);
 const DATA_DIR = process.env.FRONT_BRIDGE_DATA || path.join(os.homedir(), '.front-browser-bridge');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
-const LEDGER_PATH = path.join(DATA_DIR, 'scan-ledger-v25.json');
-const PENDING_PATH = path.join(DATA_DIR, 'pending-evidence-v25.json');
+const LEDGER_PATH = path.join(DATA_DIR, 'scan-ledger-v26.json');
+const PENDING_PATH = path.join(DATA_DIR, 'pending-evidence-v26.json');
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://believable-inspiration-production-a68b.up.railway.app',
   'https://front-narrative-desk.austinrock2000.chatgpt.site',
@@ -43,7 +45,7 @@ const clean = (value, max = 500) => String(value ?? '').replace(/\s+/g, ' ').tri
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
 function writeJson(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value, null, 2)); }
-function scanId() { return `v25-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
+function scanId() { return `v26-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
 function hasText(value) {
   const text = clean(value, 2000);
   if (text.length < 3 || !/[\p{L}]/u.test(text)) return false;
@@ -74,7 +76,8 @@ function deriveTopics(rows = [], limit = 24) {
   topics = attachVisualSignals(topics, rows, at);
   topics = semanticConsolidateTopics(topics, rows, at);
   topics = consolidateTopicAliases(topics);
-  return rankInvestigationCandidates(topics, rows, { limit, now: at });
+  topics = rankInvestigationCandidates(topics, rows, { limit, now: at });
+  return enhanceNarrativesV26(topics, rows, at).slice(0, limit);
 }
 function summarizeRows(rows = []) {
   const platformCounts = {};
@@ -106,6 +109,7 @@ let latestLive = {
   observed: 0, candidateTopics: 0, platformCounts: {}, sourcePages: [], errors: [], evidence: [], inferredTopics: [], stages: {},
 };
 const understanding = new ContentUnderstandingEngine({ dataDir: DATA_DIR });
+const postUnderstanding = new PostUnderstandingEngineV26({ dataDir: DATA_DIR });
 const tiktok = new BroadTikTokObserver({ cdpUrl: CDP_URL, intervalMs: Number(process.env.FRONT_TIKTOK_OBSERVER_MS || 850) });
 
 function saveLedger() { writeJson(LEDGER_PATH, scans.slice(-100)); }
@@ -197,7 +201,7 @@ async function collectXFeed(target, maxSeconds = 70) {
     const tab = page.getByRole('tab', { name: /^For you$/i }).first();
     if (await tab.count().catch(() => 0)) await tab.click({ timeout: 2000 }).catch(() => {});
     while (!shouldStop() && Date.now() - started < maxSeconds * 1000 && rows.size < target && scrolls < 24 && stale < 4) {
-      for (const row of await extractX(page, 'Front v25 · X dedicated For You collector', target)) rows.set(row.id, row);
+      for (const row of await extractX(page, 'Front v26 · X dedicated For You collector', target)) rows.set(row.id, row);
       stale = rows.size <= lastSize + 1 ? stale + 1 : 0;
       lastSize = rows.size;
       stage('xDiscovery', { status: 'running', observed: rows.size, target, scrolls, sourcePage: page.url(), stalePasses: stale });
@@ -247,8 +251,8 @@ async function collectSearch(platform, query, limit = 24) {
     let out = [];
     for (let pass = 0; pass < 4 && out.length < limit && !shouldStop(); pass++) {
       const rows = platform === 'X'
-        ? await extractX(page, `Front v25 · X origin/investigation · ${q}`, limit)
-        : await extractTikTokSearch(page, `Front v25 · TikTok origin/investigation · ${q}`, limit);
+        ? await extractX(page, `Front v26 · X origin/investigation · ${q}`, limit)
+        : await extractTikTokSearch(page, `Front v26 · TikTok origin/investigation · ${q}`, limit);
       out = mergeRichEvidence([...out, ...rows]);
       if (out.length >= limit) break;
       await page.mouse.wheel(0, 950).catch(() => {});
@@ -301,6 +305,22 @@ async function addOriginResearch(rows, topics, mode) {
   return mergeRichEvidence(merged);
 }
 
+async function contextualizePosts(rows, phaseName = 'post-understanding') {
+  if (!rows.length || shouldStop()) return rows;
+  setPhase(phaseName);
+  const maxPosts = Math.max(12, Math.min(180, Number(process.env.FRONT_CONTEXT_MAX_POSTS || 90)));
+  const selected = rows.slice(0, maxPosts);
+  stage('postUnderstanding', { status: 'running', requested: selected.length, totalEvidence: rows.length, engine: postUnderstanding.status() });
+  const enriched = await postUnderstanding.enrich(selected, {
+    batchSize: Math.max(2, Math.min(16, Number(process.env.FRONT_CONTEXT_BATCH_SIZE || 8))),
+    timeoutMs: Math.max(12000, Number(process.env.FRONT_CONTEXT_TIMEOUT_MS || 45000)),
+  });
+  const byId = new Map(enriched.rows.map((row) => [row.id, row]));
+  const output = rows.map((row) => byId.get(row.id) || row);
+  stage('postUnderstanding', { status: enriched.stats.failed ? 'degraded' : 'complete', ...enriched.stats, analyzedPosts: selected.length, untouchedPosts: Math.max(0, rows.length - selected.length), engine: postUnderstanding.status() });
+  return output;
+}
+
 async function runScan(body = {}) {
   if (current) throw new Error('A scan is already running. Use Stop scan before starting another one.');
   const request = requestSummary({ ...config, ...body });
@@ -314,6 +334,7 @@ async function runScan(body = {}) {
       xDiscovery: { status: request.scanXForYou ? 'pending' : 'disabled', observed: 0, target: request.targetUniqueFeedItems, updatedAt: Date.now() },
       tiktokDiscovery: { status: request.scanTikTokForYou ? 'pending' : 'disabled', active: request.scanTikTokForYou, observed: 0, grounded: 0, target: request.targetUniqueFeedItems, sourcePages: [], errors: [], updatedAt: Date.now() },
       visualUnderstanding: { status: 'pending', updatedAt: Date.now() },
+      postUnderstanding: { status: 'pending', updatedAt: Date.now() },
       narrativeEngine: { status: 'pending', updatedAt: Date.now() },
       originResearch: { status: request.mode === 'deep' ? 'pending' : 'disabled', updatedAt: Date.now() },
     },
@@ -362,13 +383,16 @@ async function runScan(body = {}) {
       stage('visualUnderstanding', { status: understanding.status().enabled ? (shouldStop() ? 'stopped' : 'skipped-no-video') : 'inactive', engine: understanding.status() });
     }
 
+    resultRows = await contextualizePosts(resultRows);
+
     setPhase('narrative-ranking');
     topics = deriveTopics(resultRows, 24);
-    stage('narrativeEngine', { status: 'complete', candidates: topics.length });
+    stage('narrativeEngine', { status: 'complete', candidates: topics.length, intelligenceVersion: 26 });
     resultRows = await addOriginResearch(resultRows, topics, request.mode);
     if (!shouldStop() && request.mode === 'deep') {
+      resultRows = await contextualizePosts(resultRows, 'post-understanding-origin');
       topics = deriveTopics(resultRows, 24);
-      stage('narrativeEngine', { status: 'complete', candidates: topics.length, rerankedAfterOrigin: true });
+      stage('narrativeEngine', { status: 'complete', candidates: topics.length, rerankedAfterOrigin: true, intelligenceVersion: 26 });
     }
 
     summary = summarizeRows(resultRows);
@@ -382,8 +406,9 @@ async function runScan(body = {}) {
     savePending();
     return {
       ok: true, version: V25_VERSION, scanId: id, evidence: resultRows, inferredTopics: topics, errors: latestLive.errors,
-      audit: { singleProcess: true, stages: latestLive.stages, sourcePages: latestLive.sourcePages, ...summary },
-      contentUnderstanding: { ...understanding.status(), visuallyUnderstood: resultRows.filter((row) => row.contentSummary).length }, at: Date.now(),
+      audit: { singleProcess: true, intelligenceVersion: 26, stages: latestLive.stages, sourcePages: latestLive.sourcePages, ...summary },
+      contentUnderstanding: { ...understanding.status(), visuallyUnderstood: resultRows.filter((row) => row.contentSummary).length },
+      postUnderstanding: postUnderstanding.status(), at: Date.now(),
     };
   } catch (error) {
     latestLive = {
@@ -398,7 +423,7 @@ async function runScan(body = {}) {
       id, status: finalStatus, startedAt, completedAt: Date.now(), durationMs: Date.now() - startedAt, request,
       observed: latestLive.observed, candidateTopics: latestLive.candidateTopics, platformCounts: latestLive.platformCounts,
       stages: latestLive.stages, errors: latestLive.errors, sourcePages: latestLive.sourcePages,
-      samples: latestLive.evidence.slice(0, 30).map((row) => ({ platform: row.platform, author: row.author, url: row.url, content: clean(row.contentSummary || row.content, 260), provenance: row.provenance })),
+      samples: latestLive.evidence.slice(0, 30).map((row) => ({ platform: row.platform, author: row.author, url: row.url, subject: row.postSubject || null, event: row.postEvent || row.contentEvent || null, content: clean(row.contentSummary || row.content, 260), provenance: row.provenance })),
     };
     scans.push(finished); scans = scans.slice(-100); saveLedger();
     current = null;
@@ -407,11 +432,12 @@ async function runScan(body = {}) {
 
 function health() {
   return {
-    ok: true, service: 'front-browser-bridge', version: V25_VERSION, scanner: 'front-single-process-v25', architecture: 'single-process',
+    ok: true, service: 'front-browser-bridge', version: V25_VERSION, scanner: 'front-single-process-v26', architecture: 'single-process', intelligenceVersion: 26,
     running: Boolean(current), scanId: current?.id || null, scanPhase: current?.phase || 'idle', scanLedger: { current, retained: scans.length },
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
-    contentUnderstanding: understanding.status(), contentTargets: { deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 8), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 4) },
-    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','broad-tiktok-observation','caption-light-tiktok-discovery','visual-understanding','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
+    contentUnderstanding: understanding.status(), postUnderstanding: postUnderstanding.status(),
+    contentTargets: { deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 8), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 4), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 90) },
+    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','broad-tiktok-observation','caption-light-tiktok-discovery','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
     activePorts: { bridge: PORT, chromeCdp: CDP_PORT },
   };
 }
@@ -485,7 +511,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Front browser bridge v25 listening on http://${HOST}:${PORT}`);
+  console.log(`Front browser bridge v26 listening on http://${HOST}:${PORT}`);
   console.log(`Single-process scanner active. Chrome CDP remains on ${CDP_URL}.`);
-  console.log('Pipeline: browser preflight → X/TikTok discovery → visual understanding → narrative ranking → origin research.');
+  console.log('Pipeline: browser preflight → X/TikTok discovery → visual understanding → contextual post understanding → semantic narrative ranking → origin research.');
 });
