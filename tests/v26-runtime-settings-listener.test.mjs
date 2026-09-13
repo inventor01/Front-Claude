@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -28,6 +29,11 @@ test('local vision defaults match the proven 8 GB Mac profile and do not cap dis
   assert.match(start,/replacing stale background visual budget 2 with balanced budget 1/);
   assert.match(start,/FRONT_CONTEXT_OLLAMA_MODEL:-\$FRONT_OLLAMA_MODEL/);
   assert.match(start,/replacing stale 8B context model with current local model/);
+});
+
+test('browser bridge launcher remains valid bash after runtime-profile migrations',()=>{
+  const result=spawnSync('bash',['-n',path.join(root,'browser-bridge/start.command')],{encoding:'utf8'});
+  assert.equal(result.status,0,result.stderr||result.stdout);
 });
 
 test('settings does not own a PumpPortal websocket and legacy no-op trend toggles are disabled',()=>{
