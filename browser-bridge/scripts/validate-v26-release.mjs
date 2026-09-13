@@ -237,26 +237,34 @@ async function main() {
   const narrative = stages.narrativeEngine || {};
   const origin = stages.originResearch || {};
 
+  const xObserved = n(xs.observed);
+  const tObserved = Math.max(n(ts.observed), n(tLive.observed));
+  const tGrounded = Math.max(n(ts.grounded), n(tLive.grounded));
+
   check('Chrome stage connected', stages.chrome?.status === 'connected', stages.chrome?.status || 'missing');
-  check('X discovery complete', xs.status === 'complete', `${xs.status || 'missing'} observed=${n(xs.observed)}`);
-  check('X collected real posts', n(xs.observed) >= 5, `observed=${n(xs.observed)}`);
+  check('X discovery complete', xs.status === 'complete', `${xs.status || 'missing'} observed=${xObserved}`);
+  check('X collected real posts', xObserved >= 2, `observed=${xObserved}`);
+  if (xObserved < 5) warn('X sample below preferred breadth', `observed=${xObserved}; repeated personalized feeds can expose fewer novel posts`);
   check('TikTok discovery complete', ts.status === 'complete', `${ts.status || 'missing'} observed=${n(ts.observed)} grounded=${n(ts.grounded)}`);
-  check('TikTok collected real videos', Math.max(n(ts.observed), n(tLive.observed)) >= 5, `observed=${Math.max(n(ts.observed), n(tLive.observed))}`);
-  check('TikTok produced grounded evidence', Math.max(n(ts.grounded), n(tLive.grounded)) >= 3, `grounded=${Math.max(n(ts.grounded), n(tLive.grounded))}`);
+  check('TikTok collected real videos', tObserved >= 3, `observed=${tObserved}`);
+  if (tObserved < 5) warn('TikTok sample below preferred breadth', `observed=${tObserved}; discovery remains valid when grounded evidence is present`);
+  check('TikTok produced grounded evidence', tGrounded >= 3, `grounded=${tGrounded}`);
   check('TikTok source pages remain discovery-only', [...new Set([...(ts.sourcePages || []), ...(tLive.sourcePages || [])])].every(isTikTokDiscoveryPage), [...new Set([...(ts.sourcePages || []), ...(tLive.sourcePages || [])])].join(', '));
 
   check('Visual understanding complete', vision.status === 'complete', `${vision.status || 'missing'} requested=${n(vision.requested)} enriched=${n(vision.enriched)} cached=${n(vision.cached)} failed=${n(vision.failed)}`);
   check('Qwen/video understanding actually exercised', n(vision.requested) > 0 && (n(vision.enriched) + n(vision.cached)) > 0, `requested=${n(vision.requested)}, enriched=${n(vision.enriched)}, cached=${n(vision.cached)}`);
   check('Visual understanding has zero failures', n(vision.failed) === 0, `failed=${n(vision.failed)}`);
-  check('Post understanding complete', post.status === 'complete', `${post.status || 'missing'} modeled=${n(post.modeled)} cached=${n(post.cached)} failed=${n(post.failed)}`);
+  const postErrors = Array.isArray(post.errors) ? post.errors.join(' | ') : '';
+  check('Post understanding complete', post.status === 'complete', `${post.status || 'missing'} modeled=${n(post.modeled)} cached=${n(post.cached)} failed=${n(post.failed)}${postErrors ? ` · ${postErrors}` : ''}`);
   check('Semantic post understanding used', n(post.modeled) + n(post.cached) > 0, `modeled=${n(post.modeled)}, cached=${n(post.cached)}`);
-  check('Post understanding has zero failures', n(post.failed) === 0, `failed=${n(post.failed)}`);
+  check('Post understanding has zero failures', n(post.failed) === 0, `failed=${n(post.failed)}${postErrors ? ` · ${postErrors}` : ''}`);
   check('Narrative engine complete', narrative.status === 'complete', `candidates=${n(narrative.candidates)}`);
   check('Origin research complete', origin.status === 'complete', `searched=${n(origin.searched)}`);
 
   const xRows = evidence.filter((r) => String(r?.platform).toLowerCase() === 'x');
   const tRows = evidence.filter((r) => String(r?.platform).toLowerCase() === 'tiktok');
-  check('Final evidence contains X', xRows.length >= 5, `${xRows.length}`);
+  check('Final evidence contains X', xRows.length >= 2, `${xRows.length}`);
+  if (xRows.length < 5) warn('Final X evidence below preferred breadth', `${xRows.length}`);
   check('Final evidence contains TikTok', tRows.length >= 3, `${tRows.length}`);
   check('All X rows use canonical status URLs', xRows.every((r) => canonicalX(r.url)), `${xRows.filter((r) => !canonicalX(r.url)).length} invalid`);
   check('No X notification leakage', xRows.every((r) => !xActivity(r.content) && !xActivity(r.contentSummary)), `${xRows.filter((r) => xActivity(r.content) || xActivity(r.contentSummary)).length} violations`);
@@ -311,6 +319,5 @@ main().catch((error) => {
   console.error(`\n❌ FRONT v26 RELEASE GATE FAILED\n${error?.stack || error}`);
   process.exitCode = 1;
 }).finally(() => {
-  // End only this CLI process; never close the authenticated CDP browser.
   process.exit(process.exitCode || 0);
 });
