@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { classifyAlias } from '@/lib/coin-matching';
 import { coinLinks } from '@/lib/coin-intelligence';
 import { ExternalLink, Radio } from 'lucide-react';
@@ -22,6 +22,7 @@ const WATCH_EVENT='front-pumpportal-watches-changed';
 
 function normalize(value:string){return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();}
 function readArray<T>(key:string):T[]{try{const value=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(value)?value:[];}catch{return[];}}
+function notify(title:string,body:string){if(typeof Notification!=='undefined'&&Notification.permission==='granted')new Notification(title,{body});}
 
 export default function NarrativeCreationWatcher(){
  const [cards,setCards]=useState<NarrativeCard[]>([]);
@@ -33,17 +34,24 @@ export default function NarrativeCreationWatcher(){
  const matchesRef=useRef<Match[]>([]);
  const hitsRef=useRef<LifecycleHit[]>([]);
  const watchesRef=useRef<Watch[]>([]);
+ const enabledRef=useRef(true);
+ const statusRef=useRef('Starting');
 
- function publish(nextStatus=status,nextHits=hitsRef.current,nextEnabled=enabled){
+ const publish=useCallback((nextStatus=statusRef.current,nextHits=hitsRef.current,nextEnabled=enabledRef.current)=>{
   window.dispatchEvent(new CustomEvent(STATE_EVENT,{detail:{enabled:nextEnabled,status:nextStatus,hits:nextHits}}));
- }
- function storeHits(updater:(current:LifecycleHit[])=>LifecycleHit[]){
-  setHits((current)=>{const next=updater(current).slice(0,30);hitsRef.current=next;localStorage.setItem(HIT_KEY,JSON.stringify(next));publish(status,next,enabled);return next;});
- }
- function addLifecycleHit(hit:LifecycleHit){
+ },[]);
+ const storeHits=useCallback((updater:(current:LifecycleHit[])=>LifecycleHit[])=>{
+  setHits((current)=>{
+   const next=updater(current).slice(0,30);
+   hitsRef.current=next;
+   localStorage.setItem(HIT_KEY,JSON.stringify(next));
+   publish(statusRef.current,next,enabledRef.current);
+   return next;
+  });
+ },[publish]);
+ const addLifecycleHit=useCallback((hit:LifecycleHit)=>{
   storeHits((current)=>[hit,...current.filter((item)=>!(item.mint===hit.mint&&item.event===hit.event))]);
- }
- function notify(title:string,body:string){if(typeof Notification!=='undefined'&&Notification.permission==='granted')new Notification(title,{body});}
+ },[storeHits]);
 
  useEffect(()=>{
   const kickoff=window.setTimeout(()=>{
@@ -51,16 +59,25 @@ export default function NarrativeCreationWatcher(){
    const savedHits=readArray<LifecycleHit>(HIT_KEY).slice(0,30);
    const savedWatches=readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string').slice(0,100);
    const savedEnabled=localStorage.getItem(ENABLE_KEY)!=='false';
-   matchesRef.current=savedMatches;hitsRef.current=savedHits;watchesRef.current=savedWatches;
-   setMatches(savedMatches);setHits(savedHits);setEnabled(savedEnabled);
-   publish(savedEnabled?'Starting':'Off',savedHits,savedEnabled);
+   const initialStatus=savedEnabled?'Starting':'Off';
+   matchesRef.current=savedMatches;hitsRef.current=savedHits;watchesRef.current=savedWatches;enabledRef.current=savedEnabled;statusRef.current=initialStatus;
+   setMatches(savedMatches);setHits(savedHits);setEnabled(savedEnabled);setStatus(initialStatus);
+   publish(initialStatus,savedHits,savedEnabled);
   },0);
-  const control=(event:Event)=>{const detail=(event as CustomEvent<{enabled?:boolean}>).detail;if(typeof detail?.enabled!=='boolean')return;localStorage.setItem(ENABLE_KEY,String(detail.enabled));setEnabled(detail.enabled);setStatus(detail.enabled?'Starting':'Off');publish(detail.enabled?'Starting':'Off',hitsRef.current,detail.enabled);};
+  const control=(event:Event)=>{
+   const detail=(event as CustomEvent<{enabled?:boolean}>).detail;
+   if(typeof detail?.enabled!=='boolean')return;
+   const nextStatus=detail.enabled?'Starting':'Off';
+   localStorage.setItem(ENABLE_KEY,String(detail.enabled));
+   enabledRef.current=detail.enabled;statusRef.current=nextStatus;
+   setEnabled(detail.enabled);setStatus(nextStatus);
+   publish(nextStatus,hitsRef.current,detail.enabled);
+  };
   const refreshWatches=()=>{watchesRef.current=readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string').slice(0,100);};
   window.addEventListener(CONTROL_EVENT,control as EventListener);
   window.addEventListener(WATCH_EVENT,refreshWatches);
   return()=>{window.clearTimeout(kickoff);window.removeEventListener(CONTROL_EVENT,control as EventListener);window.removeEventListener(WATCH_EVENT,refreshWatches);};
- },[]);
+ },[publish]);
 
  useEffect(()=>{cardsRef.current=cards;},[cards]);
  useEffect(()=>{matchesRef.current=matches;},[matches]);
@@ -77,9 +94,10 @@ export default function NarrativeCreationWatcher(){
  },[]);
 
  useEffect(()=>{
-  if(!enabled){setStatus('Off');publish('Off',hitsRef.current,false);return;}
+  enabledRef.current=enabled;
+  if(!enabled){statusRef.current='Off';publish('Off',hitsRef.current,false);return;}
   let socket:WebSocket|undefined,retry:ReturnType<typeof setTimeout>,stopped=false,attempt=0;
-  const setPublishedStatus=(value:string)=>{setStatus(value);publish(value,hitsRef.current,true);};
+  const setPublishedStatus=(value:string)=>{statusRef.current=value;setStatus(value);publish(value,hitsRef.current,true);};
   const connect=()=>{
    if(stopped)return;
    setPublishedStatus('Connecting');
@@ -128,7 +146,7 @@ export default function NarrativeCreationWatcher(){
   };
   const kickoff=window.setTimeout(connect,0);
   return()=>{stopped=true;window.clearTimeout(kickoff);clearTimeout(retry);socket?.close();};
- },[enabled]);
+ },[enabled,addLifecycleHit,publish]);
 
  const visibleHits=hits.slice(0,3);
  const visibleMatches=matches.filter((match)=>!visibleHits.some((hit)=>hit.mint===match.mint&&hit.event==='create')).slice(0,Math.max(0,3-visibleHits.length));
