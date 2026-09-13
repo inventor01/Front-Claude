@@ -52,6 +52,9 @@ fi
 EXPLICIT_PROVIDER="${FRONT_CONTENT_PROVIDER-}"
 EXPLICIT_MODEL="${FRONT_OLLAMA_MODEL-}"
 EXPLICIT_ENDPOINT="${FRONT_OLLAMA_ENDPOINT-}"
+EXPLICIT_OLLAMA_KEEP_ALIVE="${FRONT_OLLAMA_KEEP_ALIVE-}"
+EXPLICIT_OLLAMA_PREWARM="${FRONT_OLLAMA_PREWARM-}"
+EXPLICIT_OLLAMA_WARM_TIMEOUT="${FRONT_OLLAMA_WARM_TIMEOUT_MS-}"
 EXPLICIT_DEEP="${FRONT_CONTENT_DEEP_VIDEOS-}"
 EXPLICIT_SCOUT="${FRONT_CONTENT_SCOUT_VIDEOS-}"
 EXPLICIT_BACKGROUND="${FRONT_CONTENT_BACKGROUND_VIDEOS-}"
@@ -77,6 +80,9 @@ done
 [ -n "$EXPLICIT_PROVIDER" ] && export FRONT_CONTENT_PROVIDER="$EXPLICIT_PROVIDER"
 [ -n "$EXPLICIT_MODEL" ] && export FRONT_OLLAMA_MODEL="$EXPLICIT_MODEL"
 [ -n "$EXPLICIT_ENDPOINT" ] && export FRONT_OLLAMA_ENDPOINT="$EXPLICIT_ENDPOINT"
+[ -n "$EXPLICIT_OLLAMA_KEEP_ALIVE" ] && export FRONT_OLLAMA_KEEP_ALIVE="$EXPLICIT_OLLAMA_KEEP_ALIVE"
+[ -n "$EXPLICIT_OLLAMA_PREWARM" ] && export FRONT_OLLAMA_PREWARM="$EXPLICIT_OLLAMA_PREWARM"
+[ -n "$EXPLICIT_OLLAMA_WARM_TIMEOUT" ] && export FRONT_OLLAMA_WARM_TIMEOUT_MS="$EXPLICIT_OLLAMA_WARM_TIMEOUT"
 [ -n "$EXPLICIT_DEEP" ] && export FRONT_CONTENT_DEEP_VIDEOS="$EXPLICIT_DEEP"
 [ -n "$EXPLICIT_SCOUT" ] && export FRONT_CONTENT_SCOUT_VIDEOS="$EXPLICIT_SCOUT"
 [ -n "$EXPLICIT_BACKGROUND" ] && export FRONT_CONTENT_BACKGROUND_VIDEOS="$EXPLICIT_BACKGROUND"
@@ -91,12 +97,15 @@ done
 export FRONT_CONTENT_PROVIDER="${FRONT_CONTENT_PROVIDER:-ollama}"
 export FRONT_OLLAMA_MODEL="${FRONT_OLLAMA_MODEL:-qwen3-vl:4b-instruct}"
 export FRONT_OLLAMA_ENDPOINT="${FRONT_OLLAMA_ENDPOINT:-http://127.0.0.1:11434/api/chat}"
+export FRONT_OLLAMA_KEEP_ALIVE="${FRONT_OLLAMA_KEEP_ALIVE:-30m}"
+export FRONT_OLLAMA_PREWARM="${FRONT_OLLAMA_PREWARM:-1}"
+export FRONT_OLLAMA_WARM_TIMEOUT_MS="${FRONT_OLLAMA_WARM_TIMEOUT_MS:-75000}"
 export FRONT_CONTENT_DEEP_VIDEOS="${FRONT_CONTENT_DEEP_VIDEOS:-4}"
 export FRONT_CONTENT_SCOUT_VIDEOS="${FRONT_CONTENT_SCOUT_VIDEOS:-2}"
 export FRONT_CONTENT_BACKGROUND_VIDEOS="${FRONT_CONTENT_BACKGROUND_VIDEOS:-1}"
-export FRONT_CONTEXT_MAX_POSTS="${FRONT_CONTEXT_MAX_POSTS:-90}"
-export FRONT_CONTEXT_BATCH_SIZE="${FRONT_CONTEXT_BATCH_SIZE:-8}"
-export FRONT_CONTEXT_TIMEOUT_MS="${FRONT_CONTEXT_TIMEOUT_MS:-45000}"
+export FRONT_CONTEXT_MAX_POSTS="${FRONT_CONTEXT_MAX_POSTS:-36}"
+export FRONT_CONTEXT_BATCH_SIZE="${FRONT_CONTEXT_BATCH_SIZE:-4}"
+export FRONT_CONTEXT_TIMEOUT_MS="${FRONT_CONTEXT_TIMEOUT_MS:-60000}"
 export FRONT_TIKTOK_OBSERVER_MS="${FRONT_TIKTOK_OBSERVER_MS:-850}"
 export FRONT_BRIDGE_HEADLESS="${FRONT_BRIDGE_HEADLESS:-1}"
 
@@ -131,11 +140,17 @@ echo "Starting Front browser bridge v26 on http://127.0.0.1:43981"
 echo "Keep this Terminal window open while you want browser intelligence running."
 echo "v26 preserves the v25 single-process collectors and adds contextual post understanding plus semantic narrative clustering."
 echo "Chrome CDP stays on http://127.0.0.1:43982 and must remain running."
-echo "Balanced profile: vision=${FRONT_OLLAMA_MODEL:-none}, context=${FRONT_CONTEXT_OLLAMA_MODEL:-none}, deep=$FRONT_CONTENT_DEEP_VIDEOS, scout=$FRONT_CONTENT_SCOUT_VIDEOS, background=$FRONT_CONTENT_BACKGROUND_VIDEOS, contextual=$FRONT_CONTEXT_MAX_POSTS, context-batch=$FRONT_CONTEXT_BATCH_SIZE, TikTok poll=${FRONT_TIKTOK_OBSERVER_MS}ms."
+echo "Balanced profile: vision=${FRONT_OLLAMA_MODEL:-none}, context=${FRONT_CONTEXT_OLLAMA_MODEL:-none}, deep=$FRONT_CONTENT_DEEP_VIDEOS, scout=$FRONT_CONTENT_SCOUT_VIDEOS, background=$FRONT_CONTENT_BACKGROUND_VIDEOS, contextual=$FRONT_CONTEXT_MAX_POSTS, context-batch=$FRONT_CONTEXT_BATCH_SIZE, context-timeout=${FRONT_CONTEXT_TIMEOUT_MS}ms, keep-alive=${FRONT_OLLAMA_KEEP_ALIVE}, TikTok poll=${FRONT_TIKTOK_OBSERVER_MS}ms."
 if [ -n "${FRONT_CONTENT_API_KEY:-${OPENAI_API_KEY:-}}" ]; then
   echo "Content/context understanding: OpenAI provider configured."
 elif [ -n "${FRONT_OLLAMA_MODEL:-}" ]; then
   echo "Content/context understanding: local Ollama provider configured."
+  if [ "$FRONT_OLLAMA_PREWARM" != "0" ]; then
+    echo "Prewarming local Ollama model before the first scan..."
+    if ! node ./scripts/warm-ollama.mjs; then
+      echo "Warning: Ollama prewarm failed. Front will still start, but local model stages may time out until Ollama is ready."
+    fi
+  fi
 else
   echo "Content/context understanding: deterministic fallback active; semantic model inactive until content.env is configured."
 fi
