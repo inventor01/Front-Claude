@@ -16,10 +16,12 @@ const compat=fs.readFileSync(new URL('../src/playwright-cdp-compat.mjs',import.m
 const fallback=fs.readFileSync(new URL('../src/fallback-discovery-v18.mjs',import.meta.url),'utf8');
 const worker=fs.readFileSync(new URL('../src/fallback-worker-v18.mjs',import.meta.url),'utf8');
 const pkg=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8'));
+const V26_START='node --import ./src/playwright-cdp-compat.mjs src/server-v25.mjs';
 
-test('v25 single-process scanner is default while v21/v20/v19/v18/v17/v16 remain explicit fallbacks',()=>{
-  assert.equal(pkg.scripts.start,'node src/server-v25.mjs');
-  assert.equal(pkg.scripts['start:v25'],'node src/server-v25.mjs');
+test('v26 single-process scanner is default while v21/v20/v19/v18/v17/v16 remain explicit fallbacks',()=>{
+  assert.equal(pkg.scripts.start,V26_START);
+  assert.equal(pkg.scripts['start:v26'],V26_START);
+  assert.equal(pkg.scripts['start:v25'],V26_START);
   assert.equal(pkg.scripts['start:v21'],'node src/launcher-v21.mjs');
   assert.equal(pkg.scripts['start:v20'],'node src/launcher-v20.mjs');
   assert.equal(pkg.scripts['start:v19'],'node src/launcher-v19.mjs');
