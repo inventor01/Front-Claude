@@ -1,9 +1,18 @@
 const clean = (value, max = 8000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
+export function isTikTokActivityText(value) {
+  const text = clean(value, 8000).toLowerCase();
+  if (!text) return false;
+  return /(?:^|\b)(?:liked|commented on|replied to|shared|reposted|saved|favorited|viewed|mentioned|tagged|followed|started following|sent)\b[\s\S]{0,120}\b(?:your|you)\b[\s\S]{0,120}\b(?:video|post|comment|profile|story|message)?\b/i.test(text)
+    || /\b(?:activity|notifications?|inbox)\b[\s\S]{0,80}\b(?:your video|your post|your comment|followed you|mentioned you|tagged you)\b/i.test(text)
+    || /\b(?:liked your video|liked your post|liked your comment|commented on your video|commented on your post|replied to your comment|shared your video|reposted your video|viewed your profile|mentioned you|tagged you|followed you|started following you|sent you a message)\b/i.test(text);
+}
+
 export function meaningfulTikTokText(value) {
   const text = clean(value, 8000);
   if (text.length < 3 || !/[\p{L}]/u.test(text)) return false;
-  if (/^(?:home|explore|for you|following|search|profile|video|photo|sound|show more|more|views?|likes?|shares?|comments?)$/i.test(text)) return false;
+  if (isTikTokActivityText(text)) return false;
+  if (/^(?:home|explore|for you|following|search|profile|video|photo|sound|show more|more|views?|likes?|shares?|comments?|activity|notifications?|inbox)$/i.test(text)) return false;
   if (/^[+$-]?\d+(?:[.,]\d+)?\s*(?:K|M|B|T|%|x)?$/i.test(text)) return false;
   return true;
 }
