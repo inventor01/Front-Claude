@@ -11,7 +11,7 @@ import {
   selectVideoCandidates,
 } from '../src/content-understanding.mjs';
 
-const cacheKey=(row)=>`${row.platform}|${row.id}|${row.url}|timeline-sheet-v1`;
+const cacheKey=(row,provider='ollama',model='qwen-test')=>`${row.platform}|${row.id}|${row.url}|${provider}|${model}|v17|timeline-sheet-v2`;
 
 test('frame schedule covers the whole short-video timeline without exploding frame count',()=>{
   const times=frameSchedule(9,16);
@@ -78,7 +78,7 @@ test('content health distinguishes successful and failed persistent cache entrie
     const successRow={id:'ok',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/1000000000001'};
     const failRow={id:'bad',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/1000000000002'};
     fs.writeFileSync(path.join(dir,'content-understanding-v17.json'),JSON.stringify({
-      [cacheKey(successRow)]:{at:now-1000,ok:true,analysis:{summary:'A mascot falls while dancing.',confidence:.91,provider:'ollama',model:'qwen-test',frameCount:11,modelFrameCount:11,duration:8.4,captureType:'video-timeline',analyzedAt:now-1200}},
+      [cacheKey(successRow)]:{at:now-1000,ok:true,analysis:{summary:'A mascot falls while dancing.',confidence:.91,provider:'ollama',model:'qwen-test',frameCount:11,modelFrameCount:8,duration:8.4,captureType:'video-timeline',analyzedAt:now-1200}},
       [cacheKey(failRow)]:{at:now,ok:false,error:'Content analysis timed out.',analysis:null},
     }));
     const engine=new ContentUnderstandingEngine({dataDir:dir});
@@ -98,9 +98,13 @@ test('content health distinguishes successful and failed persistent cache entrie
   }
 });
 
-test('recent failed content analysis is cached for cooldown instead of immediately retrying Ollama',async()=>{
+test('recent failed content analysis is cached for cooldown instead of immediately retrying the same Ollama model',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-content-failure-'));
+  const previousModel=process.env.FRONT_OLLAMA_MODEL;
+  const previousProvider=process.env.FRONT_CONTENT_PROVIDER;
   try{
+    process.env.FRONT_OLLAMA_MODEL='qwen-test';
+    process.env.FRONT_CONTENT_PROVIDER='ollama';
     const row={id:'bad',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/1000000000003',content:'',mediaType:'video'};
     fs.writeFileSync(path.join(dir,'content-understanding-v17.json'),JSON.stringify({
       [cacheKey(row)]:{at:Date.now(),ok:false,error:'Previous Ollama timeout',analysis:null},
@@ -110,7 +114,44 @@ test('recent failed content analysis is cached for cooldown instead of immediate
     assert.equal(result.cachedFailure,true);
     assert.equal(result.analysis,null);
     assert.match(result.error,/Previous Ollama timeout/);
-  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+  }finally{
+    if(previousModel===undefined)delete process.env.FRONT_OLLAMA_MODEL;else process.env.FRONT_OLLAMA_MODEL=previousModel;
+    if(previousProvider===undefined)delete process.env.FRONT_CONTENT_PROVIDER;else process.env.FRONT_CONTENT_PROVIDER=previousProvider;
+    fs.rmSync(dir,{recursive:true,force:true});
+  }
+});
+
+test('failure cooldown is scoped to provider and model so switching models retries',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-content-model-switch-'));
+  const previousModel=process.env.FRONT_OLLAMA_MODEL;
+  const previousProvider=process.env.FRONT_CONTENT_PROVIDER;
+  const original=globalThis.fetch;
+  try{
+    process.env.FRONT_OLLAMA_MODEL='qwen-new';
+    process.env.FRONT_CONTENT_PROVIDER='ollama';
+    const row={id:'switch',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/1000000000004',content:'caption',mediaType:'video'};
+    fs.writeFileSync(path.join(dir,'content-understanding-v17.json'),JSON.stringify({
+      [cacheKey(row,'ollama','qwen-old')]:{at:Date.now(),ok:false,error:'Old model timeout',analysis:null},
+    }));
+    const engine=new ContentUnderstandingEngine({dataDir:dir});
+    engine.capture=async()=>({frames:[{base64:'fixture'}],duration:1,captureType:'video-timeline',pageTitle:'fixture',transcript:''});
+    let calls=0;
+    globalThis.fetch=async(_url,options)=>{
+      calls++;
+      const body=JSON.parse(options.body);
+      assert.equal(body.model,'qwen-new');
+      return Response.json({message:{content:JSON.stringify({summary:'Mascot falls during halftime',confidence:.9})}});
+    };
+    const result=await engine.analyzeOne({},row,{timeoutMs:1000});
+    assert.equal(calls,1);
+    assert(result.analysis);
+    assert.equal(result.cachedFailure,undefined);
+  }finally{
+    globalThis.fetch=original;
+    if(previousModel===undefined)delete process.env.FRONT_OLLAMA_MODEL;else process.env.FRONT_OLLAMA_MODEL=previousModel;
+    if(previousProvider===undefined)delete process.env.FRONT_CONTENT_PROVIDER;else process.env.FRONT_CONTENT_PROVIDER=previousProvider;
+    fs.rmSync(dir,{recursive:true,force:true});
+  }
 });
 
 test('frame capture cannot consume the model inference deadline before the request starts',async()=>{
@@ -119,11 +160,19 @@ test('frame capture cannot consume the model inference deadline before the reque
  try{
   const engine=new ContentUnderstandingEngine({dataDir:dir});engine.provider={available:true,provider:'ollama',model:'test',endpoint:'http://model.test'};
   engine.capture=async()=>{await new Promise(r=>setTimeout(r,120));return{frames:[{base64:'fixture'}],duration:1,captureType:'video-timeline'};};
-  globalThis.fetch=async(_url,{signal})=>{assert.equal(signal.aborted,false);return Response.json({message:{content:JSON.stringify({summary:'Mascot falls during halftime',confidence:.9})}});};
+  globalThis.fetch=async(_url,{signal,body})=>{
+    assert.equal(signal.aborted,false);
+    const payload=JSON.parse(body);
+    assert.equal(payload.keep_alive,'30m');
+    assert.equal(payload.format,'json');
+    assert.equal(payload.options.num_predict,420);
+    return Response.json({message:{content:JSON.stringify({summary:'Mascot falls during halftime',confidence:.9})}});
+  };
   const result=await engine.analyzeOne({}, {id:'1',platform:'X',url:'https://x.com/a/status/1'}, {timeoutMs:50});
   assert(result.analysis);assert(result.analysis.captureMs>=100);
  }finally{globalThis.fetch=original;fs.rmSync(dir,{recursive:true,force:true});}
 });
+
 test('reapplying visual cache preserves the caption without duplicating generated text',()=>{
  const row={id:'1',platform:'X',url:'https://x.com/a/status/1',content:'source caption'};
  const analysis={summary:'Mascot falls',event:'mascot halftime fall',confidence:.9};
