@@ -48,26 +48,31 @@ if [ ! -f "$QUALITY_MARKER" ]; then
   echo "Front v13: archived old active scanner state and started with a clean feed."
 fi
 
+EXPLICIT_DEEP="${FRONT_CONTENT_DEEP_VIDEOS-}"
+EXPLICIT_SCOUT="${FRONT_CONTENT_SCOUT_VIDEOS-}"
+EXPLICIT_CONTEXT_MAX="${FRONT_CONTEXT_MAX_POSTS-}"
 CONTENT_ENV="$FRONT_DATA_DIR/content.env"
 if [ -f "$CONTENT_ENV" ]; then
   set -a
-  # shellcheck disable=SC1090
   source "$CONTENT_ENV"
   set +a
 fi
+[ -n "$EXPLICIT_DEEP" ] && export FRONT_CONTENT_DEEP_VIDEOS="$EXPLICIT_DEEP"
+[ -n "$EXPLICIT_SCOUT" ] && export FRONT_CONTENT_SCOUT_VIDEOS="$EXPLICIT_SCOUT"
+[ -n "$EXPLICIT_CONTEXT_MAX" ] && export FRONT_CONTEXT_MAX_POSTS="$EXPLICIT_CONTEXT_MAX"
 
 export FRONT_BRIDGE_HEADLESS="${FRONT_BRIDGE_HEADLESS:-1}"
 
-echo "Starting Front browser bridge v25 on http://127.0.0.1:43981"
+echo "Starting Front browser bridge v26 on http://127.0.0.1:43981"
 echo "Keep this Terminal window open while you want browser intelligence running."
-echo "v25 uses one scanner process, one scan state, one ledger, one X collector, and one isolated TikTok collector."
+echo "v26 preserves the v25 single-process collectors and adds contextual post understanding plus semantic narrative clustering."
 echo "Chrome CDP stays on http://127.0.0.1:43982 and must remain running."
-echo "Browser scans and video-frame analysis run in the background; login still opens regular Chrome."
+echo "Visual budget: deep=${FRONT_CONTENT_DEEP_VIDEOS:-8}, scout=${FRONT_CONTENT_SCOUT_VIDEOS:-4}. Contextual post budget=${FRONT_CONTEXT_MAX_POSTS:-90}."
 if [ -n "${FRONT_CONTENT_API_KEY:-${OPENAI_API_KEY:-}}" ]; then
-  echo "Video understanding: OpenAI provider configured."
+  echo "Content/context understanding: OpenAI provider configured."
 elif [ -n "${FRONT_OLLAMA_MODEL:-}" ]; then
-  echo "Video understanding: local Ollama provider configured."
+  echo "Content/context understanding: local Ollama provider configured."
 else
-  echo "Video understanding: frame capture ready; semantic model inactive until content.env is configured."
+  echo "Content/context understanding: deterministic fallback active; semantic model inactive until content.env is configured."
 fi
 npm start
