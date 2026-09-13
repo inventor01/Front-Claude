@@ -138,6 +138,18 @@ if [ -z "$EXPLICIT_BACKGROUND" ] && [ "$FRONT_CONTENT_BACKGROUND_VIDEOS" = "2" ]
   echo "Front v26: replacing stale background visual budget 2 with balanced budget 1."
   export FRONT_CONTENT_BACKGROUND_VIDEOS="1"
 fi
+if [ -z "$EXPLICIT_CONTEXT_MAX" ] && [ "$FRONT_CONTEXT_MAX_POSTS" = "90" ]; then
+  echo "Front v26: replacing stale contextual post budget 90 with balanced budget 36."
+  export FRONT_CONTEXT_MAX_POSTS="36"
+fi
+if [ -z "$EXPLICIT_CONTEXT_BATCH" ] && [ "$FRONT_CONTEXT_BATCH_SIZE" = "8" ]; then
+  echo "Front v26: replacing stale context batch size 8 with balanced batch size 4."
+  export FRONT_CONTEXT_BATCH_SIZE="4"
+fi
+if [ -z "$EXPLICIT_CONTEXT_TIMEOUT" ] && [ "$FRONT_CONTEXT_TIMEOUT_MS" = "45000" ]; then
+  echo "Front v26: replacing stale context timeout 45000ms with validated 60000ms."
+  export FRONT_CONTEXT_TIMEOUT_MS="60000"
+fi
 
 export FRONT_CONTEXT_PROVIDER="${FRONT_CONTEXT_PROVIDER:-$FRONT_CONTENT_PROVIDER}"
 export FRONT_CONTEXT_OLLAMA_MODEL="${FRONT_CONTEXT_OLLAMA_MODEL:-$FRONT_OLLAMA_MODEL}"

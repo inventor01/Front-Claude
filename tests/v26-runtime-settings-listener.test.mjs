@@ -49,6 +49,9 @@ test('local vision defaults match the proven 8 GB Mac profile and do not cap dis
   assert.match(start,/replacing stale deep visual budget 8 with balanced budget 4/);
   assert.match(start,/replacing stale scout visual budget 4 with balanced budget 2/);
   assert.match(start,/replacing stale background visual budget 2 with balanced budget 1/);
+  assert.match(start,/replacing stale contextual post budget 90 with balanced budget 36/);
+  assert.match(start,/replacing stale context batch size 8 with balanced batch size 4/);
+  assert.match(start,/replacing stale context timeout 45000ms with validated 60000ms/);
   assert.match(start,/FRONT_CONTEXT_OLLAMA_MODEL:-\$FRONT_OLLAMA_MODEL/);
   assert.match(start,/replacing stale 8B context model with current local model/);
   assert.match(warm,/keep_alive: keepAlive/);
