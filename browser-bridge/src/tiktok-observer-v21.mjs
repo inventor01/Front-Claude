@@ -38,7 +38,7 @@ export function isTikTokLocalActivityE2E(value) {
   return /(?:user-post-item|inbox-list-item|notification-item|activity-item|message-item|profile)/i.test(String(value || ''));
 }
 
-async function extractTikTokAnchors(page, provenance) {
+export async function extractTikTokAnchors(page, provenance) {
   const result = await page.evaluate(() => {
     const feedContainerSelector = [
       '[data-e2e*="recommend-list-item-container"]',
@@ -95,19 +95,40 @@ async function extractTikTokAnchors(page, provenance) {
         containerE2E: e2e,
       });
     }
+    // Current one-column feed cards have no permalink anchor. Their own player
+    // wrapper carries the video ID and their avatar link carries the author.
+    // Never infer identity from global state or unrelated notification anchors.
+    let playerCardsAccepted = 0;
+    for (const container of document.querySelectorAll('[data-e2e="recommend-list-item-container"]')) {
+      if (container.closest(localActivitySelector)) continue;
+      const player = container.querySelector('[id^="xgwrapper-"]');
+      const id = player?.id.match(/^xgwrapper-\d+-(\d{10,25})$/)?.[1];
+      const authorLink = container.querySelector('a[data-e2e="video-author-avatar"]');
+      const author = authorLink?.getAttribute('href')?.match(/^\/@([A-Za-z0-9_.]+)\/?$/)?.[1];
+      if (!id || !author) continue;
+      const href = `https://www.tiktok.com/@${author}/video/${id}`;
+      if (seen.has(href)) continue;
+      const image = container.querySelector('[data-e2e="feed-video"] picture img');
+      const content = container.querySelector('[data-e2e="video-desc"]')?.textContent?.trim() || image?.getAttribute('alt') || '';
+      if (/\b(?:liked your video|commented on your video|followed you|sent you a message)\b/i.test(content)) continue;
+      seen.add(href);
+      rows.push({href, content, coverUrl:image?.getAttribute('src') || '', containerE2E:'recommend-list-item-container'});
+      playerCardsAccepted++;
+    }
     return {
       rows,
       diagnostics: {
         rawVideoAnchors: links.length,
         feedContainers: document.querySelectorAll(feedContainerSelector).length,
-        acceptedAnchors: rows.length,
+        acceptedAnchors: rows.length - playerCardsAccepted,
+        playerCardsAccepted, acceptedCards: rows.length,
         withoutContainer,
         localActivityRejected,
         containerRejected,
         activityTextRejected,
       },
     };
-  }).catch(() => ({ rows: [], diagnostics: { rawVideoAnchors: 0, feedContainers: 0, acceptedAnchors: 0 } }));
+  });
   const at = Date.now();
   return {
     observations: result.rows.map((row) => normalizeTikTokObservation({ ...row, provenance }, at)).filter(Boolean),
@@ -138,6 +159,7 @@ export class BroadTikTokObserver {
       target: 90,
       observed: 0,
       grounded: 0,
+      scrolls: 0,
       sourcePages: [],
       errors: [],
       diagnostics: {
@@ -231,8 +253,14 @@ export class BroadTikTokObserver {
       const sourceUrl = page.url();
       const extracted = await extractTikTokAnchors(page, 'TikTok dedicated discovery observation');
       this.add(extracted.observations);
-      if (this.state.observed < this.state.target && shouldDriveTikTokFeed(sourceUrl, extracted.diagnostics.rawVideoAnchors > 0)) {
-        await page.evaluate(() => window.scrollBy(0, Math.max(window.innerHeight * 1.05, 820))).catch(() => {});
+      if (this.state.observed < this.state.target && shouldDriveTikTokFeed(sourceUrl, extracted.observations.length > 0)) {
+        await page.evaluate(() => {
+          const card = document.querySelector('[data-e2e="recommend-list-item-container"]');
+          let scroller = card?.parentElement;
+          while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+          (scroller || window).scrollBy(0, card ? card.getBoundingClientRect().height + 16 : 820);
+        });
+        this.state.scrolls = (this.state.scrolls || 0) + 1;
       }
       this.state = {
         ...this.state,

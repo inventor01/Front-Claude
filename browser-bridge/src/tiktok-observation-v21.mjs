@@ -20,7 +20,7 @@ export function meaningfulTikTokText(value) {
 export function parseTikTokVideoUrl(value) {
   try {
     const url = new URL(value, 'https://www.tiktok.com');
-    if (!/(^|\.)tiktok\.com$/i.test(url.hostname)) return null;
+    if (!['http:', 'https:'].includes(url.protocol) || !/(^|\.)tiktok\.com$/i.test(url.hostname)) return null;
     const match = url.pathname.match(/^\/@([^/]+)\/video\/(\d{10,25})/);
     if (!match) return null;
     const author = decodeURIComponent(match[1]).replace(/^@/, '').trim();

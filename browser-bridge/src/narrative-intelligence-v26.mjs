@@ -1,7 +1,7 @@
 const clean = (value, max = 240) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const normalize = (value) => clean(value, 400).normalize('NFKC').toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
 const words = (value) => normalize(value).split(' ').filter(Boolean);
-const creatorKey = (row) => `${row?.platform || 'unknown'}:${String(row?.author || '').toLowerCase()}`;
+const creatorKey = (row) => String(row?.author || '').replace(/^@/, '').trim().toLowerCase();
 const clamp = (value, min = 0, max = 100) => Math.min(max, Math.max(min, Number(value) || 0));
 const STOP = new Set('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i you your we our they their he she his her not no yes just very really have has had do does did can could would should will may might about into over under after before more most some any all one two what when where who why how'.split(/\s+/));
 const GENERIC = new Set('face faces take takes took taking grow grows growing grown love loves loved loving look looks looking looked make makes making made get gets getting got use uses using used good bad big small new old today tonight now thing things stuff something anything everything people person guy guys girl girls man men woman women bro dude video videos post posts clip clips live stream streams viral trend trends trending meme memes funny reaction reactions update updates news breaking official original sound audio photo photos image images tiktok twitter x fyp foryou crypto solana coin coins token tokens market markets pump pumpfun'.split(/\s+/));
@@ -115,7 +115,7 @@ export function deriveSemanticNarrativesV26(evidence = [], now = Date.now()) {
     const key = normalize(row?.semanticNarrativeKey || '');
     const subject = clean(row?.postSubject, 140);
     const confidence = Number(row?.postUnderstandingConfidence || 0);
-    if (!key || confidence < 0.5 || !subject || isGenericNarrativeLabel(subject)) continue;
+    if (!creatorKey(row) || !key || confidence < 0.5 || !subject || isGenericNarrativeLabel(subject)) continue;
     const bucket = buckets.get(key) || { key, rows: [], subjects: new Map(), creators: new Set(), platforms: new Set() };
     bucket.rows.push(row); bucket.creators.add(creatorKey(row)); bucket.platforms.add(row.platform);
     bucket.subjects.set(subject, (bucket.subjects.get(subject) || 0) + 1);
@@ -140,7 +140,12 @@ export function deriveSemanticNarrativesV26(evidence = [], now = Date.now()) {
 
 const LIFECYCLE_RANK = { 'EARLY BREAKOUT': 5, VIRAL: 4, EMERGING: 3, SEED: 2, SATURATED: 1, DECLINING: 0 };
 export function enhanceNarrativesV26(topics = [], evidence = [], now = Date.now()) {
-  const merged = [...deriveSemanticNarrativesV26(evidence, now), ...topics];
+  // Legacy lexical candidates may contribute metadata only after semantic
+  // corroboration; they must never bypass the subject/key/confidence gate.
+  const merged = deriveSemanticNarrativesV26(evidence, now).map(semantic => {
+    const prior = topics.find(topic => normalize(topic.semanticNarrativeKey || topic.key) === semantic.key);
+    return {...prior, ...semantic};
+  });
   const deduped = new Map();
   for (const topic of merged) {
     const rows = supportRows(topic, evidence);

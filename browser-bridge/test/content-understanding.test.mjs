@@ -28,9 +28,9 @@ test('long videos use representative timeline coverage capped at maxFrames',()=>
 
 test('video candidates diversify independent creators instead of spending the budget on one account',()=>{
   const rows=[
-    {id:'1',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/1',content:'',views:900000,likes:50000,mediaType:'video',provenance:'TikTok For You'},
-    {id:'2',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/2',content:'second post',views:800000,likes:40000,mediaType:'video',provenance:'TikTok For You'},
-    {id:'3',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/3',content:'',views:120000,likes:9000,mediaType:'video',provenance:'TikTok For You'},
+    {id:'1',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/1234567890001',content:'',views:900000,likes:50000,mediaType:'video',provenance:'TikTok For You'},
+    {id:'2',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/1234567890002',content:'second post',views:800000,likes:40000,mediaType:'video',provenance:'TikTok For You'},
+    {id:'3',platform:'TikTok',author:'b',url:'https://www.tiktok.com/@b/video/1234567890003',content:'',views:120000,likes:9000,mediaType:'video',provenance:'TikTok For You'},
     {id:'4',platform:'X',author:'c',url:'https://x.com/c/status/4',content:'caption',views:50000,likes:3000,mediaType:'video',provenance:'X For You'},
   ];
   const selected=selectVideoCandidates(rows,{limit:3});
@@ -109,4 +109,22 @@ test('recent failed content analysis is cached for cooldown instead of immediate
     assert.equal(result.analysis,null);
     assert.match(result.error,/Previous Ollama timeout/);
   }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('frame capture cannot consume the model inference deadline before the request starts',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-model-deadline-'));
+ const original=globalThis.fetch;
+ try{
+  const engine=new ContentUnderstandingEngine({dataDir:dir});engine.provider={available:true,provider:'ollama',model:'test',endpoint:'http://model.test'};
+  engine.capture=async()=>{await new Promise(r=>setTimeout(r,120));return{frames:[{base64:'fixture'}],duration:1,captureType:'video-timeline'};};
+  globalThis.fetch=async(_url,{signal})=>{assert.equal(signal.aborted,false);return Response.json({message:{content:JSON.stringify({summary:'Mascot falls during halftime',confidence:.9})}});};
+  const result=await engine.analyzeOne({}, {id:'1',platform:'X',url:'https://x.com/a/status/1'}, {timeoutMs:50});
+  assert(result.analysis);assert(result.analysis.captureMs>=100);
+ }finally{globalThis.fetch=original;fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('reapplying visual cache preserves the caption without duplicating generated text',()=>{
+ const row={id:'1',platform:'X',url:'https://x.com/a/status/1',content:'source caption'};
+ const analysis={summary:'Mascot falls',event:'mascot halftime fall',confidence:.9};
+ const once=applyUnderstanding(row,analysis),twice=applyUnderstanding(once,analysis);
+ assert.equal(twice.content,once.content);assert.equal(twice.sourceContent,'source caption');
 });

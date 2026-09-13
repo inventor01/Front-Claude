@@ -91,3 +91,7 @@ test('current TikTok For You feed containers are allowed even when persistent in
   assert.equal(isTikTokLocalActivityE2E('notification-item'), true);
   assert.equal(isTikTokLocalActivityE2E('user-post-item'), true);
 });
+
+test('TikTok observation rejects non-HTTP video protocols',()=>{
+ assert.equal(parseTikTokVideoUrl('ftp://www.tiktok.com/@a/video/1234567890123'),null);
+});

@@ -1,3 +1,6 @@
+import { scanOutcome } from './scan-outcome-v26.mjs';
+import { scrollFeedPage, nextStalePassCount } from './feed-scroll.mjs';
+import { buildScanLedgerEntry } from './scan-ledger-v26.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -11,7 +14,8 @@ import { rankInvestigationCandidates } from './scout-skill.mjs';
 import { ContentUnderstandingEngine } from './content-understanding.mjs';
 import { PostUnderstandingEngineV26 } from './post-understanding-v26.mjs';
 import { enhanceNarrativesV26 } from './narrative-intelligence-v26.mjs';
-import { BroadTikTokObserver } from './tiktok-observer-v21.mjs';
+import { canonicalSocialPostUrl } from './social-post-url.mjs';
+import { BroadTikTokObserver, extractTikTokAnchors } from './tiktok-observer-v21.mjs';
 import {
   findSystemChrome,
   frontCdpUrl,
@@ -52,22 +56,8 @@ function hasText(value) {
   if (/^(?:home|explore|for you|following|search|profile|video|photo|sound|show more|more|views?|likes?|shares?|comments?)$/i.test(text)) return false;
   return true;
 }
-function canonicalXUrl(raw) {
-  try {
-    const url = new URL(raw, 'https://x.com');
-    if (!/(^|\.)(x\.com|twitter\.com)$/i.test(url.hostname)) return null;
-    url.search = ''; url.hash = '';
-    return url.toString();
-  } catch { return null; }
-}
-function canonicalTikTokUrl(raw) {
-  try {
-    const url = new URL(raw, 'https://www.tiktok.com');
-    const match = url.pathname.match(/\/@([^/]+)\/video\/(\d{10,25})/);
-    if (!match) return null;
-    return `https://www.tiktok.com/@${match[1]}/video/${match[2]}`;
-  } catch { return null; }
-}
+const canonicalXUrl = (raw) => canonicalSocialPostUrl(raw, 'X');
+const canonicalTikTokUrl = (raw) => canonicalSocialPostUrl(raw, 'TikTok');
 function deriveTopics(rows = [], limit = 24) {
   if (!rows.length) return [];
   const at = Date.now();
@@ -147,7 +137,7 @@ function setPhase(phase) {
   if (!current) return;
   current.phase = phase;
   current.heartbeatAt = Date.now();
-  latestLive = { ...latestLive, phase, updatedAt: Date.now() };
+  latestLive = { ...latestLive, phase, phaseHistory: [...(latestLive.phaseHistory || []), {phase, at:Date.now()}], updatedAt: Date.now() };
 }
 function shouldStop() { return Boolean(current?.stopRequested); }
 async function ensureContext() {
@@ -219,12 +209,12 @@ async function collectXFeed(target, maxSeconds = 70) {
       const currentEvidence = mergeRichEvidence([...latestLive.evidence, ...found]);
       latestLive = { ...latestLive, evidence: currentEvidence.slice(-300), updatedAt: Date.now() };
 
-      stale = rows.size <= lastSize + 1 ? stale + 1 : 0;
+      stale = nextStalePassCount(lastSize, rows.size, stale);
       lastSize = rows.size;
       stage('xDiscovery', { status: 'running', observed: rows.size, target, scrolls, sourcePage: page.url(), stalePasses: stale });
       latestLive = { ...latestLive, sourcePages: [...new Set([...latestLive.sourcePages.filter((x) => !/x\.com/i.test(x)), page.url()])], updatedAt: Date.now() };
       if (rows.size >= target) break;
-      await page.mouse.wheel(0, Math.max(900, await page.evaluate(() => innerHeight * 0.95).catch(() => 900))).catch(() => {});
+      await scrollFeedPage(page, 'article[data-testid="tweet"]', 950);
       await page.waitForTimeout(800);
       scrolls += 1;
     }
@@ -234,11 +224,8 @@ async function collectXFeed(target, maxSeconds = 70) {
 }
 
 async function extractTikTokSearch(page, provenance, limit = 40) {
-  const raw = await page.evaluate((max) => [...document.querySelectorAll('a[href*="/video/"]')].slice(0, max * 4).map((link) => {
-    const container = link.closest('[data-e2e*="search-card"], [data-e2e*="recommend-list-item-container"], article') || link.parentElement?.parentElement?.parentElement || link.parentElement;
-    const image = link.querySelector('img') || container?.querySelector?.('img');
-    return { href: link.href || link.getAttribute('href') || '', text: (container?.innerText || link.getAttribute('aria-label') || image?.getAttribute('alt') || '').slice(0, 5000), coverUrl: image?.getAttribute('src') || null };
-  }), limit).catch(() => []);
+  const extracted = await extractTikTokAnchors(page, provenance);
+  const raw = extracted.observations.map(row => ({ href: row.url, text: row.content, coverUrl: row.coverUrl }));
   const rows = [];
   const seen = new Set();
   for (const item of raw) {
@@ -272,7 +259,7 @@ async function collectSearch(platform, query, limit = 24) {
         : await extractTikTokSearch(page, `Front v26 · TikTok origin/investigation · ${q}`, limit);
       out = mergeRichEvidence([...out, ...rows]);
       if (out.length >= limit) break;
-      await page.mouse.wheel(0, 950).catch(() => {});
+      await scrollFeedPage(page, platform === 'X' ? 'article[data-testid="tweet"]' : '[data-e2e*="search-card"]', 950);
       await page.waitForTimeout(650);
     }
     return out.slice(0, limit);
@@ -293,7 +280,7 @@ async function collectTikTokFeed(target, maxSeconds = 70) {
 
       stage('tiktokDiscovery', {
         status: snap.status, active: snap.active, observed: snap.observed, grounded: snap.grounded, target: snap.target,
-        sourcePages: snap.sourcePages, errors: snap.errors, elapsedMs: Date.now() - started,
+        sourcePages: snap.sourcePages, errors: snap.errors, diagnostics: snap.diagnostics, scrolls: snap.scrolls, elapsedMs: Date.now() - started,
       });
       latestLive = { ...latestLive, sourcePages: [...new Set([...latestLive.sourcePages.filter((x) => !/tiktok\.com/i.test(x)), ...snap.sourcePages])], updatedAt: Date.now() };
       if (snap.observed >= target) break;
@@ -302,7 +289,7 @@ async function collectTikTokFeed(target, maxSeconds = 70) {
     const snap = tiktok.snapshot();
     stage('tiktokDiscovery', {
       status: shouldStop() ? 'stopped' : 'complete', active: false, observed: snap.observed, grounded: snap.grounded,
-      target: snap.target, sourcePages: snap.sourcePages, errors: snap.errors, elapsedMs: Date.now() - started,
+      target: snap.target, sourcePages: snap.sourcePages, errors: snap.errors, diagnostics: snap.diagnostics, scrolls: snap.scrolls, elapsedMs: Date.now() - started,
     });
     return { evidence: tiktok.groundedEvidence(), snapshot: snap };
   } finally {
@@ -332,7 +319,8 @@ async function contextualizePosts(rows, phaseName = 'post-understanding') {
   if (!rows.length || shouldStop()) return rows;
   setPhase(phaseName);
   const maxPosts = Math.max(12, Math.min(180, Number(process.env.FRONT_CONTEXT_MAX_POSTS || 90)));
-  const selected = rows.slice(0, maxPosts);
+  const selected = [...rows].sort((a,b) => Number(Boolean(a.postUnderstandingVersion)) - Number(Boolean(b.postUnderstandingVersion))).slice(0, maxPosts);
+  const priorRuns = latestLive.stages.postUnderstanding?.runs || [];
   stage('postUnderstanding', { status: 'running', requested: selected.length, totalEvidence: rows.length, engine: postUnderstanding.status() });
   const enriched = await postUnderstanding.enrich(selected, {
     batchSize: Math.max(2, Math.min(16, Number(process.env.FRONT_CONTEXT_BATCH_SIZE || 8))),
@@ -340,7 +328,9 @@ async function contextualizePosts(rows, phaseName = 'post-understanding') {
   });
   const byId = new Map(enriched.rows.map((row) => [row.id, row]));
   const output = rows.map((row) => byId.get(row.id) || row);
-  stage('postUnderstanding', { status: enriched.stats.failed ? 'degraded' : 'complete', ...enriched.stats, analyzedPosts: selected.length, untouchedPosts: Math.max(0, rows.length - selected.length), engine: postUnderstanding.status() });
+  const runs = [...priorRuns, {phase:phaseName, ...enriched.stats}];
+  const totals = Object.fromEntries(['modeled','cached','fallback','failed'].map(key => [key, runs.reduce((sum,run) => sum + Number(run[key] || 0), 0)]));
+  stage('postUnderstanding', { ...enriched.stats, ...totals, runs, status: totals.failed ? 'degraded' : 'complete', analyzedPosts: selected.length, untouchedPosts: Math.max(0, rows.length - selected.length), engine: postUnderstanding.status() });
   return output;
 }
 
@@ -419,16 +409,17 @@ async function runScan(body = {}) {
     }
 
     summary = summarizeRows(resultRows);
+    const outcome = scanOutcome({stopped:shouldStop(), evidenceCount:resultRows.length, stages:latestLive.stages, errors:latestLive.errors});
     latestLive = {
-      ...latestLive, ...summary, active: false, status: shouldStop() ? 'stopped' : (resultRows.length ? 'complete' : 'zero'),
-      phase: shouldStop() ? 'stopped' : 'complete', completedAt: Date.now(), updatedAt: Date.now(),
-      candidateTopics: topics.length, evidence: resultRows.slice(-300), inferredTopics: topics.slice(0, 50), errors: latestLive.errors.slice(-30),
+      ...latestLive, ...summary, active: false, status: outcome.status,
+      phase: outcome.status === 'zero' ? 'complete' : outcome.status, completedAt: Date.now(), updatedAt: Date.now(),
+      candidateTopics: topics.length, evidence: resultRows, inferredTopics: topics.slice(0, 50), errors: outcome.errors.slice(-30),
     };
     finalStatus = latestLive.status;
     pendingEvidence = mergeRichEvidence([...pendingEvidence, ...resultRows]).slice(-500);
     savePending();
     return {
-      ok: true, version: V25_VERSION, scanId: id, evidence: resultRows, inferredTopics: topics, errors: latestLive.errors,
+      ok: finalStatus === 'complete', version: V25_VERSION, scanId: id, evidence: resultRows, inferredTopics: topics, errors: latestLive.errors,
       audit: { singleProcess: true, intelligenceVersion: 26, stages: latestLive.stages, sourcePages: latestLive.sourcePages, ...summary },
       contentUnderstanding: { ...understanding.status(), visuallyUnderstood: resultRows.filter((row) => row.contentSummary).length },
       postUnderstanding: postUnderstanding.status(), at: Date.now(),
@@ -442,12 +433,7 @@ async function runScan(body = {}) {
     throw error;
   } finally {
     const startedAt = Number(current?.startedAt || latestLive.startedAt || Date.now());
-    const finished = {
-      id, status: finalStatus, startedAt, completedAt: Date.now(), durationMs: Date.now() - startedAt, request,
-      observed: latestLive.observed, candidateTopics: latestLive.candidateTopics, platformCounts: latestLive.platformCounts,
-      stages: latestLive.stages, errors: latestLive.errors, sourcePages: latestLive.sourcePages,
-      samples: latestLive.evidence.slice(0, 30).map((row) => ({ platform: row.platform, author: row.author, url: row.url, subject: row.postSubject || null, event: row.postEvent || row.contentEvent || null, content: clean(row.contentSummary || row.content, 260), provenance: row.provenance })),
-    };
+    const finished = buildScanLedgerEntry({id, finalStatus, startedAt, request, latestLive, connected: browserConnection?.isConnected?.(), contentStatus: understanding.status(), postStatus: postUnderstanding.status()});
     scans.push(finished); scans = scans.slice(-100); saveLedger();
     current = null;
   }

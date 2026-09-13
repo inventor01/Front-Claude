@@ -1,3 +1,4 @@
+import { canonicalSocialPostUrl } from './social-post-url.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -67,7 +68,7 @@ export function frameSchedule(durationSeconds, maxFrames = 16) {
 }
 
 export function selectVideoCandidates(rows = [], { limit = 4 } = {}) {
-  const videos = rows.filter((row) => row?.id && row?.url && looksLikeVideo(row));
+  const videos = rows.filter((row) => row?.id && canonicalSocialPostUrl(row?.url, row?.platform) && looksLikeVideo(row));
   const byCreator = new Map();
   for (const row of videos.sort((a, b) => evidenceScore(b) - evidenceScore(a))) {
     const key = creatorKey(row);
@@ -187,6 +188,7 @@ async function analyzeOllama(frames, context, provider, signal) {
     body: JSON.stringify({
       model: provider.model,
       stream: false,
+      think: false,
       messages: [{
         role: 'user',
         content: context,
@@ -265,11 +267,13 @@ async function textTrackTranscript(video) {
   }).catch(() => '');
 }
 
-async function capturePostFrames(context, row, { maxFrames = 16, timeoutMs = 30000 } = {}) {
+async function capturePostFrames(context, row, { maxFrames = 16, timeoutMs = 30000, contactSheet = false } = {}) {
+  const url = canonicalSocialPostUrl(row?.url, row?.platform);
+  if (!url) throw new Error('Unsupported or malformed social post URL');
   const page = await context.newPage();
   const started = Date.now();
   try {
-    await page.goto(row.url, { waitUntil: 'domcontentloaded', timeout: Math.min(timeoutMs, 20000) });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Math.min(timeoutMs, 20000) });
     await page.waitForTimeout(1200);
     const title = clean(await page.title().catch(() => ''), 300);
     const video = await visibleVideo(page);
@@ -286,16 +290,47 @@ async function capturePostFrames(context, row, { maxFrames = 16, timeoutMs = 300
       if (Date.now() - started > timeoutMs) break;
       await seekVideo(video, time);
       await page.waitForTimeout(80);
-      const buffer = await video.screenshot({ type: 'jpeg', quality: 45 }).catch(() => null);
+      // Read the decoded frame directly, avoiding compositor/animation waits
+      // on hidden tabs. Cross-origin media falls back to a bounded screenshot.
+      const decoded = await video.evaluate(element => {
+        if (!element.videoWidth || !element.videoHeight || element.readyState < 2) return null;
+        const scale = Math.min(1, 640 / Math.max(element.videoWidth, element.videoHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(element.videoWidth * scale); canvas.height = Math.round(element.videoHeight * scale);
+        canvas.getContext('2d').drawImage(element, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+      }).catch(() => null);
+      const buffer = decoded ? Buffer.from(decoded, 'base64') : await video.screenshot({ type: 'jpeg', quality: 45, timeout: 2500 }).catch(() => null);
       if (!buffer) continue;
       const base64 = buffer.toString('base64');
       frames.push({ time, base64, dataUrl: `data:image/jpeg;base64,${base64}` });
     }
     const transcript = clean(await textTrackTranscript(video), 4000);
-    return { frames, duration: metadata.duration || 0, transcript, pageTitle: title, captureType: 'video-timeline', elapsedMs: Date.now() - started };
+    const sheet = contactSheet && frames.length > 1 ? await buildTimelineContactSheet(page, modelFrames(frames, 12)) : null;
+    return { frames, modelFrames: sheet ? [sheet] : null, contactSheet: Boolean(sheet), duration: metadata.duration || 0, transcript, pageTitle: title, captureType: 'video-timeline', elapsedMs: Date.now() - started };
   } finally {
     await page.close().catch(() => {});
   }
+}
+
+export async function buildTimelineContactSheet(page, frames) {
+  const base64 = await page.evaluate(async input => {
+    const images = await Promise.all(input.map(frame => new Promise((resolve,reject) => {
+      const image = new Image(); image.onload = () => resolve(image); image.onerror = reject; image.src = `data:image/jpeg;base64,${frame.base64}`;
+    })));
+    const columns = Math.min(3, images.length), rows = Math.ceil(images.length / columns);
+    const cellWidth = 320, imageHeight = Math.min(568, Math.round(cellWidth * images[0].height / images[0].width)), labelHeight = 24;
+    const canvas = document.createElement('canvas'); canvas.width = columns * cellWidth; canvas.height = rows * (imageHeight + labelHeight);
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    images.forEach((image,index) => {
+      const x = (index % columns) * cellWidth, y = Math.floor(index / columns) * (imageHeight + labelHeight);
+      const scale = Math.min(cellWidth/image.width,imageHeight/image.height);
+      ctx.drawImage(image,x+(cellWidth-image.width*scale)/2,y+labelHeight,image.width*scale,image.height*scale);
+      ctx.fillStyle = '#fff'; ctx.font = '16px sans-serif'; ctx.fillText(`${index+1}: ${Number(input[index].time).toFixed(1)}s`,x+6,y+18);
+    });
+    return canvas.toDataURL('image/jpeg',0.7).split(',')[1];
+  }, frames.map(({base64,time})=>({base64,time})));
+  return {base64, representedFrames:frames.length, time:0};
 }
 
 function modelFrames(frames, limit = 12) {
@@ -316,7 +351,7 @@ function analysisPrompt(row, capture) {
     `Page title: ${capture.pageTitle || 'unknown'}`,
     `Video duration: ${Number(capture.duration || 0).toFixed(2)} seconds`,
     capture.transcript ? `Available caption track text: ${capture.transcript}` : 'Available caption track text: none',
-    'Frames are ordered from early to late and labeled with timestamps.',
+    capture.contactSheet ? 'The image is a chronological contact sheet. Read panels left to right, then top to bottom; each panel has a frame number and timestamp. These are successive frames from ONE video, not separate events.' : 'Frames are ordered from early to late and labeled with timestamps.',
   ].join('\n');
 }
 
@@ -330,11 +365,12 @@ export function applyUnderstanding(row, analysis) {
     analysis.onScreenText?.length ? `On-screen text: ${analysis.onScreenText.join(' · ')}` : '',
     analysis.visualMotifs?.length ? `Visual motifs: ${analysis.visualMotifs.join(', ')}` : '',
   ].filter(Boolean);
-  const original = clean(row.content, 6200);
+  const original = clean(row.sourceContent ?? row.content, 6200);
   const enriched = clean(`${original} ${parts.join('. ')}`, 8000);
   return {
     ...row,
     content: enriched,
+    sourceContent: original,
     contentSummary: analysis.summary,
     contentEvent: analysis.event || null,
     contentEntities: analysis.entities || [],
@@ -415,7 +451,7 @@ export class ContentUnderstandingEngine {
     };
   }
 
-  cacheKey(row) { return `${row.platform}|${row.id}|${row.url}`; }
+  cacheKey(row) { return `${row.platform}|${row.id}|${row.url}|timeline-sheet-v1`; }
 
   cacheEntry(row) {
     const entry = this.cache[this.cacheKey(row)];
@@ -443,17 +479,23 @@ export class ContentUnderstandingEngine {
     writeJson(this.cachePath, this.cache);
   }
 
+  capture(context, row, options) { return capturePostFrames(context, row, options); }
+
   async analyzeOne(context, row, { maxFrames = 16, timeoutMs = 45000 } = {}) {
     const cachedEntry = this.cacheEntry(row);
     if (cachedEntry?.ok === true && cachedEntry.analysis?.summary) return { analysis: cachedEntry.analysis, cached: true };
     if (cachedEntry?.ok === false) return { analysis: null, cached: false, cachedFailure: true, error: clean(cachedEntry.error, 300) || 'Recent content-analysis failure is cooling down.' };
     if (!this.provider.available) return { analysis: null, cached: false, skipped: this.provider.reason || 'provider-unavailable' };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timer;
+    const started = Date.now();
+    let captureMs = 0;
     try {
-      const capture = await capturePostFrames(context, row, { maxFrames, timeoutMs: Math.max(8000, timeoutMs - 8000) });
+      const capture = await this.capture(context, row, { maxFrames, contactSheet: this.provider.provider === 'ollama', timeoutMs: Math.max(8000, timeoutMs - 8000) });
+      captureMs = Date.now() - started;
       if (!capture.frames.length) throw new Error('No visual frames could be captured from the post.');
-      const chosen = modelFrames(capture.frames, Math.min(12, maxFrames));
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+      const chosen = capture.modelFrames || modelFrames(capture.frames, Math.min(12, maxFrames));
       const prompt = analysisPrompt(row, capture);
       const raw = this.provider.provider === 'ollama'
         ? await analyzeOllama(chosen, prompt, this.provider, controller.signal)
@@ -463,9 +505,9 @@ export class ContentUnderstandingEngine {
         provider: this.provider.provider,
         model: this.provider.model,
         frameCount: capture.frames.length,
-        modelFrameCount: chosen.length,
+        modelFrameCount: chosen.reduce((sum, frame) => sum + (frame.representedFrames || 1), 0), modelImageCount: chosen.length,
         duration: Number(capture.duration || 0),
-        captureType: capture.captureType,
+        captureType: capture.captureType, captureMs, modelMs: Date.now() - started - captureMs,
         analyzedAt: Date.now(),
         version: CONTENT_UNDERSTANDING_VERSION,
       };
@@ -474,7 +516,7 @@ export class ContentUnderstandingEngine {
       return { analysis, cached: false };
     } catch (error) {
       const message = error?.name === 'AbortError' ? 'Content analysis timed out.' : clean(error?.message || error, 300);
-      this.cache[this.cacheKey(row)] = { at: Date.now(), ok: false, error: message, analysis: null };
+      this.cache[this.cacheKey(row)] = { at: Date.now(), ok: false, error: message, captureMs, totalMs: Date.now() - started, analysis: null };
       this.persistCache();
       return { analysis: null, cached: false, error: message };
     } finally {

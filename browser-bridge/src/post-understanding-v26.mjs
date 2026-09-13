@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -136,7 +137,7 @@ function batchPrompt(rows) {
 }
 
 function normalizeFrame(raw, fallback) {
-  if (!raw || typeof raw !== 'object') return fallback;
+  if (!raw || typeof raw !== 'object' || isGenericSubject(raw.subject)) return fallback;
   const subject = clean(raw.subject, 180);
   const event = clean(raw.event, 220);
   const narrativeKey = clean(raw.narrativeKey, 180).toLowerCase();
@@ -159,7 +160,7 @@ function normalizeFrame(raw, fallback) {
 async function analyzeOllama(rows, provider, signal) {
   const response = await fetch(provider.endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-    body: JSON.stringify({ model: provider.model, stream: false, messages: [{ role: 'user', content: batchPrompt(rows) }], options: { temperature: 0.05 } }),
+    body: JSON.stringify({ model: provider.model, stream: false, think: false, messages: [{ role: 'user', content: batchPrompt(rows) }], options: { temperature: 0.05 } }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`Ollama context analysis failed (${response.status}): ${clean(data?.error || response.statusText, 220)}`);
@@ -200,11 +201,14 @@ export class PostUnderstandingEngineV26 {
     this.provider = providerConfig();
     this.lastStats = null;
   }
-  key(row) { return `${row.platform}|${row.id}|${row.url}`; }
+  key(row) {
+    const fingerprint = createHash('sha256').update(JSON.stringify([row.content, row.contentSummary, row.contentEvent, row.contentEntities, this.provider.provider, this.provider.model, 'grounded-v2'])).digest('hex');
+    return `${row.platform}|${row.id}|${row.url}|${fingerprint}`;
+  }
   cached(row) {
     const entry = this.cache[this.key(row)];
     if (!entry || Date.now() - Number(entry.at || 0) > CACHE_TTL_MS) return null;
-    return entry.frame || null;
+    return entry.frame?.method === 'semantic-model' ? entry.frame : null;
   }
   persist() {
     const entries = Object.entries(this.cache).sort((a, b) => Number(b[1]?.at || 0) - Number(a[1]?.at || 0)).slice(0, 2500);
@@ -233,11 +237,15 @@ export class PostUnderstandingEngineV26 {
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
           analyzed = this.provider.provider === 'ollama' ? await analyzeOllama(batch, this.provider, controller.signal) : await analyzeOpenAI(batch, this.provider, controller.signal);
-        } catch { failed += batch.length; }
+        } catch { analyzed = null; }
         finally { clearTimeout(timer); }
       }
       batch.forEach((row, index) => {
-        const frame = Array.isArray(analyzed) ? normalizeFrame(analyzed.find((item) => Number(item?.index) === index) || analyzed[index], fallbacks[index]) : fallbacks[index];
+        const matches = Array.isArray(analyzed) ? analyzed.filter(item => Number.isInteger(item?.index) && item.index === index) : [];
+        const raw = matches.length === 1 ? matches[0] : null;
+        const valid = raw && typeof raw.subject === 'string' && Number.isFinite(raw.confidence);
+        if (this.provider.available && !valid) failed++;
+        const frame = valid ? normalizeFrame(raw, fallbacks[index]) : fallbacks[index];
         if (frame.method === 'semantic-model') modeled++;
         this.cache[this.key(row)] = { at: Date.now(), frame };
         output.set(this.key(row), applyPostUnderstanding(row, frame));

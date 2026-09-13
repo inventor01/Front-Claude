@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { nativeLoopbackScan } from '../src/loopback-scan-fetch-compat.mjs';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { isTikTokActivityText, parseTikTokVideoUrl } from '../src/tiktok-observation-v21.mjs';
-import { isTikTokDiscoveryPage } from '../src/tiktok-observer-v21.mjs';
+import { isTikTokDiscoveryPage, extractTikTokAnchors } from '../src/tiktok-observer-v21.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const bridgeRoot = path.resolve(here, '..');
@@ -81,7 +82,7 @@ async function probe(context) {
   const t = await context.newPage();
   try {
     await x.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await x.waitForTimeout(3000);
+    await x.locator('article[data-testid="tweet"]').first().waitFor({timeout:20000});
     const xp = await x.evaluate(() => ({
       url: location.href,
       tweets: document.querySelectorAll('article[data-testid="tweet"]').length,
@@ -90,7 +91,14 @@ async function probe(context) {
     check('X authenticated home surface', /\/home(?:\/|$)/.test(new URL(xp.url).pathname) && !xp.login, `${xp.url} · ${xp.tweets} tweet article(s)`);
 
     await t.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await t.waitForTimeout(4500);
+    let extracted;
+    const readyUntil = Date.now() + 20000;
+    do {
+      extracted = await extractTikTokAnchors(t, 'release probe');
+      if (extracted.observations.length) break;
+      await sleep(500);
+    } while (Date.now() < readyUntil);
+
     const tp = await t.evaluate(() => {
       const feedSelector = [
         '[data-e2e*="recommend-list-item-container"]',
@@ -129,8 +137,8 @@ async function probe(context) {
       };
     });
     check('TikTok discovery surface', isTikTokDiscoveryPage(tp.url), tp.url);
-    check('TikTok renders real video anchors', tp.anchors > 0, `anchors=${tp.anchors}, feedContainers=${tp.containers}`);
-    check('TikTok feed filter admits current For You cards', tp.eligible > 0, `eligible=${tp.eligible}, anchors=${tp.anchors}`);
+    check('TikTok renders real video identities', extracted.observations.length > 0, `anchors=${tp.anchors}, playerCards=${extracted.diagnostics.playerCardsAccepted || 0}, feedContainers=${tp.containers}`);
+    check('TikTok feed filter admits current For You cards', extracted.observations.length > 0, JSON.stringify(extracted.diagnostics));
     check('TikTok not login-walled', !tp.login, tp.login ? 'login/signup wall' : 'ok');
     check('TikTok not challenged', !tp.challenge, tp.challenge ? 'challenge detected' : 'ok');
     return { x: xp, tiktok: tp };
@@ -153,6 +161,7 @@ async function monitor(scanIdRef) {
     if (live.scanId && !scanIdRef.value) scanIdRef.value = live.scanId;
     if (scanIdRef.value && live.scanId !== scanIdRef.value) continue;
     if (live.phase) phases.add(live.phase);
+    for (const transition of live.phaseHistory || []) phases.add(transition.phase);
     const x = live.stages?.xDiscovery || {};
     const t = live.tiktokDiscovery || {};
     const sig = [live.status, live.phase, x.observed, t.observed, t.grounded, live.candidateTopics].join('|');
@@ -194,7 +203,7 @@ async function main() {
   const scanIdRef = { value: null };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
-  const scanPromise = fetch(`${BRIDGE}/scan`, {
+  const scanPromise = nativeLoopbackScan(`${BRIDGE}/scan`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode:'deep', targetUniqueFeedItems:TARGET, scanXForYou:true, scanTikTokForYou:true }),
@@ -208,6 +217,9 @@ async function main() {
   let scan, live;
   try { [scan, live] = await Promise.all([scanPromise, monitor(scanIdRef)]); }
   finally { clearTimeout(timer); }
+
+  fs.mkdirSync(path.dirname(REPORT), { recursive:true });
+  fs.writeFileSync(REPORT.replace(/\.json$/, '') + '-scan.json', JSON.stringify({scan:scan?.body, live}, null, 2));
 
   check('Scan request succeeds', scan?.res?.ok === true, `${scan?.res?.status || 'no response'} ${scan?.body?.error || ''}`);
   check('Scan returns ok=true', scan?.body?.ok === true, scan?.body?.error || 'ok');
@@ -298,4 +310,7 @@ main().catch((error) => {
   } catch {}
   console.error(`\n❌ FRONT v26 RELEASE GATE FAILED\n${error?.stack || error}`);
   process.exitCode = 1;
+}).finally(() => {
+  // End only this CLI process; never close the authenticated CDP browser.
+  process.exit(process.exitCode || 0);
 });
