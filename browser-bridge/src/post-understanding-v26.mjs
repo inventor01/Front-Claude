@@ -4,6 +4,8 @@ import path from 'node:path';
 
 const VERSION = 26;
 const CACHE_TTL_MS = 7 * 24 * 3600000;
+const OLLAMA_KEEP_ALIVE = String(process.env.FRONT_OLLAMA_KEEP_ALIVE || '30m');
+const CONTEXT_NUM_PREDICT = Math.max(300, Math.min(1600, Number(process.env.FRONT_CONTEXT_NUM_PREDICT || 900)));
 const clean = (value, max = 800) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const normalize = (value) => clean(value, 1200).normalize('NFKC').toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}$#@]+/gu, ' ').replace(/\s+/g, ' ').trim();
 const uniq = (items = [], limit = 12) => [...new Set(items.map((x) => clean(x, 160)).filter(Boolean))].slice(0, limit);
@@ -160,7 +162,14 @@ function normalizeFrame(raw, fallback) {
 async function analyzeOllama(rows, provider, signal) {
   const response = await fetch(provider.endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-    body: JSON.stringify({ model: provider.model, stream: false, think: false, messages: [{ role: 'user', content: batchPrompt(rows) }], options: { temperature: 0.05 } }),
+    body: JSON.stringify({
+      model: provider.model,
+      stream: false,
+      think: false,
+      keep_alive: OLLAMA_KEEP_ALIVE,
+      messages: [{ role: 'user', content: batchPrompt(rows) }],
+      options: { temperature: 0.05, num_predict: CONTEXT_NUM_PREDICT },
+    }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`Ollama context analysis failed (${response.status}): ${clean(data?.error || response.statusText, 220)}`);
@@ -216,9 +225,9 @@ export class PostUnderstandingEngineV26 {
     writeJson(this.cachePath, this.cache);
   }
   status() {
-    return { version: VERSION, enabled: this.provider.available, provider: this.provider.provider, model: this.provider.model || null, cachedPosts: Object.keys(this.cache).length, lastStats: this.lastStats };
+    return { version: VERSION, enabled: this.provider.available, provider: this.provider.provider, model: this.provider.model || null, cachedPosts: Object.keys(this.cache).length, lastStats: this.lastStats, keepAlive: this.provider.provider === 'ollama' ? OLLAMA_KEEP_ALIVE : null };
   }
-  async enrich(rows = [], { batchSize = 8, timeoutMs = 45000 } = {}) {
+  async enrich(rows = [], { batchSize = 4, timeoutMs = 60000 } = {}) {
     const output = new Map();
     const pending = [];
     let cached = 0;
@@ -228,6 +237,7 @@ export class PostUnderstandingEngineV26 {
       else pending.push(row);
     }
     let modeled = 0, failed = 0;
+    const batchErrors = [];
     for (let offset = 0; offset < pending.length; offset += Math.max(1, batchSize)) {
       const batch = pending.slice(offset, offset + Math.max(1, batchSize));
       const fallbacks = batch.map(fallbackFrame);
@@ -237,8 +247,12 @@ export class PostUnderstandingEngineV26 {
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
           analyzed = this.provider.provider === 'ollama' ? await analyzeOllama(batch, this.provider, controller.signal) : await analyzeOpenAI(batch, this.provider, controller.signal);
-        } catch { analyzed = null; }
-        finally { clearTimeout(timer); }
+          if (!Array.isArray(analyzed)) batchErrors.push('Context model returned an unreadable JSON array.');
+        } catch (error) {
+          const message = error?.name === 'AbortError' ? `Context analysis timed out after ${timeoutMs}ms.` : clean(error?.message || error, 300);
+          batchErrors.push(message);
+          analyzed = null;
+        } finally { clearTimeout(timer); }
       }
       batch.forEach((row, index) => {
         const matches = Array.isArray(analyzed) ? analyzed.filter(item => Number.isInteger(item?.index) && item.index === index) : [];
@@ -252,7 +266,17 @@ export class PostUnderstandingEngineV26 {
       });
       this.persist();
     }
-    this.lastStats = { total: rows.length, cached, modeled, fallback: rows.length - cached - modeled, failed, batchSize: Math.max(1, batchSize), provider: this.provider.provider, model: this.provider.model || null };
+    this.lastStats = {
+      total: rows.length,
+      cached,
+      modeled,
+      fallback: rows.length - cached - modeled,
+      failed,
+      batchSize: Math.max(1, batchSize),
+      provider: this.provider.provider,
+      model: this.provider.model || null,
+      errors: uniq(batchErrors, 8),
+    };
     return { rows: rows.map((row) => output.get(this.key(row)) || applyPostUnderstanding(row, fallbackFrame(row))), stats: this.lastStats };
   }
 }
