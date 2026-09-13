@@ -7,7 +7,12 @@ import {
   normalizeTikTokObservation,
   parseTikTokVideoUrl,
 } from '../src/tiktok-observation-v21.mjs';
-import { isTikTokDiscoveryPage, shouldDriveTikTokFeed } from '../src/tiktok-observer-v21.mjs';
+import {
+  isKnownTikTokFeedContainerE2E,
+  isTikTokDiscoveryPage,
+  isTikTokLocalActivityE2E,
+  shouldDriveTikTokFeed,
+} from '../src/tiktok-observer-v21.mjs';
 
 test('TikTok observer has no four-video ceiling and retains broad unique discovery', () => {
   const rows = Array.from({ length: 90 }, (_, index) => normalizeTikTokObservation({
@@ -56,7 +61,7 @@ test('broad grounded TikTok rows augment final scan evidence without duplicating
   assert.equal(merged[0].firstObserved, 100);
 });
 
-test('TikTok root feed is scroll-driven after /foryou redirects to / when video cards are present', () => {
+test('TikTok root feed is scroll-driven after /foryou redirects to / when video cards present', () => {
   assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/', true), true);
   assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/', false), false);
   assert.equal(shouldDriveTikTokFeed('https://www.tiktok.com/foryou', false), true);
@@ -75,4 +80,14 @@ test('TikTok discovery excludes account activity and personal surfaces', () => {
   assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/notification'), false);
   assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/@creator'), false);
   assert.equal(isTikTokDiscoveryPage('https://www.tiktok.com/@creator/video/1000000000000000009'), false);
+});
+
+test('current TikTok For You feed containers are allowed even when persistent inbox chrome exists elsewhere', () => {
+  assert.equal(isKnownTikTokFeedContainerE2E('recommend-list-item-container'), true);
+  assert.equal(isKnownTikTokFeedContainerE2E('feed-item'), true);
+  assert.equal(isKnownTikTokFeedContainerE2E('search-card'), true);
+  assert.equal(isTikTokLocalActivityE2E('recommend-list-item-container'), false);
+  assert.equal(isTikTokLocalActivityE2E('inbox-list-item'), true);
+  assert.equal(isTikTokLocalActivityE2E('notification-item'), true);
+  assert.equal(isTikTokLocalActivityE2E('user-post-item'), true);
 });
