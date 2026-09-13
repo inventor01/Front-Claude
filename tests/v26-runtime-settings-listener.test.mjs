@@ -12,23 +12,38 @@ test('local vision defaults match the proven 8 GB Mac profile and do not cap dis
   const env=read('browser-bridge/content.env');
   const example=read('browser-bridge/content.env.example');
   const start=read('browser-bridge/start.command');
+  const warm=read('browser-bridge/scripts/warm-ollama.mjs');
   assert.match(env,/FRONT_OLLAMA_MODEL=qwen3-vl:4b-instruct/);
+  assert.match(env,/FRONT_OLLAMA_KEEP_ALIVE=30m/);
+  assert.match(env,/FRONT_OLLAMA_PREWARM=1/);
   assert.match(env,/FRONT_CONTENT_DEEP_VIDEOS=4/);
   assert.match(env,/FRONT_CONTENT_SCOUT_VIDEOS=2/);
   assert.match(env,/FRONT_CONTENT_BACKGROUND_VIDEOS=1/);
   assert.match(env,/FRONT_CONTEXT_OLLAMA_MODEL=qwen3-vl:4b-instruct/);
+  assert.match(env,/FRONT_CONTEXT_MAX_POSTS=36/);
+  assert.match(env,/FRONT_CONTEXT_BATCH_SIZE=4/);
+  assert.match(env,/FRONT_CONTEXT_TIMEOUT_MS=60000/);
   assert.match(example,/cap EXPENSIVE visual analysis, not X\/TikTok discovery/);
   assert.match(example,/keep visual and contextual understanding on the same model/);
   assert.match(start,/DEFAULT_CONTENT_ENV=.*content\.env/);
   assert.match(start,/FRONT_OLLAMA_MODEL:-qwen3-vl:4b-instruct/);
+  assert.match(start,/FRONT_OLLAMA_KEEP_ALIVE:-30m/);
+  assert.match(start,/FRONT_OLLAMA_PREWARM:-1/);
   assert.match(start,/FRONT_CONTENT_DEEP_VIDEOS:-4/);
   assert.match(start,/FRONT_CONTENT_SCOUT_VIDEOS:-2/);
+  assert.match(start,/FRONT_CONTEXT_MAX_POSTS:-36/);
+  assert.match(start,/FRONT_CONTEXT_BATCH_SIZE:-4/);
+  assert.match(start,/FRONT_CONTEXT_TIMEOUT_MS:-60000/);
+  assert.match(start,/scripts\/warm-ollama\.mjs/);
   assert.match(start,/replacing stale qwen3-vl:8b local default/);
   assert.match(start,/replacing stale deep visual budget 8 with balanced budget 4/);
   assert.match(start,/replacing stale scout visual budget 4 with balanced budget 2/);
   assert.match(start,/replacing stale background visual budget 2 with balanced budget 1/);
   assert.match(start,/FRONT_CONTEXT_OLLAMA_MODEL:-\$FRONT_OLLAMA_MODEL/);
   assert.match(start,/replacing stale 8B context model with current local model/);
+  assert.match(warm,/keep_alive: keepAlive/);
+  assert.match(warm,/num_predict: 4/);
+  assert.match(warm,/FRONT_OLLAMA_WARM_TIMEOUT_MS/);
 });
 
 test('browser bridge launcher remains valid bash after runtime-profile migrations',()=>{
