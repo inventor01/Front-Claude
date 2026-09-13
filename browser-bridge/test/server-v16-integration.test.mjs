@@ -86,7 +86,7 @@ test('v21 persists TikTok breadth diagnostics on top of the readable v19 ledger'
 });
 
 test('v18 can stop the whole scan tree and guards duplicate manual scans',()=>{
-  assert.match(supervisor,/url\.pathname === '\/stop'/);
+  assert.match(supervisor,/req\.url === '\/stop'/);
   assert.match(supervisor,/killProcessGroup/);
   assert.match(supervisor,/A scan is already running\. Use Stop scan before starting another one\./);
 });
