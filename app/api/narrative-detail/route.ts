@@ -1,3 +1,4 @@
+import { rankCoins } from '@/lib/coin-intelligence';
 import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 
@@ -96,7 +97,8 @@ export async function GET(request:Request){
   const richOrigin=parseJson<Record<string,unknown>|null>(latestRich?.origin_research,null);
   const richOriginPublished=typeof richOrigin?.published==='number'?richOrigin.published:null;
   const earliestEvidenceAt=evidenceTimes.length?Math.min(...evidenceTimes):richOriginPublished||latest?.origin_published||null;
-  const firstLaunchAt=launches.length?launches[0].seen:null;
+  const verifiedCreationTimes=coins.map(row=>parseJson<Record<string,unknown>>(row.data,{}).createdAt).filter((value):value is number=>typeof value==='number'&&value>0);
+  const firstLaunchAt=verifiedCreationTimes.length?Math.min(...verifiedCreationTimes):null;
   const leadMs=detectedAt&&firstLaunchAt?firstLaunchAt-detectedAt:null;
 
   return json({
@@ -106,9 +108,9 @@ export async function GET(request:Request){
    feedHistory:richSnapshots.slice(-48).map(row=>({observed:row.observed,feedPenetration:row.feed_penetration,feedPenetrationDelta:row.feed_penetration_delta,feedPenetrationVelocity:row.feed_penetration_velocity})),
    evidence:evidence.slice(0,20).map(row=>({...row,hashtags:parseJson<string[]>(row.hashtags,[]),outbound_urls:parseJson<string[]>(row.outbound_urls,[])})),
    relationships:relationships.map(row=>({...row,platforms:parseJson<string[]>(row.platforms,[])})),
-   coins:coins.map(row=>({...row,data:parseJson(row.data,{})})),
+   coins:coins.map(row=>({...row,data:parseJson<Record<string,unknown>>(row.data,{})})).filter(row=>row.data.verifiedPumpfun===true).sort((a,b)=>rankCoins(a.data,b.data)),
    launches:launches.map(row=>({...row,data:parseJson(row.data,{})})),
-   edge:{detectedAt,firstLaunchAt,leadMs,status:firstLaunchAt==null?'waiting':leadMs!=null&&leadMs>0?'before-launch':leadMs!=null&&leadMs<0?'after-launch':'same-time'},
+   edge:{detectedAt,firstLaunchAt,leadMs,status:firstLaunchAt==null?(coins.length?'unknown':'waiting'):leadMs!=null&&leadMs>0?'before-launch':leadMs!=null&&leadMs<0?'after-launch':'same-time'},
    note:'Front detection time is the earliest stored topic snapshot or Radar creation time. Origin research deep-scrolls narrative aliases and parent/quoted evidence; the earliest result is Front’s earliest verified find, not a guarantee of the absolute first internet post. For You penetration, creator size, relation, visual-hash and engagement fields are shown only when the platform exposed or Front could safely derive them.',
    at:Date.now(),
   });

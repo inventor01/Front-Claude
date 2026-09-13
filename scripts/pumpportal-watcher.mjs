@@ -6,7 +6,7 @@ const secret=process.env.FRONT_SETTINGS_KEY||'';
 const owner=process.env.FRONT_STANDALONE_USER_ID||'';
 const internalKey=secret?createHash('sha256').update(`${secret}:launch-watch`).digest('hex'):'';
 const normalize=(value)=>String(value??'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();
-const COMMON=new Set('the a an and or for to of in on with is are was were this that it its my your our their new official original coin token meme memecoin crypto sol solana pump fun'.split(' '));
+const COMMON=new Set('the a an and or for to of in on with is are was were this that it its my your our their new official original coin token meme memecoin crypto sol solana pump fun love grow face take make look'.split(' '));
 const words=(value)=>normalize(value).split(' ').filter((word)=>word.length>=3&&!COMMON.has(word));
 let narratives=[];
 let stopped=false;
@@ -43,7 +43,7 @@ function connect(){
  if(typeof WebSocket!=='function'){console.warn('[front-launch] WebSocket is unavailable in this Node runtime.');return;}
  socket=new WebSocket('wss://pumpportal.fun/api/data');
  socket.addEventListener('open',()=>{attempt=0;console.log('[front-launch] PumpPortal connected · subscribeNewToken');socket.send(JSON.stringify({method:'subscribeNewToken'}));});
- socket.addEventListener('message',(message)=>{try{const data=JSON.parse(String(message.data));if(data?.txType!=='create'||typeof data?.mint!=='string'||typeof data?.name!=='string')return;const match=candidateMatch(data.name,data.symbol);if(match)void saveMatch(data,match);}catch{}});
+ socket.addEventListener('message',(message)=>{try{const data=JSON.parse(String(message.data));if(data?.txType!=='create'||typeof data?.mint!=='string'||typeof data?.name!=='string')return;const match=candidateMatch(data.name,data.symbol);void saveMatch(data,match||{type:'unmatched',score:0,narrative:{title:''}});}catch{}});
  socket.addEventListener('error',()=>console.warn('[front-launch] PumpPortal websocket error'));
  socket.addEventListener('close',()=>{if(stopped)return;const delay=Math.min(30000,1000*2**attempt++);console.warn(`[front-launch] disconnected; retrying in ${delay}ms`);reconnectTimer=setTimeout(connect,delay);});
 }

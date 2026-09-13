@@ -1,4 +1,5 @@
 'use client';
+import RelatedCoin from './related-coin';
 
 import { useEffect, useState } from 'react';
 import { Activity, ExternalLink, Radio, RefreshCw, Sparkles, Timer, TrendingUp } from 'lucide-react';
@@ -26,7 +27,7 @@ type Detail={
  relationships:Relationship[];
  coins:Coin[];
  launches:LaunchMatch[];
- edge:{detectedAt:number|null;firstLaunchAt:number|null;leadMs:number|null;status:'waiting'|'before-launch'|'after-launch'|'same-time'};
+ edge:{detectedAt:number|null;firstLaunchAt:number|null;leadMs:number|null;status:'unknown'|'waiting'|'before-launch'|'after-launch'|'same-time'};
  note:string;
 };
 
@@ -53,7 +54,7 @@ export default function NarrativeWorkbench({narrativeId,topic}:Props){
  const evidence=detail?.evidence??[];
  const distinctCreators=new Set(evidence.map(item=>`${item.platform}:${item.author.toLowerCase()}`)).size;
  const windows=[['15','15m'],['60','1h'],['360','6h'],['1440','24h']] as const;
- const edgeText=!detail?'':detail.edge.status==='waiting'?'No matching Pump.fun launch has been stored yet.':detail.edge.status==='before-launch'?`Front detected this ${duration(detail.edge.leadMs)} before the first matching stored launch.`:detail.edge.status==='after-launch'?`Front detected this ${duration(detail.edge.leadMs)} after the first matching stored launch.`:'Front detection and the first matching launch were recorded at about the same time.';
+ const edgeText=!detail?'':detail.edge.status==='unknown'?'Related coin found; exact launch time is unverified.':detail.edge.status==='waiting'?'No matching Pump.fun launch has been stored yet.':detail.edge.status==='before-launch'?`Front detected this ${duration(detail.edge.leadMs)} before the first matching stored launch.`:detail.edge.status==='after-launch'?`Front detected this ${duration(detail.edge.leadMs)} after the first matching stored launch.`:'Front detection and the first matching launch were recorded at about the same time.';
  const maxCreators=Math.max(1,...(detail?.snapshots??[]).map(s=>s.creators));
  const topSounds=(latest?.soundSignals||[]).filter(signal=>signal.soundId||signal.title).slice(0,5);
  const topVisuals=(latest?.visualSignals||[]).filter(signal=>signal.hash).slice(0,5);
@@ -102,7 +103,7 @@ export default function NarrativeWorkbench({narrativeId,topic}:Props){
     <section className={styles.section}><div className={styles.sectionHead}><div><h5><Radio size={14}/> Matching launches</h5><p>PumpPortal creation events matched to this narrative.</p></div></div><div className={styles.launchList}>{detail.launches.slice(0,8).map(hit=><div key={hit.mint}><div><b>{hit.name}{hit.symbol?` · ${hit.symbol}`:''}</b><span>{age(hit.seen)} · {hit.match_type}</span></div><div><a href={pump(hit.mint)} target="_blank" rel="noreferrer">Pump</a><a href={axiom(hit.mint)} target="_blank" rel="noreferrer">Axiom</a></div></div>)}{!detail.launches.length&&<div className={styles.empty}>No matching stored launch yet. Front&apos;s server watcher remains armed for exact narrative aliases.</div>}</div></section>
    </div>
 
-   <section className={styles.section}><div className={styles.sectionHead}><div><h5>Related coins</h5><p>Stored search candidates tied to this Radar narrative; association remains evidence-based, not guaranteed.</p></div><span>{detail.coins.length}</span></div><div className={styles.coinGrid}>{detail.coins.slice(0,10).map(coin=><div className={styles.coin} key={coin.mint}><div><b>{coin.data.name||coin.data.symbol||'Coin candidate'}{coin.data.symbol?` · ${coin.data.symbol}`:''}</b><span>price {dollars(coin.data.price)} · liq {dollars(coin.data.liquidity)}</span><span>volume {dollars(coin.data.volume24h??coin.data.volume)} · mcap {dollars(coin.data.marketCap)}</span><code>{coin.mint.slice(0,9)}…{coin.mint.slice(-5)}</code>{coin.data.matchReason&&<small>{coin.data.matchReason}</small>}</div><div className={styles.coinLinks}><a href={pump(coin.mint)} target="_blank" rel="noreferrer">Pump</a><a href={axiom(coin.mint)} target="_blank" rel="noreferrer">Axiom</a></div></div>)}{!detail.coins.length&&<div className={styles.empty}>No stored coin candidates yet. Use the row&apos;s coin button to run a match.</div>}</div></section>
+   <section className={styles.section}><h5>Related Coins ({detail.coins.length})</h5><div className={styles.coinGrid}>{detail.coins.map(coin=><RelatedCoin key={coin.mint} mint={coin.mint} data={coin.data}/>)}{!detail.coins.length&&<div className={styles.empty}>PRE-COIN · Watching Pump.fun for matching launches</div>}</div></section>
    <div className={styles.note}>{detail.note}</div>
   </>}
  </div>;

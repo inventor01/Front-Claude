@@ -124,11 +124,22 @@ function stage(name, patch = {}) {
   };
 }
 function livePayload() {
+  const tiktokSnap = tiktok.snapshot();
+  const xObserved = latestLive.stages?.xDiscovery?.observed || 0;
+  const tiktokObserved = tiktokSnap.observed || 0;
+  
   return {
     ...latestLive,
-    tiktokDiscovery: latestLive.stages?.tiktokDiscovery || {
-      observed: 0, grounded: 0, target: latestLive.request?.targetUniqueFeedItems || 90,
-      active: false, status: 'idle', sourcePages: [], errors: [],
+    observed: latestLive.observed || (xObserved + tiktokObserved),
+    platformCounts: {
+      ...latestLive.platformCounts,
+      X: latestLive.platformCounts?.X || xObserved,
+      TikTok: latestLive.platformCounts?.TikTok || tiktokObserved,
+    },
+    tiktokDiscovery: {
+      ...tiktokSnap,
+      active: tiktokSnap.active || latestLive.stages?.tiktokDiscovery?.active,
+      target: tiktokSnap.target || latestLive.request?.targetUniqueFeedItems || 90,
     },
   };
 }
@@ -201,7 +212,13 @@ async function collectXFeed(target, maxSeconds = 70) {
     const tab = page.getByRole('tab', { name: /^For you$/i }).first();
     if (await tab.count().catch(() => 0)) await tab.click({ timeout: 2000 }).catch(() => {});
     while (!shouldStop() && Date.now() - started < maxSeconds * 1000 && rows.size < target && scrolls < 24 && stale < 4) {
-      for (const row of await extractX(page, 'Front v26 · X dedicated For You collector', target)) rows.set(row.id, row);
+      const found = await extractX(page, 'Front v26 · X dedicated For You collector', target);
+      for (const row of found) rows.set(row.id, row);
+      
+      // PROGRESSIVE STREAMING: update latestLive.evidence immediately
+      const currentEvidence = mergeRichEvidence([...latestLive.evidence, ...found]);
+      latestLive = { ...latestLive, evidence: currentEvidence.slice(-300), updatedAt: Date.now() };
+
       stale = rows.size <= lastSize + 1 ? stale + 1 : 0;
       lastSize = rows.size;
       stage('xDiscovery', { status: 'running', observed: rows.size, target, scrolls, sourcePage: page.url(), stalePasses: stale });
@@ -243,7 +260,7 @@ async function collectSearch(platform, query, limit = 24) {
   const q = sanitizeTopic(query);
   if (!q || shouldStop()) return [];
   const url = platform === 'X'
-    ? `https://x.com/search?q=${encodeURIComponent(`\"${q}\" -filter:replies`)}&src=typed_query&f=live`
+    ? `https://x.com/search?q=${encodeURIComponent(`"${q}" -filter:replies`)}&src=typed_query&f=live`
     : `https://www.tiktok.com/search?q=${encodeURIComponent(q)}`;
   const page = await openOwnedPage(url);
   try {
@@ -268,6 +285,12 @@ async function collectTikTokFeed(target, maxSeconds = 70) {
   try {
     while (!shouldStop() && Date.now() - started < maxSeconds * 1000) {
       const snap = tiktok.snapshot();
+      
+      // PROGRESSIVE STREAMING: update latestLive.evidence immediately
+      const grounded = snap.evidence || [];
+      const currentEvidence = mergeRichEvidence([...latestLive.evidence, ...grounded]);
+      latestLive = { ...latestLive, evidence: currentEvidence.slice(-300), updatedAt: Date.now() };
+
       stage('tiktokDiscovery', {
         status: snap.status, active: snap.active, observed: snap.observed, grounded: snap.grounded, target: snap.target,
         sourcePages: snap.sourcePages, errors: snap.errors, elapsedMs: Date.now() - started,

@@ -122,11 +122,18 @@ async function nativeLoopbackScan(input, init = {}) {
 }
 
 if (!globalThis[MARKER]) {
+  console.log('Patching globalThis.fetch for loopback scan proxy...');
   const originalFetch = globalThis.fetch.bind(globalThis);
   globalThis.fetch = async function frontFetch(input, init = {}) {
     const target = typeof input === 'string' || input instanceof URL ? String(input) : input?.url;
     const method = init.method || (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET');
-    if (target && isLoopbackScan(target, method)) return nativeLoopbackScan(input, init);
+    
+    console.log('[frontFetch] CALL:', { target, method });
+
+    if (target && isLoopbackScan(target, method)) {
+      console.log('[frontFetch] INTERCEPTING:', target, method);
+      return nativeLoopbackScan(input, init);
+    }
     return originalFetch(input, init);
   };
   globalThis[MARKER] = true;

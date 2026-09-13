@@ -141,3 +141,48 @@ Front was previously too close to a text scraper: social feed/search captions co
 - mixed real-topic + one-off-noise replay.
 
 A release should not merge if this quality gate or the existing browser bridge, build, migration, lint, or typecheck gates fail.
+
+## 2026-09-12 — TikTok discovery regressed to personal/activity content
+
+### Root cause
+The v26 branch was created from the Golden v25 checkpoint before the TikTok feed-card-only isolation fixes were incorporated. The observer used a broad DOM ancestor fallback that accidentally climbed into profile, activity, and notification containers, causing personal content to be scanned as discovery evidence.
+
+### Permanent fix
+- Updated `browser-bridge/src/tiktok-observer-v21.mjs` to use a strict allow-list of feed/discovery containers: `[data-e2e*="recommend-list-item-container"], [data-e2e*="search-card"], [data-e2e*="recommend-item"], [data-e2e*="feed-item"], article`.
+- Removed the broad parent-climbing fallback.
+- Verified that TikTok discovery now exclusively grounds actual feed/discovery cards.
+
+## 2026-09-12 — Current Scan box looked empty during active discovery
+
+### Root cause
+The UI in `app/front-live-shell.tsx` relied on top-level `live.observed` and `live.evidence` arrays. While the backend was actively finding posts via the TikTok observer, the top-level counts were not updated until the discovery phase finished and grounded evidence was merged.
+
+### Permanent fix
+- Modified `server-v25.mjs` to dynamically compute the total `observed` count and `platformCounts` in the `/live` endpoint by combining the X discovery state with the real-time snapshot from the `BroadTikTokObserver`.
+- This ensures the UI shows "Observed: X" and "TikTok: Y" immediately as the scanner progresses.
+
+## 2026-09-12 — Discovery evidence only appeared after scan completion
+
+### Root cause
+The scanner waited for the entire discovery phase (both X and TikTok) to complete before exposing the grounded evidence array to the `/live` endpoint.
+
+### Permanent fix
+- Implemented progressive grounded evidence streaming in `server-v25.mjs`.
+- In `collectXFeed` and `collectTikTokFeed`, discovered grounded evidence is now merged into `latestLive.evidence` immediately during the polling loop.
+- The UI now displays evidence cards progressively as they are found, while keeping them separate from the final narrative intelligence gates.
+
+### Regression / release gate
+Verified that:
+1. TikTok discovery excludes personal/profile/activity rows.
+2. Current Scan UI updates counts live during discovery.
+3. Grounded evidence streams progressively to the UI.
+4. Full unit test suite passes (except for environment-blocked loopback tests).
+
+## 2026-09-13 — Related coin tracking and false association repair
+
+- Root cause: alias containment was symmetric, so a partial token name such as Agent qualified against Coding Agent. Require the complete phrase in the coin name, reject generic singleton aliases and require multiple distinctive terms for overlap. Revalidate old links and preserve their historical snapshots when rejected.
+- Root cause: enrichment replaced data on every refresh, coercing missing values to zero and falling back from MC to FDV. Preserve immutable first/match baselines, keep unavailable MC null, keep FDV separate, and atomically append coin_market_snapshots with current records. Never assign a later quote to an unknown match-time baseline.
+- Retain unmatched PumpPortal create events for later narrative discovery. Add independently labeled discovery of direct Pump.fun pools; never fabricate a creation event from a search result. Cache queries and mint requests; rank semantic confidence before traction.
+- Add shared related-coin detail cards, all three mint-based links, Copy CA, window metrics, momentum, timing and explicit PRE-COIN states. Background enrichment proceeds separately from scan completion and rotates through narrative pages.
+- Persist exact launch timestamps only when verified; creation-event observation and pool-creation times remain distinct. SOL-denominated event market caps are not labeled USD. Unknown holder/curve data remain unavailable.
+- Integration also preserved remote v26 feed protections and live counters. Fixed pre-existing invalid escaped template delimiters in the local scanner source; added syntax regression coverage. Updated counter-layout/copy assertions to the combined current UI while retaining polling and feed-protection assertions.

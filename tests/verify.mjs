@@ -6,7 +6,7 @@ import {DatabaseSync} from 'node:sqlite';
 import ts from 'typescript';
 const folder=mkdtempSync(join('node_modules','.front-verify-'));
 const compile=(name,file,replacements=[])=>{let src=readFileSync(file,'utf8');for(const [a,b] of replacements)src=src.replaceAll(a,b);writeFileSync(join(folder,name+'.mjs'),ts.transpileModule(src,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);};
-compile('domain','lib/domain.ts');compile('schemas','lib/schemas.ts');compile('providers','lib/providers.ts',[["'./domain'","'./domain.mjs'"],["'./schemas'","'./schemas.mjs'"]]);compile('pumpfun','lib/pumpfun.ts');compile('narratives-base','lib/narratives-base.ts',[["'./domain'","'./domain.mjs'"],["'./providers'","'./providers.mjs'"],["'./schemas'","'./schemas.mjs'"]]);compile('narratives','lib/narratives.ts',[["'./narratives-base'","'./narratives-base.mjs'"],["'./pumpfun'","'./pumpfun.mjs'"]]);compile('request-origin','lib/request-origin.ts');
+compile('domain','lib/domain.ts');compile('schemas','lib/schemas.ts');compile('providers','lib/providers.ts',[["'./domain'","'./domain.mjs'"],["'./schemas'","'./schemas.mjs'"]]);compile('pumpfun','lib/pumpfun.ts');compile('narratives-base','lib/narratives-base.ts',[["'./domain'","'./domain.mjs'"],["'./providers'","'./providers.mjs'"],["'./schemas'","'./schemas.mjs'"]]);compile('live','lib/live.ts');compile('narrative-quality','lib/narrative-quality.ts');compile('coin-matching','lib/coin-matching.ts',[["'./live'","'./live.mjs'"],["'./narrative-quality'","'./narrative-quality.mjs'"]]);compile('coin-intelligence','lib/coin-intelligence.ts');compile('narratives','lib/narratives.ts',[["'./narratives-base'","'./narratives-base.mjs'"],["'./pumpfun'","'./pumpfun.mjs'"],["'./coin-intelligence'","'./coin-intelligence.mjs'"],["'./coin-matching'","'./coin-matching.mjs'"]]);compile('request-origin','lib/request-origin.ts');
 compile('route','app/api/desk/route.ts',[["import {env} from 'cloudflare:workers';","const env=globalThis.testEnv;"],["import {getChatGPTUser} from '@/app/chatgpt-auth';","const getChatGPTUser=async()=>globalThis.testUser;"],["'@/lib/providers'","'./providers.mjs'"],["'@/lib/domain'","'./domain.mjs'"],["'@/lib/narratives'","'./narratives.mjs'"],["'@/lib/request-origin'","'./request-origin.mjs'"]]);
 const d=await import(pathToFileURL(join(folder,'domain.mjs')));const p=await import(pathToFileURL(join(folder,'providers.mjs')));const n=await import(pathToFileURL(join(folder,'narratives.mjs')));
 const mint='So11111111111111111111111111111111111111112';
@@ -34,6 +34,38 @@ const now=Date.now();for(let i=0;i<65;i++){const id=`auto:topic-${i}`;database.p
 let feed=await n.narrativeFeed(globalThis.testEnv.DB,'alice',{limit:50});assert.equal(feed.cards.length,50);assert.equal(feed.page.total,65);assert.equal(feed.page.hasMore,true);assert.equal(feed.page.nextOffset,50);feed=await n.narrativeFeed(globalThis.testEnv.DB,'alice',{limit:50,offset:50});assert.equal(feed.cards.length,15);assert.equal(feed.page.hasMore,false);
 database.prepare('INSERT INTO narratives(owner,id,title,aliases,created) VALUES(?,?,?,?,?)').run('alice','auto:crypto','Crypto',JSON.stringify(['Crypto']),now-600000);database.prepare('INSERT INTO narratives(owner,id,title,aliases,created) VALUES(?,?,?,?,?)').run('alice','manual:crypto','Crypto',JSON.stringify(['Crypto']),now-600000);const cleaned=await n.cleanupLegacyNarratives(globalThis.testEnv.DB,'alice');assert(cleaned.deletedBroad>=1);assert.equal(database.prepare("SELECT COUNT(*) AS n FROM narratives WHERE id='auto:crypto'").get().n,0);assert.equal(database.prepare("SELECT COUNT(*) AS n FROM narratives WHERE id='manual:crypto'").get().n,1,'manual narratives must survive cleanup');
 const mergeA='auto:banana-phone-kid',mergeB='auto:banana phone kid';database.prepare('INSERT INTO narratives(owner,id,title,aliases,created) VALUES(?,?,?,?,?)').run('alice',mergeA,'Banana Phone Kid',JSON.stringify(['Banana Phone Kid']),now);database.prepare('INSERT INTO narratives(owner,id,title,aliases,created) VALUES(?,?,?,?,?)').run('alice',mergeB,'BananaPhoneKid',JSON.stringify(['BananaPhoneKid']),now);for(const [idx,eid] of ['x:dup1','x:dup2'].entries()){database.prepare('INSERT INTO evidence(owner,id,platform,author,url,content,published,first_seen,last_seen,provenance) VALUES(?,?,?,?,?,?,?,?,?,?)').run('alice',eid,'X',`dup${idx}`,`https://x.com/a/status/${2000+idx}`,'Banana Phone Kid reaction',now,now,now,'test');database.prepare('INSERT INTO evidence_links(owner,narrative,evidence,reason) VALUES(?,?,?,?)').run('alice',mergeA,eid,'test');database.prepare('INSERT INTO evidence_links(owner,narrative,evidence,reason) VALUES(?,?,?,?)').run('alice',mergeB,eid,'test');}const deduped=await n.cleanupLegacyNarratives(globalThis.testEnv.DB,'alice');assert(deduped.mergedDuplicates>=1);assert.equal(database.prepare('SELECT COUNT(*) AS n FROM narratives WHERE id IN (?,?)').get(mergeA,mergeB).n,1);
+
+// Related coin pipeline exercises real SQL migrations, discovery, rejection and history.
+const coinOwner='coin-qa',coinId='narrative:daejon';
+database.prepare('INSERT INTO narratives(owner,id,title,aliases,created) VALUES(?,?,?,?,?)').run(coinOwner,coinId,'Daejon Love',JSON.stringify(['Daejon Love']),now-60000);
+await n.matchNarrative(globalThis.testEnv.DB,coinOwner,coinId);
+assert.equal(database.prepare('SELECT COUNT(*) AS n FROM narrative_coins WHERE owner=?').get(coinOwner).n,0);
+for(const [i,name] of ['Daejon Love','Daejon Love Coin','Love'].entries()){
+ database.prepare('INSERT INTO pump_creation_events(owner,mint,name,symbol,seen,data) VALUES(?,?,?,?,?,?)').run(coinOwner,mint.slice(0,-1)+(i+1),name,'DAEJON',now,JSON.stringify({txType:'create',marketCapSol:42}));
+}
+await n.matchNarrative(globalThis.testEnv.DB,coinOwner,coinId);
+const matchedCoins=database.prepare('SELECT data FROM narrative_coins WHERE owner=?').all(coinOwner);
+assert.equal(matchedCoins.length,2,'generic surname cannot become a match');
+assert.equal(database.prepare('SELECT COUNT(*) AS n FROM coin_market_snapshots WHERE owner=?').get(coinOwner).n,2);
+const preserved=JSON.parse(matchedCoins[0].data);assert.equal(preserved.marketCapAtMatch,null);assert.equal(preserved.firstObservedMarketCapSol,42);
+await n.matchNarrative(globalThis.testEnv.DB,coinOwner,coinId);
+assert.equal(database.prepare('SELECT COUNT(*) AS n FROM coin_market_snapshots WHERE owner=?').get(coinOwner).n,2,'cached refresh must not write a fake new observation');
+database.prepare('UPDATE narratives SET title=?,aliases=? WHERE owner=? AND id=?').run('Tesla Roadster Unveil Launch',JSON.stringify(['Tesla Roadster Unveil Launch']),coinOwner,coinId);
+await n.matchNarrative(globalThis.testEnv.DB,coinOwner,coinId);
+assert.equal(database.prepare('SELECT COUNT(*) AS n FROM narrative_coins WHERE owner=?').get(coinOwner).n,0,'revalidate and remove old false links');
+assert.equal(database.prepare('SELECT COUNT(*) AS n FROM coin_market_snapshots WHERE owner=?').get(coinOwner).n,2,'rejected links retain historical observations');
+database.prepare('UPDATE narratives SET title=?,aliases=? WHERE owner=? AND id=?').run('Daejon Love',JSON.stringify(['Daejon Love']),coinOwner,coinId);
+globalThis.testEnv.FRONT_STANDALONE_USER_ID=coinOwner;
+compile('launch-route','app/api/internal/launch-watch/route.ts',[["import { env } from 'cloudflare:workers';","const env=globalThis.testEnv;"],["'@/lib/coin-matching'","'./coin-matching.mjs'"],["'@/lib/narratives'","'./narratives.mjs'"],["'@/lib/narrative-quality'","'./narrative-quality.mjs'"]]);
+const launchRoute=await import(pathToFileURL(join(folder,'launch-route.mjs')));
+const tokenBytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(`${globalThis.testEnv.FRONT_SETTINGS_KEY}:launch-watch`));
+const internalKey=[...new Uint8Array(tokenBytes)].map(b=>b.toString(16).padStart(2,'0')).join('');
+const creationRequest=txType=>new Request('https://test.local/api/internal/launch-watch',{method:'POST',headers:{'content-type':'application/json','x-front-internal-key':internalKey},body:JSON.stringify({mint,name:'Daejon Love',seen:now,raw:{txType,marketCapSol:42}})});
+assert.equal((await launchRoute.POST(creationRequest('buy'))).status,400);
+const creationResponse=await launchRoute.POST(creationRequest('create'));assert.equal(creationResponse.status,200);assert.equal((await creationResponse.json()).matched,true);
+assert.ok(database.prepare('SELECT COUNT(*) AS n FROM narrative_coins WHERE owner=? AND mint=?').get(coinOwner,mint).n===1);
+console.log('PASS: 4 authenticated creation-route assertions (reject trades, accept create, reverse match, persisted related coin).');
+console.log('PASS: 8 related-coin SQL integration assertions (no coin, exact/multiple, generic rejection, snapshots, SOL units, caching, revalidation, history retention).');
 
 const r=await import(pathToFileURL(join(folder,'route.mjs')));
 const post=(body,origin='https://test.local')=>r.POST(new Request('https://test.local/api/desk',{method:'POST',headers:{origin,'Content-Type':'application/json'},body:JSON.stringify(body)}));

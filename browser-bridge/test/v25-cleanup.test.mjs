@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -39,7 +40,9 @@ test('v26 exposes contextual post understanding and semantic narrative diagnosti
   assert.match(server, /contextual-post-understanding/);
   assert.match(server, /semantic-subject-event-clustering/);
   assert.match(server, /generic-word-rejection/);
-  assert.match(server, /tiktokDiscovery: latestLive\.stages\?\.tiktokDiscovery/);
+  assert.match(server, /tiktokDiscovery: \{/);
+  assert.match(server, /\.\.\.tiktokSnap/);
+  assert.match(server, /active: tiktokSnap\.active \|\| latestLive\.stages\?\.tiktokDiscovery\?\.active/);
   assert.match(server, /owned-tiktok-page/);
   assert.match(server, /owned-x-page/);
 });
@@ -48,3 +51,5 @@ test('v26 owns only bridge and Chrome CDP ports', () => {
   assert.match(server, /activePorts: \{ bridge: PORT, chromeCdp: CDP_PORT \}/);
   for (const legacyPort of ['43986', '43987', '43988', '43991', '43994']) assert.doesNotMatch(server, new RegExp(legacyPort));
 });
+
+test('v26 scanner parses before startup',()=>{const result=spawnSync(process.execPath,['--check',path.join(root,'src/server-v25.mjs')],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);});
