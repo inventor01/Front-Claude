@@ -29,8 +29,17 @@ export function isTikTokDiscoveryPage(urlValue) {
   }
 }
 
+export function isKnownTikTokFeedContainerE2E(value) {
+  return /(?:^|[-_])(?:recommend-list-item-container|recommend-item|feed-item|search-card)(?:$|[-_])/i.test(String(value || ''))
+    || /^(?:recommend-list-item-container|recommend-item|feed-item|search-card)$/i.test(String(value || ''));
+}
+
+export function isTikTokLocalActivityE2E(value) {
+  return /(?:user-post-item|inbox-list-item|notification-item|activity-item|message-item|profile)/i.test(String(value || ''));
+}
+
 async function extractTikTokAnchors(page, provenance) {
-  const raw = await page.evaluate(() => {
+  const result = await page.evaluate(() => {
     const feedContainerSelector = [
       '[data-e2e*="recommend-list-item-container"]',
       '[data-e2e*="recommend-item"]',
@@ -38,27 +47,42 @@ async function extractTikTokAnchors(page, provenance) {
       '[data-e2e*="search-card"]',
       'article',
     ].join(', ');
-    const activitySelector = [
-      '[data-e2e*="inbox"]',
-      '[data-e2e*="notification"]',
-      '[data-e2e*="activity"]',
-      '[data-e2e*="message"]',
+    // Keep this intentionally local. Broad selectors such as [data-e2e*="inbox"]
+    // can match persistent TikTok navigation shells that wrap the For You feed.
+    const localActivitySelector = [
+      '[data-e2e="inbox-list-item"]',
+      '[data-e2e*="notification-item"]',
+      '[data-e2e*="activity-item"]',
+      '[data-e2e*="message-item"]',
+      '[data-e2e*="user-post-item"]',
       '[role="dialog"]',
     ].join(', ');
     const links = [...document.querySelectorAll('a[href*="/video/"]')].slice(0, 700);
     const rows = [];
     const seen = new Set();
+    let withoutContainer = 0;
+    let localActivityRejected = 0;
+    let containerRejected = 0;
+    let activityTextRejected = 0;
     for (const link of links) {
       const href = link.href || link.getAttribute('href') || '';
       if (!href || seen.has(href)) continue;
-      if (link.closest(activitySelector)) continue;
       const container = link.closest(feedContainerSelector);
-      if (!container) continue;
-      if (container.closest(activitySelector)) continue;
+      if (!container) { withoutContainer += 1; continue; }
+      if (link.closest(localActivitySelector) || container.closest(localActivitySelector)) {
+        localActivityRejected += 1;
+        continue;
+      }
       const e2e = String(container.getAttribute('data-e2e') || '').toLowerCase();
-      if (/user-post-item|profile|inbox|notification|activity|message/.test(e2e)) continue;
+      if (/user-post-item|profile|inbox-list-item|notification-item|activity-item|message-item/.test(e2e)) {
+        containerRejected += 1;
+        continue;
+      }
       const containerText = (container.innerText || '').trim();
-      if (/\b(?:liked your video|liked your post|liked your comment|commented on your video|commented on your post|replied to your comment|shared your video|reposted your video|viewed your profile|mentioned you|tagged you|followed you|started following you|sent you a message)\b/i.test(containerText)) continue;
+      if (/\b(?:liked your video|liked your post|liked your comment|commented on your video|commented on your post|replied to your comment|shared your video|reposted your video|viewed your profile|mentioned you|tagged you|followed you|started following you|sent you a message)\b/i.test(containerText)) {
+        activityTextRejected += 1;
+        continue;
+      }
       seen.add(href);
       const image = link.querySelector('img') || container.querySelector?.('img');
       rows.push({
@@ -68,12 +92,27 @@ async function extractTikTokAnchors(page, provenance) {
         alt: image?.getAttribute('alt') || '',
         coverUrl: image?.getAttribute('src') || '',
         containerText: containerText.slice(0, 8000),
+        containerE2E: e2e,
       });
     }
-    return rows;
-  }).catch(() => []);
+    return {
+      rows,
+      diagnostics: {
+        rawVideoAnchors: links.length,
+        feedContainers: document.querySelectorAll(feedContainerSelector).length,
+        acceptedAnchors: rows.length,
+        withoutContainer,
+        localActivityRejected,
+        containerRejected,
+        activityTextRejected,
+      },
+    };
+  }).catch(() => ({ rows: [], diagnostics: { rawVideoAnchors: 0, feedContainers: 0, acceptedAnchors: 0 } }));
   const at = Date.now();
-  return raw.map((row) => normalizeTikTokObservation({ ...row, provenance }, at)).filter(Boolean);
+  return {
+    observations: result.rows.map((row) => normalizeTikTokObservation({ ...row, provenance }, at)).filter(Boolean),
+    diagnostics: result.diagnostics,
+  };
 }
 
 export class BroadTikTokObserver {
@@ -101,6 +140,15 @@ export class BroadTikTokObserver {
       grounded: 0,
       sourcePages: [],
       errors: [],
+      diagnostics: {
+        rawVideoAnchors: 0,
+        feedContainers: 0,
+        acceptedAnchors: 0,
+        withoutContainer: 0,
+        localActivityRejected: 0,
+        containerRejected: 0,
+        activityTextRejected: 0,
+      },
     };
   }
 
@@ -181,12 +229,17 @@ export class BroadTikTokObserver {
         await page.waitForTimeout(1800);
       }
       const sourceUrl = page.url();
-      const observations = await extractTikTokAnchors(page, 'TikTok dedicated discovery observation');
-      this.add(observations);
-      if (this.state.observed < this.state.target && shouldDriveTikTokFeed(sourceUrl, observations.length > 0)) {
+      const extracted = await extractTikTokAnchors(page, 'TikTok dedicated discovery observation');
+      this.add(extracted.observations);
+      if (this.state.observed < this.state.target && shouldDriveTikTokFeed(sourceUrl, extracted.diagnostics.rawVideoAnchors > 0)) {
         await page.evaluate(() => window.scrollBy(0, Math.max(window.innerHeight * 1.05, 820))).catch(() => {});
       }
-      this.state = { ...this.state, sourcePages: [sourceUrl], updatedAt: Date.now() };
+      this.state = {
+        ...this.state,
+        sourcePages: [sourceUrl],
+        diagnostics: extracted.diagnostics,
+        updatedAt: Date.now(),
+      };
     } catch (error) {
       const errors = [...this.state.errors, clean(error?.message || error, 500)].slice(-8);
       this.state = { ...this.state, errors, updatedAt: Date.now() };
