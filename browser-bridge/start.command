@@ -18,9 +18,6 @@ if [ ! -d node_modules/playwright ]; then
   npm install --no-audit --no-fund
 fi
 
-# Playwright's cache directory can exist even when the exact Chromium revision
-# required by this Node Playwright package is missing. Check the executable
-# Playwright actually expects instead of checking the cache directory itself.
 PLAYWRIGHT_EXECUTABLE="$(node --input-type=module -e "import { chromium } from 'playwright'; process.stdout.write(chromium.executablePath())")"
 if [ ! -x "$PLAYWRIGHT_EXECUTABLE" ]; then
   echo "Installing the Chromium revision required by Front..."
@@ -38,11 +35,6 @@ fi
 FRONT_DATA_DIR="${FRONT_BRIDGE_DATA:-$HOME/.front-browser-bridge}"
 mkdir -p "$FRONT_DATA_DIR"
 
-# v13 changes the definition of a promotable narrative. On the first v13 start,
-# remove stale v10/v11 active scan state so junk topics cannot be reintroduced
-# from the local queue/history after the server has been cleared. Preserve the
-# files in a private local archive and leave login/profile, config, source
-# reputation, creator stats and visual caches untouched.
 QUALITY_MARKER="$FRONT_DATA_DIR/.quality-reset-v13.done"
 if [ ! -f "$QUALITY_MARKER" ]; then
   ARCHIVE_DIR="$FRONT_DATA_DIR/archive/v13-quality-reset-$(date +%Y%m%d-%H%M%S)"
@@ -56,10 +48,6 @@ if [ ! -f "$QUALITY_MARKER" ]; then
   echo "Front v13: archived old active scanner state and started with a clean feed."
 fi
 
-# v17+ content understanding uses a private local env file when present. The file
-# is never uploaded by Front and its values are never printed. This supports an
-# OpenAI vision key or a local Ollama vision model without putting secrets into
-# the cloud Settings page.
 CONTENT_ENV="$FRONT_DATA_DIR/content.env"
 if [ -f "$CONTENT_ENV" ]; then
   set -a
@@ -68,13 +56,12 @@ if [ -f "$CONTENT_ENV" ]; then
   set +a
 fi
 
-# Login happens in regular visible Chrome. Collection and video analysis should
-# be invisible by default so scanning does not pop up disposable windows.
 export FRONT_BRIDGE_HEADLESS="${FRONT_BRIDGE_HEADLESS:-1}"
 
-echo "Starting Front browser bridge v20 on http://127.0.0.1:43981"
+echo "Starting Front browser bridge v25 on http://127.0.0.1:43981"
 echo "Keep this Terminal window open while you want browser intelligence running."
-echo "v20 adds live dashboard findings, fast duplicate rejection, and accurate CDP-ready status while preserving the v19 ledger and v18 Stop Scan/visual fallback behavior."
+echo "v25 uses one scanner process, one scan state, one ledger, one X collector, and one isolated TikTok collector."
+echo "Chrome CDP stays on http://127.0.0.1:43982 and must remain running."
 echo "Browser scans and video-frame analysis run in the background; login still opens regular Chrome."
 if [ -n "${FRONT_CONTENT_API_KEY:-${OPENAI_API_KEY:-}}" ]; then
   echo "Video understanding: OpenAI provider configured."
