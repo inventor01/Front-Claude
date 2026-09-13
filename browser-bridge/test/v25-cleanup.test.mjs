@@ -8,10 +8,11 @@ const root = path.resolve(import.meta.dirname, '..');
 const server = fs.readFileSync(path.join(root, 'src/server-v25.mjs'), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const launcher = fs.readFileSync(path.join(root, 'start.command'), 'utf8');
+const V26_START = 'node --import ./src/playwright-cdp-compat.mjs src/server-v25.mjs';
 
 test('v26 is the default browser bridge runtime', () => {
-  assert.equal(pkg.scripts.start, 'node src/server-v25.mjs');
-  assert.equal(pkg.scripts['start:v26'], 'node src/server-v25.mjs');
+  assert.equal(pkg.scripts.start, V26_START);
+  assert.equal(pkg.scripts['start:v26'], V26_START);
   assert.match(launcher, /Starting Front browser bridge v26/);
 });
 
