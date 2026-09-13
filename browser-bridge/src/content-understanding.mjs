@@ -6,6 +6,11 @@ export const CONTENT_UNDERSTANDING_VERSION = 17;
 const CACHE_TTL_MS = 7 * 24 * 3600000;
 const FAILURE_TTL_MS = 5 * 60000;
 const MAX_CONTEXT_TEXT = 2200;
+const OLLAMA_KEEP_ALIVE = String(process.env.FRONT_OLLAMA_KEEP_ALIVE || '30m');
+const MODEL_FRAME_LIMIT = Math.max(4, Math.min(12, Number(process.env.FRONT_CONTENT_MODEL_FRAMES || 8)));
+const DEEP_TIMEOUT_MS = Math.max(30000, Number(process.env.FRONT_CONTENT_TIMEOUT_MS || 60000));
+const SCOUT_TIMEOUT_MS = Math.max(20000, Number(process.env.FRONT_CONTENT_SCOUT_TIMEOUT_MS || 45000));
+const OLLAMA_NUM_PREDICT = Math.max(160, Math.min(900, Number(process.env.FRONT_CONTENT_NUM_PREDICT || 420)));
 
 const clean = (value, max = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const finite = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
@@ -189,12 +194,14 @@ async function analyzeOllama(frames, context, provider, signal) {
       model: provider.model,
       stream: false,
       think: false,
+      keep_alive: OLLAMA_KEEP_ALIVE,
+      format: 'json',
       messages: [{
         role: 'user',
         content: context,
         images: frames.map((frame) => frame.base64),
       }],
-      options: { temperature: 0.1 },
+      options: { temperature: 0.1, num_predict: OLLAMA_NUM_PREDICT },
     }),
   });
   const data = await response.json().catch(() => ({}));
@@ -290,8 +297,6 @@ async function capturePostFrames(context, row, { maxFrames = 16, timeoutMs = 300
       if (Date.now() - started > timeoutMs) break;
       await seekVideo(video, time);
       await page.waitForTimeout(80);
-      // Read the decoded frame directly, avoiding compositor/animation waits
-      // on hidden tabs. Cross-origin media falls back to a bounded screenshot.
       const decoded = await video.evaluate(element => {
         if (!element.videoWidth || !element.videoHeight || element.readyState < 2) return null;
         const scale = Math.min(1, 640 / Math.max(element.videoWidth, element.videoHeight));
@@ -306,7 +311,7 @@ async function capturePostFrames(context, row, { maxFrames = 16, timeoutMs = 300
       frames.push({ time, base64, dataUrl: `data:image/jpeg;base64,${base64}` });
     }
     const transcript = clean(await textTrackTranscript(video), 4000);
-    const sheet = contactSheet && frames.length > 1 ? await buildTimelineContactSheet(page, modelFrames(frames, 12)) : null;
+    const sheet = contactSheet && frames.length > 1 ? await buildTimelineContactSheet(page, modelFrames(frames, MODEL_FRAME_LIMIT)) : null;
     return { frames, modelFrames: sheet ? [sheet] : null, contactSheet: Boolean(sheet), duration: metadata.duration || 0, transcript, pageTitle: title, captureType: 'video-timeline', elapsedMs: Date.now() - started };
   } finally {
     await page.close().catch(() => {});
@@ -448,10 +453,16 @@ export class ContentUnderstandingEngine {
       lastRun: this.lastRun,
       lastError: this.lastError,
       lastStats: this.lastStats,
+      modelFrameLimit: MODEL_FRAME_LIMIT,
+      deepTimeoutMs: DEEP_TIMEOUT_MS,
+      scoutTimeoutMs: SCOUT_TIMEOUT_MS,
+      keepAlive: this.provider.provider === 'ollama' ? OLLAMA_KEEP_ALIVE : null,
     };
   }
 
-  cacheKey(row) { return `${row.platform}|${row.id}|${row.url}|timeline-sheet-v1`; }
+  cacheKey(row) {
+    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v2`;
+  }
 
   cacheEntry(row) {
     const entry = this.cache[this.cacheKey(row)];
@@ -481,7 +492,7 @@ export class ContentUnderstandingEngine {
 
   capture(context, row, options) { return capturePostFrames(context, row, options); }
 
-  async analyzeOne(context, row, { maxFrames = 16, timeoutMs = 45000 } = {}) {
+  async analyzeOne(context, row, { maxFrames = 16, timeoutMs = DEEP_TIMEOUT_MS } = {}) {
     const cachedEntry = this.cacheEntry(row);
     if (cachedEntry?.ok === true && cachedEntry.analysis?.summary) return { analysis: cachedEntry.analysis, cached: true };
     if (cachedEntry?.ok === false) return { analysis: null, cached: false, cachedFailure: true, error: clean(cachedEntry.error, 300) || 'Recent content-analysis failure is cooling down.' };
@@ -495,7 +506,7 @@ export class ContentUnderstandingEngine {
       captureMs = Date.now() - started;
       if (!capture.frames.length) throw new Error('No visual frames could be captured from the post.');
       timer = setTimeout(() => controller.abort(), timeoutMs);
-      const chosen = capture.modelFrames || modelFrames(capture.frames, Math.min(12, maxFrames));
+      const chosen = capture.modelFrames || modelFrames(capture.frames, Math.min(MODEL_FRAME_LIMIT, maxFrames));
       const prompt = analysisPrompt(row, capture);
       const raw = this.provider.provider === 'ollama'
         ? await analyzeOllama(chosen, prompt, this.provider, controller.signal)
@@ -528,9 +539,9 @@ export class ContentUnderstandingEngine {
     const limit = Math.max(0, Math.min(8, Number(maxVideos ?? (mode === 'deep' ? 4 : 2)) || 0));
     const selected = selectVideoCandidates(rows, { limit });
     const byKey = new Map(rows.map((row) => [this.cacheKey(row), row]));
-    const stats = { requested: selected.length, analyzed: 0, cached: 0, cachedFailures: 0, enriched: 0, failed: 0, skipped: 0, provider: this.provider.provider, model: this.provider.model || null };
+    const stats = { requested: selected.length, analyzed: 0, cached: 0, cachedFailures: 0, enriched: 0, failed: 0, skipped: 0, provider: this.provider.provider, model: this.provider.model || null, modelFrameLimit: MODEL_FRAME_LIMIT };
     for (const row of selected) {
-      const result = await this.analyzeOne(context, row, { maxFrames: mode === 'deep' ? 16 : 10, timeoutMs: mode === 'deep' ? 45000 : 30000 });
+      const result = await this.analyzeOne(context, row, { maxFrames: mode === 'deep' ? 16 : 10, timeoutMs: mode === 'deep' ? DEEP_TIMEOUT_MS : SCOUT_TIMEOUT_MS });
       if (result.cached) stats.cached++;
       else if (result.cachedFailure) { stats.cachedFailures++; stats.failed++; }
       else if (result.analysis) stats.analyzed++;
