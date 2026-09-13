@@ -1,11 +1,12 @@
 {
   "name": "front-browser-bridge",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "engines": { "node": ">=22.13.0" },
   "scripts": {
     "start": "node src/server-v25.mjs",
+    "start:v26": "node src/server-v25.mjs",
     "start:v25": "node src/server-v25.mjs",
     "start:v21": "node src/launcher-v21.mjs",
     "start:v20": "node src/launcher-v20.mjs",
