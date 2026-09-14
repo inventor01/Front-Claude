@@ -109,11 +109,11 @@ export FRONT_OLLAMA_KEEP_ALIVE="${FRONT_OLLAMA_KEEP_ALIVE:-30m}"
 export FRONT_OLLAMA_PREWARM="${FRONT_OLLAMA_PREWARM:-1}"
 export FRONT_OLLAMA_WARM_TIMEOUT_MS="${FRONT_OLLAMA_WARM_TIMEOUT_MS:-75000}"
 export FRONT_CONTENT_MODEL_FRAMES="${FRONT_CONTENT_MODEL_FRAMES:-8}"
-export FRONT_CONTENT_TIMEOUT_MS="${FRONT_CONTENT_TIMEOUT_MS:-60000}"
+export FRONT_CONTENT_TIMEOUT_MS="${FRONT_CONTENT_TIMEOUT_MS:-75000}"
 export FRONT_CONTENT_SCOUT_TIMEOUT_MS="${FRONT_CONTENT_SCOUT_TIMEOUT_MS:-45000}"
 export FRONT_CONTENT_NUM_PREDICT="${FRONT_CONTENT_NUM_PREDICT:-420}"
-export FRONT_CONTENT_DEEP_VIDEOS="${FRONT_CONTENT_DEEP_VIDEOS:-4}"
-export FRONT_CONTENT_SCOUT_VIDEOS="${FRONT_CONTENT_SCOUT_VIDEOS:-2}"
+export FRONT_CONTENT_DEEP_VIDEOS="${FRONT_CONTENT_DEEP_VIDEOS:-2}"
+export FRONT_CONTENT_SCOUT_VIDEOS="${FRONT_CONTENT_SCOUT_VIDEOS:-1}"
 export FRONT_CONTENT_BACKGROUND_VIDEOS="${FRONT_CONTENT_BACKGROUND_VIDEOS:-1}"
 export FRONT_CONTEXT_MAX_POSTS="${FRONT_CONTEXT_MAX_POSTS:-12}"
 export FRONT_CONTEXT_BATCH_SIZE="${FRONT_CONTEXT_BATCH_SIZE:-4}"
@@ -126,13 +126,17 @@ if [ -z "$EXPLICIT_MODEL" ] && [ "$FRONT_OLLAMA_MODEL" = "qwen3-vl:8b" ]; then
   echo "Front v26: replacing stale qwen3-vl:8b local default with verified qwen3-vl:4b-instruct."
   export FRONT_OLLAMA_MODEL="qwen3-vl:4b-instruct"
 fi
-if [ -z "$EXPLICIT_DEEP" ] && [ "$FRONT_CONTENT_DEEP_VIDEOS" = "8" ]; then
-  echo "Front v26: replacing stale deep visual budget 8 with balanced budget 4."
-  export FRONT_CONTENT_DEEP_VIDEOS="4"
+if [ -z "$EXPLICIT_CONTENT_TIMEOUT" ] && [ "$FRONT_CONTENT_TIMEOUT_MS" = "60000" ]; then
+  echo "Front v26: replacing stale deep visual timeout 60000ms with measured-safe 75000ms."
+  export FRONT_CONTENT_TIMEOUT_MS="75000"
 fi
-if [ -z "$EXPLICIT_SCOUT" ] && [ "$FRONT_CONTENT_SCOUT_VIDEOS" = "4" ]; then
-  echo "Front v26: replacing stale scout visual budget 4 with balanced budget 2."
-  export FRONT_CONTENT_SCOUT_VIDEOS="2"
+if [ -z "$EXPLICIT_DEEP" ] && { [ "$FRONT_CONTENT_DEEP_VIDEOS" = "8" ] || [ "$FRONT_CONTENT_DEEP_VIDEOS" = "4" ]; }; then
+  echo "Front v26: replacing stale deep visual budget $FRONT_CONTENT_DEEP_VIDEOS with reliable budget 2."
+  export FRONT_CONTENT_DEEP_VIDEOS="2"
+fi
+if [ -z "$EXPLICIT_SCOUT" ] && { [ "$FRONT_CONTENT_SCOUT_VIDEOS" = "4" ] || [ "$FRONT_CONTENT_SCOUT_VIDEOS" = "2" ]; }; then
+  echo "Front v26: replacing stale scout visual budget $FRONT_CONTENT_SCOUT_VIDEOS with reliable budget 1."
+  export FRONT_CONTENT_SCOUT_VIDEOS="1"
 fi
 if [ -z "$EXPLICIT_BACKGROUND" ] && [ "$FRONT_CONTENT_BACKGROUND_VIDEOS" = "2" ]; then
   echo "Front v26: replacing stale background visual budget 2 with balanced budget 1."
