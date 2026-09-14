@@ -1,0 +1,57 @@
+{
+  "row": {
+    "id": "x:browser:da1c5ddde798cc66904c72376fe6",
+    "platform": "X",
+    "author": "uchihakneega",
+    "url": "https://x.com/uchihakneega/status/2099135863741637090",
+    "content": "Nigga took a picture like he was at the zoo. 😭🤣😂 He going to show his friends look at this monkey. 😂 White men have the greatest PR firm of all time . It's called women of color LLC",
+    "published": 1789307964000,
+    "views": null,
+    "likes": null,
+    "coverUrl": "https://pbs.twimg.com/amplify_video_thumb/2099120715010347008/img/epb-eHJJmoxYm7kG.jpg",
+    "mediaType": "video",
+    "hashtags": [],
+    "provenance": "Front v26 · X dedicated For You collector",
+    "firstObserved": 1789386249434,
+    "postSubject": "Monkey photo",
+    "postEvent": "white men PR firm joke",
+    "postEntities": [
+      "Nigga",
+      "White",
+      "PR",
+      "LLC"
+    ],
+    "postAction": null,
+    "postObject": null,
+    "postContext": null,
+    "semanticNarrativeKey": "monkey photo white men pr firm joke",
+    "postUnderstandingConfidence": 0.8,
+    "postUnderstandingMethod": "semantic-model",
+    "postUnderstandingVersion": 26
+  },
+  "result": {
+    "analysis": {
+      "summary": "Woman stretches under rock archway while others pass by.",
+      "event": "Woman stretches under archway",
+      "entities": [],
+      "actions": [],
+      "onScreenText": [],
+      "visualMotifs": [],
+      "memePotential": 1,
+      "confidence": 0.95,
+      "uncertainties": [],
+      "provider": "ollama",
+      "model": "qwen3-vl:4b-instruct",
+      "frameCount": 16,
+      "modelFrameCount": 8,
+      "modelImageCount": 1,
+      "duration": 26.966,
+      "captureType": "video-timeline",
+      "captureMs": 5288,
+      "modelMs": 15946,
+      "analyzedAt": 1789386700318,
+      "version": 17
+    },
+    "cached": false
+  }
+}

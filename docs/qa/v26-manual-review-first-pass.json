@@ -1,0 +1,818 @@
+{
+  "scanId": "v26-1789355457168-tj4y9v",
+  "seed": 260913,
+  "reviews": [
+    {
+      "evidence": {
+        "id": "x:browser:46d455888c021d5d1469e81e831f",
+        "platform": "X",
+        "author": "ZentrixHQ",
+        "url": "https://x.com/ZentrixHQ/status/2099005466630140309",
+        "content": "GPT-6 ASTRA DID IN 7 DAYS WHAT SCIENTISTS SPENT 20 YEARS MAPPING. Scientists spent two decades reconstructing the brain of a fruit fly, and now AI has taken that map and turned it into something that actually works. The fly has just 166,700 neurons, packed into a brain roughly Visual summary: A video showcases an AI system using a fruit fly's brain map to enable complex behaviors, such as navigating environments and solving puzzles, in a simulated setting.. Event: AI-driven fruit fly behavior simulation. Entities: fruit fly, AI system. Actions: navigating urban environment, solving puzzle, moving in grid room, displaying brain map, performing complex movements. On-screen text: 0:0s · 2:3.1s · 3:6.1s · 4:9.2s · 5:13.8s · 6:16.8s · 7:19.9s · 8:22.9s · the fly is solving millenium prize problems · 50 Hz. Visual motifs: fruit fly in various simulated environments, brain map interface, grid room, urban street scene, AI control panel",
+        "published": 1789276875000,
+        "views": null,
+        "likes": null,
+        "coverUrl": "https://pbs.twimg.com/amplify_video_thumb/2099005423080583175/img/7Qlza8iXOAxNbv-E.jpg",
+        "mediaType": "video",
+        "hashtags": [],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355466163,
+        "sourceContent": "GPT-6 ASTRA DID IN 7 DAYS WHAT SCIENTISTS SPENT 20 YEARS MAPPING. Scientists spent two decades reconstructing the brain of a fruit fly, and now AI has taken that map and turned it into something that actually works. The fly has just 166,700 neurons, packed into a brain roughly",
+        "contentSummary": "A video showcases an AI system using a fruit fly's brain map to enable complex behaviors, such as navigating environments and solving puzzles, in a simulated setting.",
+        "contentEvent": "AI-driven fruit fly behavior simulation",
+        "contentEntities": [
+          "fruit fly",
+          "AI system"
+        ],
+        "contentActions": [
+          "navigating urban environment",
+          "solving puzzle",
+          "moving in grid room",
+          "displaying brain map",
+          "performing complex movements"
+        ],
+        "onScreenText": [
+          "0:0s",
+          "2:3.1s",
+          "3:6.1s",
+          "4:9.2s",
+          "5:13.8s",
+          "6:16.8s",
+          "7:19.9s",
+          "8:22.9s",
+          "the fly is solving millenium prize problems",
+          "50 Hz"
+        ],
+        "visualMotifs": [
+          "fruit fly in various simulated environments",
+          "brain map interface",
+          "grid room",
+          "urban street scene",
+          "AI control panel"
+        ],
+        "contentConfidence": 0.95,
+        "memePotential": 1,
+        "contentProvider": "ollama",
+        "contentModel": "qwen3-vl:4b-instruct",
+        "contentFrameCount": 16,
+        "contentDuration": 23,
+        "contentAnalyzedAt": 1789355715465,
+        "contentUnderstandingVersion": 17,
+        "contentUnderstanding": {
+          "summary": "A video showcases an AI system using a fruit fly's brain map to enable complex behaviors, such as navigating environments and solving puzzles, in a simulated setting.",
+          "event": "AI-driven fruit fly behavior simulation",
+          "entities": [
+            "fruit fly",
+            "AI system"
+          ],
+          "actions": [
+            "navigating urban environment",
+            "solving puzzle",
+            "moving in grid room",
+            "displaying brain map",
+            "performing complex movements"
+          ],
+          "onScreenText": [
+            "0:0s",
+            "2:3.1s",
+            "3:6.1s",
+            "4:9.2s",
+            "5:13.8s",
+            "6:16.8s",
+            "7:19.9s",
+            "8:22.9s",
+            "the fly is solving millenium prize problems",
+            "50 Hz"
+          ],
+          "visualMotifs": [
+            "fruit fly in various simulated environments",
+            "brain map interface",
+            "grid room",
+            "urban street scene",
+            "AI control panel"
+          ],
+          "memePotential": 1,
+          "confidence": 0.95,
+          "uncertainties": [],
+          "provider": "ollama",
+          "model": "qwen3-vl:4b-instruct",
+          "frameCount": 16,
+          "modelFrameCount": 8,
+          "modelImageCount": 1,
+          "duration": 23,
+          "captureType": "video-timeline",
+          "captureMs": 6119,
+          "modelMs": 54782,
+          "analyzedAt": 1789355715465,
+          "version": 17
+        },
+        "postSubject": "AI fruit fly brain map",
+        "postEvent": "behavior simulation",
+        "postEntities": [
+          "fruit fly",
+          "AI system",
+          "A",
+          "AI"
+        ],
+        "postAction": null,
+        "postObject": null,
+        "postContext": null,
+        "semanticNarrativeKey": "ai fruit fly brain map",
+        "postUnderstandingConfidence": 0.8,
+        "postUnderstandingMethod": "semantic-model",
+        "postUnderstandingVersion": 26
+      },
+      "source": {
+        "url": "https://x.com/ZentrixHQ/status/2099005466630140309",
+        "title": "Zentrix⌚️ on X: \"GPT-6 ASTRA DID IN 7 DAYS WHAT SCIENTISTS SPENT 20 YEARS MAPPING. Scientists spent two decades reconstructing the brain of a fruit fly, and now AI has taken that map and turned it into something that actually works. The fly has just 166,700 neurons, packed into a brain roughly https://t.co/bav7J37znh\" / X",
+        "matchedCard": true,
+        "text": "GPT-6 ASTRA DID IN 7 DAYS WHAT SCIENTISTS SPENT 20 YEARS MAPPING.\n\nScientists spent two decades reconstructing the brain of a fruit fly, and now AI has taken that map and turned it into something that actually works.\n\nThe fly has just 166,700 neurons, packed into a brain roughly the size of a poppy seed, yet its digital counterpart can already generate surprisingly complex behavior, raising an uncomfortable question about how much computation we really need to reproduce intelligence.\n\nMost AI systems learn by consuming enormous datasets and running billions of computations until useful patterns emerge, but this approach takes a completely different path: instead of training a giant model on the world, researchers took the physical wiring of a biological brain and simulated it directly inside a computer.\n\n- No giant dataset.\n- No traditional training.\n- No billions of learned parameters.\n\nThe digital fruit fly reached roughly 91% behavioral accuracy using only four ingredients: the complete neural connectivity map, synaptic connection counts used as connection weights, the classification of neurons as excitatory or inhibitory, and an extremely simple Leaky Integrate-and-Fire neuron model.\n\nThat is the part that should make you stop and think.\n\nThe intelligence was not explicitly programmed into the system; much of the behavior emerged from the structure itself, suggesting that the topology of a biological neural network may encode far more of the brain’s “software” than we previously understood.\n\nA model with fewer parameters than most modern AI systems can already do something remarkable because the fly’s brain has already been shaped by evolution for millions of years.\n\nYour LLM has more parameters than there are flies on Earth.\n\nThe fly already shipped.\n\nAnd if the same idea can scale from 166,700 neurons in a fruit fly to millions in a mouse and eventually toward the roughly 86 billion neurons in a human brain, whole-brain simulation could become one of the most important frontiers in AI.\n\nThis is not the fly becoming human.\n\nThis is you realizing how little you needed",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\nZentrix⌚️\n@ZentrixHQ\nFollow\nGPT-6 ASTRA DID IN 7 DAYS WHAT SCIENTISTS SPENT 20 YEARS MAPPING.\n\nScientists spent two decades reconstructing the brain of a fruit fly, and now AI has taken that map and turned it into something that actually works.\n\nThe fly has just 166,700 neurons, packed into a brain roughly the size of a poppy seed, yet its digital counterpart can already generate surprisingly complex behavior, raising an uncomfortable question about how much computation we really need to reproduce intelligence.\n\nMost AI systems learn by consuming enormous datasets and running billions of computations until useful patterns emerge, but this approach takes a completely different path: instead of training a giant model on the world, researchers took the physical wiring of a biological brain and simulated it directly inside a computer.\n\n- No giant dataset.\n- No traditional training.\n- No billions of learned parameters.\n\nThe digital fruit fly reached roughly 91% behavioral accuracy using only four ingredients: the complete neural connectivity map, synaptic connection counts used as c"
+      }
+    },
+    {
+      "evidence": {
+        "id": "x:browser:ced87e376133e6a6ea5140102cc9",
+        "platform": "X",
+        "author": "slvppy",
+        "url": "https://x.com/slvppy/status/2099217418338152700",
+        "content": "Roobet looks so clean on the new iPhone Duo 🔥 Double the screen = Double the action",
+        "published": 1789327408000,
+        "views": null,
+        "likes": null,
+        "coverUrl": "https://pbs.twimg.com/amplify_video_thumb/2098438280966766592/img/QKgOkPJm15olQKDn.jpg",
+        "mediaType": "video",
+        "hashtags": [],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355474654
+      },
+      "source": {
+        "url": "https://x.com/slvppy/status/2099217418338152700",
+        "title": "$𝔩𝔞𝔭☃️ on X: \"Roobet looks so clean on the new iPhone Duo 🔥\" / X",
+        "matchedCard": true,
+        "text": "Roobet looks so clean on the new iPhone Duo 🔥 Double the screen = Double the action",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\n$𝔩𝔞𝔭☃️\n@slvppy\nRoobet looks so clean on the new iPhone Duo 🔥\nQuote\nRoobet\n@Roobet\n·\nSep 11\nDouble the screen = Double the action\n0:03\n Paid partnership\n3:23 PM · Sep 13, 2026\n·\n11.4K\n Views\n4\n52\n2\nRelevant\nPost your reply\n\n\nReply\n༒\n@OGZAZZAH\n·\n7h\nLooks better while taking my money\nNo shit\nGIF\n22"
+      }
+    },
+    {
+      "evidence": {
+        "id": "x:browser:13c12bf391f0f43d542856840ce5",
+        "platform": "X",
+        "author": "chibarbi",
+        "url": "https://x.com/chibarbi/status/2098994293633384521",
+        "content": "I hate Ai",
+        "published": 1789274211000,
+        "views": null,
+        "likes": null,
+        "coverUrl": "https://pbs.twimg.com/media/HSEgLvQbAAA3rFk?format=jpg&name=900x900",
+        "mediaType": "image",
+        "hashtags": [],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355517140
+      },
+      "source": {
+        "url": "https://x.com/chibarbi/status/2098994293633384521",
+        "title": "🎈 on X: \"I hate Ai https://t.co/8MeOlhMZF5\" / X",
+        "matchedCard": true,
+        "text": "I hate Ai",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\n🎈\n@chibarbi\nFollow\nI hate Ai\n12:36 AM · Sep 13, 2026\n·\n1.2M\n Views\n369\n3.6K\n58K\n2.4K\nRelevant\nView quotes\nPost your reply\n\n\nReply"
+      }
+    },
+    {
+      "evidence": {
+        "id": "x:browser:1bf9232cfabef74514e1745a8633",
+        "platform": "X",
+        "author": "akzwhomatter",
+        "url": "https://x.com/akzwhomatter/status/2099242333934108785",
+        "content": "Quickest get back of all time 😭😭 Chicago Ave & Spaulding #MASS #SHOOTING 7 PPL SHOT 💥💥 Chicago Police are on scene of a #Mass #Shooting that left at least 7 ppl shot, 1 person was hit by a car. #CheckOnYallPeople 🙏🏾 MORE UPDATES SOON‼️‼️‼️",
+        "published": 1789333349000,
+        "views": null,
+        "likes": null,
+        "coverUrl": "https://pbs.twimg.com/media/HSHq8VnbwAE-wvZ?format=jpg&name=small",
+        "mediaType": "image",
+        "hashtags": [
+          "MASS",
+          "SHOOTING",
+          "CheckOnYallPeople"
+        ],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355477077,
+        "postSubject": "Chicago Ave & Spaulding shooting",
+        "postEvent": "Mass shooting incident",
+        "postEntities": [
+          "Quickest",
+          "Chicago Ave",
+          "Spaulding",
+          "MASS",
+          "SHOOTING",
+          "PPL SHOT",
+          "Chicago Police",
+          "Mass",
+          "Shooting",
+          "CheckOnYallPeople"
+        ],
+        "postAction": null,
+        "postObject": null,
+        "postContext": null,
+        "semanticNarrativeKey": "chicago ave spaulding shooting",
+        "postUnderstandingConfidence": 0.9,
+        "postUnderstandingMethod": "semantic-model",
+        "postUnderstandingVersion": 26
+      },
+      "source": {
+        "url": "https://x.com/akzwhomatter/status/2099242333934108785",
+        "title": "AkzWhoMatter on X: \"Quickest get back of all time 😭😭\" / X",
+        "matchedCard": false,
+        "text": "",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\nAkzWhoMatter\n@akzwhomatter\nFollow\nQuickest get back of all time 😭😭\nQuote\nChitown_Crime_Chasers\n@CCC_CrimeChaser\n·\n7h\nChicago Ave & Spaulding #MASS #SHOOTING \n7 PPL SHOT 💥💥\n\nChicago Police are on scene of a #Mass #Shooting that left at least 7 ppl shot, 1 person was hit by a car. \n#CheckOnYallPeople 🙏🏾\n\nMORE UPDATES SOON‼️‼️‼️\nLast edited\n5:02 PM · Sep 13, 2026\n·\n985.4K\n Views\n79\n455\n8.1K\n1.1K\nRelevant\nView quotes\nPost your reply\n\n\nReply\nPlutoboyygs\n@Longlivepluto4\n·\n2m\nNo we got the quickest of all time an actual fatalities\n43\nWilson\n@yunnnnsh\n·\n5h\nNaw this  quickest nigga crashout out immediately literally\n12\n16\n413\n45K"
+      }
+    },
+    {
+      "evidence": {
+        "id": "x:browser:ee409904bd131beefa2b89975935",
+        "platform": "X",
+        "author": "chongdashu",
+        "url": "https://x.com/chongdashu/status/2099140864589402585",
+        "content": "Remember that toy you played as a kid - slide a ring from one end without touching the wire? I made a cute robot inspired version of it for fun. My workflow: > Mockups with GPT Images 2.5 > Implemented with GPT 6 Astra > Blender MCP for models > Wasm + WebGPU for browser",
+        "published": 1789309156000,
+        "views": null,
+        "likes": null,
+        "coverUrl": "https://pbs.twimg.com/amplify_video_thumb/2099140507415019521/img/xTC1beKkJp8AX1vH.jpg",
+        "mediaType": "video",
+        "hashtags": [],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355471016,
+        "postSubject": "robot ring slide toy",
+        "postEvent": "GPT and Blender implementation",
+        "postEntities": [
+          "Remember",
+          "My",
+          "Mockups",
+          "GPT Images",
+          "Implemented",
+          "GPT",
+          "Astra",
+          "Blender MCP",
+          "Wasm",
+          "WebGPU"
+        ],
+        "postAction": null,
+        "postObject": null,
+        "postContext": null,
+        "semanticNarrativeKey": "robot ring slide toy build",
+        "postUnderstandingConfidence": 0.7,
+        "postUnderstandingMethod": "semantic-model",
+        "postUnderstandingVersion": 26
+      },
+      "source": {
+        "url": "https://x.com/chongdashu/status/2099140864589402585",
+        "title": "Chong-U on X: \"Remember that toy you played as a kid - slide a ring from one end without touching the wire? I made a cute robot inspired version of it for fun. My workflow: &gt; Mockups with GPT Images 2.5 &gt; Implemented with GPT 6 Astra &gt; Blender MCP for models &gt; Wasm + WebGPU for browser https://t.co/EVdLRDIpDq\" / X",
+        "matchedCard": true,
+        "text": "Remember that toy you played as a kid - slide a ring from one end without touching the wire?\n\nI made a cute robot inspired version of it for fun.\n\nMy workflow:\n> Mockups with GPT Images 2.5\n> Implemented with GPT 6 Astra \n> Blender MCP for models\n> Wasm + WebGPU for browser \n\nIdea to playable in less than a day.",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\nChong-U\n@chongdashu\nFollow\nRemember that toy you played as a kid - slide a ring from one end without touching the wire?\n\nI made a cute robot inspired version of it for fun.\n\nMy workflow:\n> Mockups with GPT Images 2.5\n> Implemented with GPT 6 Astra \n> Blender MCP for models\n> Wasm + WebGPU for browser \n\nIdea to playable in less than a day.\n10:19 AM · Sep 13, 2026\n·\n3,722\n Views\n8\n6\n62\n40\nRelevant\nView quotes\nPost your reply\n\n\nReply\nTony\n@EnvolDev\n·\n6h\nThe little robot gives this so much character. Going from those mockups to something playable in a day is the kind of AI building I love seeing.\n20"
+      }
+    },
+    {
+      "evidence": {
+        "id": "x:browser:b5938206182d9d6abe7e1b04028e",
+        "platform": "X",
+        "author": "dryxio2",
+        "url": "https://x.com/dryxio2/status/2099285330025181251",
+        "content": "rocket league ported to gta san andreas (2004)",
+        "published": 1789343600000,
+        "views": null,
+        "likes": null,
+        "coverUrl": "https://pbs.twimg.com/amplify_video_thumb/2099284896426643456/img/4YGPGeRyLicpN1fC.jpg",
+        "mediaType": "video",
+        "hashtags": [],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355495322
+      },
+      "source": {
+        "url": "https://x.com/dryxio2/status/2099285330025181251",
+        "title": "DRYXIO on X: \"rocket league ported to gta san andreas (2004) https://t.co/89rq6rzYYy\" / X",
+        "matchedCard": true,
+        "text": "rocket league ported to gta san andreas (2004)",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\nDRYXIO\n@dryxio2\nFollow\nrocket league ported to gta san andreas (2004)\n2:13\n7:53 PM · Sep 13, 2026\n·\n32.3K\n Views\n14\n104\n1.2K\n208\nRelevant\nView quotes\nPost your reply\n\n\nReply\nDRYXIO\n@dryxio2\n·\n3h\nyoutube.com\nrocket league ported to gta san andreas (2004)\n15\n1.3K\nDRYXIO\n@dryxio2\n·\n2h\nTranslated from French\nShow original\n@ImaginaXion_RL\n I found a disc that's half GTA half RL 😭\n1\n839"
+      }
+    },
+    {
+      "evidence": {
+        "id": "x:browser:e73037cbe95f1299f38de987c08b",
+        "platform": "X",
+        "author": "AfricanArchives",
+        "url": "https://x.com/AfricanArchives/status/2099244503869595653",
+        "content": "Beautiful black women women from the Victorian era.",
+        "published": 1789333866000,
+        "views": null,
+        "likes": null,
+        "coverUrl": "https://pbs.twimg.com/media/HSIDwEEa0AAqTYx?format=jpg&name=360x360",
+        "mediaType": "image",
+        "hashtags": [],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355515929
+      },
+      "source": {
+        "url": "https://x.com/AfricanArchives/status/2099244503869595653",
+        "title": "AFRICAN & BLACK HISTORY on X: \"Beautiful black women women from the Victorian era. https://t.co/BXz1TC9Kyw\" / X",
+        "matchedCard": true,
+        "text": "Beautiful black women women from the Victorian era.",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\nAFRICAN & BLACK HISTORY\n@AfricanArchives\nSubscribe\nBeautiful black women women from the Victorian era.\n5:11 PM · Sep 13, 2026\n·\n16.2K\n Views\n3\n96\n701\n35\nRelevant\nView quotes\nPost your reply\n\n\nReply\nRockyBird\n@rockybird23\n·\n28m\n🥰🥰🥰\n9\nBooregarde M.F'n. Sheet\n@DesiresRavish\n·\n2h\nI can put lipstick on a pig. It doesn't mean the pig is pretty.\n27"
+      }
+    },
+    {
+      "evidence": {
+        "id": "x:browser:9e44baa7c4fe3249b3d27732760b",
+        "platform": "X",
+        "author": "Theselfcareking",
+        "url": "https://x.com/Theselfcareking/status/2099195147313439213",
+        "content": "Why are we wasting time with Deshaun Watson?",
+        "published": 1789322098000,
+        "views": null,
+        "likes": null,
+        "coverUrl": null,
+        "mediaType": "text",
+        "hashtags": [],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355512298
+      },
+      "source": {
+        "url": "https://x.com/Theselfcareking/status/2099195147313439213",
+        "title": "Kenneth. J on X: \"Why are we wasting time with Deshaun Watson?\" / X",
+        "matchedCard": true,
+        "text": "Why are we wasting time with Deshaun Watson?",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\nKenneth. J\n@Theselfcareking\nWhy are we wasting time with Deshaun Watson?\n1:54 PM · Sep 13, 2026\n·\n829\n Views\n4\nPost your reply\n\n\nReply\nDiscover more\nSourced from across X\nKenneth. J\n@Theselfcareking\n·\n3h\nOne of my motivations to stay fit for as long as i physically can. It’s fine ass women like this out who are in their 50’s and 60’s. I’m not trying to be out here looking crazy\nQuote\nPure Sitcoms\n@PureSitcoms\n·\n5h\nRegina Hall is one the most consistent actresses in the game. Comedy, drama, ensembles… she just shows up. 🖤\n3\n23\n2.8K"
+      }
+    },
+    {
+      "evidence": {
+        "id": "x:browser:65b5f15d0ae3eaa2e327e1ca4916",
+        "platform": "X",
+        "author": "0x0SojalSec",
+        "url": "https://x.com/0x0SojalSec/status/2099164779713900781",
+        "content": "Google mapped every neuron in a male fruit fly. 166,000 neurons, Millions of synapses playing Subway Surfers Real dopamine, of trial and error. For the first time, scientists have mapped the complete brain and central nervous system of an adult male fruit fly — a key model organism in science. 🪰 Working alongside HHMI Janelia Research Campus and the scientific community, @GoogleResearch scientists and researchers used Visual summary: A video shows a Subway Surfers game where a fruit fly character navigates a track, with the game's visual style and mechanics being used to represent the mapping of a fruit fly's brain.. Event: Fruit fly character navigating Subway Surfers track. Entities: fruit fly, Subway Surfers game character, Google Research. Actions: navigating track, jumping over obstacles, collecting coins, avoiding enemies. On-screen text: 0:0.0s · 2:2.9s · 3:4.3s · 5:10.0s · 6:12.9s · 7:14.3s · 8:17.1s. Visual motifs: Subway Surfers game interface, fruit fly character, neural network visualization overlay, neuron mapping graphics",
+        "published": 1789314858000,
+        "views": null,
+        "likes": null,
+        "coverUrl": "https://pbs.twimg.com/amplify_video_thumb/2099164703918546945/img/84PlLN2nbIkkB9lI.jpg",
+        "mediaType": "video",
+        "hashtags": [],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355460075,
+        "sourceContent": "Google mapped every neuron in a male fruit fly. 166,000 neurons, Millions of synapses playing Subway Surfers Real dopamine, of trial and error. For the first time, scientists have mapped the complete brain and central nervous system of an adult male fruit fly — a key model organism in science. 🪰 Working alongside HHMI Janelia Research Campus and the scientific community, @GoogleResearch scientists and researchers used",
+        "contentSummary": "A video shows a Subway Surfers game where a fruit fly character navigates a track, with the game's visual style and mechanics being used to represent the mapping of a fruit fly's brain.",
+        "contentEvent": "Fruit fly character navigating Subway Surfers track",
+        "contentEntities": [
+          "fruit fly",
+          "Subway Surfers game character",
+          "Google Research"
+        ],
+        "contentActions": [
+          "navigating track",
+          "jumping over obstacles",
+          "collecting coins",
+          "avoiding enemies"
+        ],
+        "onScreenText": [
+          "0:0.0s",
+          "2:2.9s",
+          "3:4.3s",
+          "5:10.0s",
+          "6:12.9s",
+          "7:14.3s",
+          "8:17.1s"
+        ],
+        "visualMotifs": [
+          "Subway Surfers game interface",
+          "fruit fly character",
+          "neural network visualization overlay",
+          "neuron mapping graphics"
+        ],
+        "contentConfidence": 0.95,
+        "memePotential": 1,
+        "contentProvider": "ollama",
+        "contentModel": "qwen3-vl:4b-instruct",
+        "contentFrameCount": 13,
+        "contentDuration": 17.2,
+        "contentAnalyzedAt": 1789355654554,
+        "contentUnderstandingVersion": 17,
+        "contentUnderstanding": {
+          "summary": "A video shows a Subway Surfers game where a fruit fly character navigates a track, with the game's visual style and mechanics being used to represent the mapping of a fruit fly's brain.",
+          "event": "Fruit fly character navigating Subway Surfers track",
+          "entities": [
+            "fruit fly",
+            "Subway Surfers game character",
+            "Google Research"
+          ],
+          "actions": [
+            "navigating track",
+            "jumping over obstacles",
+            "collecting coins",
+            "avoiding enemies"
+          ],
+          "onScreenText": [
+            "0:0.0s",
+            "2:2.9s",
+            "3:4.3s",
+            "5:10.0s",
+            "6:12.9s",
+            "7:14.3s",
+            "8:17.1s"
+          ],
+          "visualMotifs": [
+            "Subway Surfers game interface",
+            "fruit fly character",
+            "neural network visualization overlay",
+            "neuron mapping graphics"
+          ],
+          "memePotential": 1,
+          "confidence": 0.95,
+          "uncertainties": [],
+          "provider": "ollama",
+          "model": "qwen3-vl:4b-instruct",
+          "frameCount": 13,
+          "modelFrameCount": 8,
+          "modelImageCount": 1,
+          "duration": 17.2,
+          "captureType": "video-timeline",
+          "captureMs": 4054,
+          "modelMs": 61795,
+          "analyzedAt": 1789355654554,
+          "version": 17
+        },
+        "postSubject": "Google fruit fly brain map",
+        "postEvent": "Subway Surfers game visualization",
+        "postEntities": [
+          "fruit fly",
+          "Subway Surfers game character",
+          "Google Research",
+          "A",
+          "Subway Surfers"
+        ],
+        "postAction": null,
+        "postObject": null,
+        "postContext": null,
+        "semanticNarrativeKey": "google fruit fly brain map",
+        "postUnderstandingConfidence": 0.9,
+        "postUnderstandingMethod": "semantic-model",
+        "postUnderstandingVersion": 26
+      },
+      "source": {
+        "url": "https://x.com/0x0SojalSec/status/2099164779713900781",
+        "title": "Md Ismail Šojal 🕷️ on X: \"Google mapped every neuron in a male fruit fly. 166,000 neurons, Millions of synapses playing Subway Surfers Real dopamine, of trial and error. https://t.co/OR1wl2d3fJ\" / X",
+        "matchedCard": true,
+        "text": "Google mapped every neuron in a male fruit fly.\n166,000 neurons, Millions of synapses playing Subway Surfers\n\nReal dopamine, of trial and error. For the first time, scientists have mapped the complete brain and central nervous system of an adult male fruit fly — a key model organism in science. 🪰\n\nWorking alongside HHMI Janelia Research Campus and the scientific community, @GoogleResearch scientists and researchers used",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\nMd Ismail Šojal 🕷️\n@0x0SojalSec\nFollow\nGoogle mapped every neuron in a male fruit fly.\n166,000 neurons, Millions of synapses playing Subway Surfers\n\nReal dopamine, of trial and error.\nQuote\nNews from Google\n@NewsFromGoogle\n·\nSep 3\nFor the first time, scientists have mapped the complete brain and central nervous system of an adult male fruit fly — a key model organism in science. 🪰\n\nWorking alongside HHMI Janelia Research Campus and the scientific community, @GoogleResearch scientists and researchers used\nALT\nALT\n11:54 AM · Sep 13, 2026\n·\n6,152\n Views\n2\n10\n74\n27\nRelevant\nPost your reply\n\n\nReply"
+      }
+    },
+    {
+      "evidence": {
+        "id": "x:browser:ae58ed36ce532f215587f9f48cc5",
+        "platform": "X",
+        "author": "BoredElonMusk",
+        "url": "https://x.com/BoredElonMusk/status/2099140885313372415",
+        "content": "See this is why I love Rory. Every single printer I have owned announces that the \"printer is out of paper\". Not \"you're down to the last 15 pages.... you might like to think of restocking the printer.\" Suggesting that the people who work for HP and Brother are a bigger bunch of stoners than the people who",
+        "published": 1789309161000,
+        "views": null,
+        "likes": null,
+        "coverUrl": null,
+        "mediaType": "text",
+        "hashtags": [],
+        "provenance": "Front v26 · X dedicated For You collector",
+        "firstObserved": 1789355503805,
+        "postSubject": "Printer manufacturers",
+        "postEvent": "HP Brother printer complaints",
+        "postEntities": [
+          "See",
+          "Rory",
+          "Every",
+          "Not",
+          "Suggesting",
+          "HP",
+          "Brother"
+        ],
+        "postAction": null,
+        "postObject": null,
+        "postContext": null,
+        "semanticNarrativeKey": "hp brother printer complaints",
+        "postUnderstandingConfidence": 0.8,
+        "postUnderstandingMethod": "semantic-model",
+        "postUnderstandingVersion": 26
+      },
+      "source": {
+        "url": "https://x.com/BoredElonMusk/status/2099140885313372415",
+        "title": "BORED on X: \"See this is why I love Rory.\" / X",
+        "matchedCard": true,
+        "text": "See this is why I love Rory. Every single printer I have owned announces that the \"printer is out of paper\". Not \"you're down to the last 15 pages.... you might like to think of restocking the printer.\"\n\nSuggesting that the people who work for HP and Brother are a bigger bunch of stoners than the people who",
+        "bodyExcerpt": "To view keyboard shortcuts, press question mark\nView keyboard shortcuts\n8\nPost\nSee new posts\nConversation\nBORED\n@BoredElonMusk\nSee this is why I love Rory.\nQuote\nRory Sutherland\n@rorysutherland\n·\nSep 12\nEvery single printer I have owned announces that the \"printer is out of paper\". Not \"you're down to the last 15 pages.... you might like to think of restocking the printer.\"\n\nSuggesting that the people who work for HP and Brother are a bigger bunch of stoners than the people who\n10:19 AM · Sep 13, 2026\n·\n30K\n Views\n1\n18\nPost your reply\n\n\nReply\nJeff | Sponsorship dude\n@sponsorhype\n·\n4h\nSimilar thing I’ve always wanted\n\nWhen I put in the wrong password on website, remind me what the requirements were (numbers / symbols / etc)\n2"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7675266319528348958",
+        "platform": "TikTok",
+        "author": "new.new1190",
+        "url": "https://www.tiktok.com/@new.new1190/video/7675266319528348958",
+        "content": "#tiktokgrowthchallenge#fyp#foryou#shorts#funnyvideo",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p16-common-sign.tiktokcdn-us.com/tos-useast8-p-0068-tx2/oQ7iEAfQAqCrkIIVKCLeICAAxBVbwfItjEGaI1~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=WzlFyseI2Ret%2BPb7hsu1SM57ItU%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355541408,
+        "lastObserved": 1789355543961
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@new.new1190/video/7675266319528348958",
+        "title": "#tiktokgrowthchallenge#fyp#foryou#shorts#funnyvideo | Funny Videos | TikTok",
+        "matchedCard": true,
+        "text": "#tiktokgrowthchallenge#fyp#foryou#shorts#funnyvideo",
+        "bodyExcerpt": "TikTok\n\n17\n\nNew New\n\n· 8-18\n\n#tiktokgrowthchallenge\n\n#fyp\n\n#foryou\n\n#shorts\n\n#funnyvideo\n\nmore\n\n00:04 / 00:07\n\n392.8K\n3949\n33.5K\n129.2K\n\nNew New\n\n· 8-20\n\n#tiktokgrowthchallenge\n\n#fyp\n\n#foryou\n\n#shorts\n\n#funnyvideo\n\nmore\n\n00:00 / 00:00\n\n140\n1\n4\n7"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7683757294689078559",
+        "platform": "TikTok",
+        "author": "fun.vibe5",
+        "url": "https://www.tiktok.com/@fun.vibe5/video/7683757294689078559",
+        "content": "#BalliBotMogis #TrendingReels #TrendingReels #Foryoupage ##FYP #FYP #ViralTikTok #MillionViews #TechMagic #SmartBot #AITrend #RobotVibes# #Innovation",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p16-common-sign.tiktokcdn-us.com/tos-useast8-p-0068-tx2/okJiiQOUAh0IAIgJ1gIOEtiyCGiiqRfMAsBRB9~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=jL6sfEM2L%2FnhOEOG9kluot2O%2BMU%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355538002,
+        "lastObserved": 1789355538002
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@fun.vibe5/video/7683757294689078559",
+        "title": "BalliBot Mogis Robot Overview: Smart Bot Tech Trend | TikTok",
+        "matchedCard": true,
+        "text": "#BalliBotMogis #TrendingReels #TrendingReels #Foryoupage ##FYP #FYP #ViralTikTok #MillionViews #TechMagic #SmartBot #AITrend #RobotVibes#  #Innovation",
+        "bodyExcerpt": "TikTok\n\n17\n\nFun Vibe\n\n· 3d ago\n\n#BalliBotMogis\n\n \n\n#TrendingReels\n\n \n\n#TrendingReels\n\n \n\n#Foryoupage\n\n #\n\n#FYP\n\n \n\n#FYP\n\n \n\n#ViralTikTok\n\n \n\n#MillionViews\n\n \n\n#TechMagic\n\n \n\n#SmartBot\n\n \n\n#AITrend\n\n \n\n#RobotVibes\n\n#  \n\n#Innovation\n\nmore\n\n00:01 / 00:05\n\n217\n4\n46\n12\n\nFun Vibe\n\n· 1d ago\n\n#BalliBotMogis\n\n \n\n#TrendingReels\n\n \n\n#TrendingReels\n\n \n\n#Foryoupage\n\n #\n\n#FYP\n\n \n\n#FYP\n\n \n\n#ViralTikTok\n\n \n\n#MillionViews\n\n \n\n#TechMagic\n\n \n\n#SmartBot\n\n \n\n#AITrend\n\n \n\n#RobotVibes\n\n#  \n\n#Innovation\n\nmore\n\n00:00 / 00:00\n\n4\n0\n2\nShare"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7683988525959662862",
+        "platform": "TikTok",
+        "author": "dirthavinn352_",
+        "url": "https://www.tiktok.com/@dirthavinn352_/video/7683988525959662862",
+        "content": "😭😭😭😭#fyp #viralvideo #blowthisup #explorepage",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p19-common-sign.tiktokcdn-us.com/tos-useast5-p-0068-tx/oUAEBuAtgiIumd3jyaBd4UvCcE2qAMcmBiuIE~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=0vylAzlsL4S0XOwoRFo2CEoVhnM%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355556773,
+        "lastObserved": 1789355558474
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@dirthavinn352_/video/7683988525959662862",
+        "title": "😭😭😭😭#fyp #viralvideo #blowthisup #explorepage | cop pulls over cop on bike | TikTok",
+        "matchedCard": true,
+        "text": "😭😭😭😭#fyp #viralvideo #blowthisup #explorepage ",
+        "bodyExcerpt": "TikTok\n\n17\n\ndirthavinn352_\n\n· 3d ago\n😭😭😭😭\n\n#fyp\n\n \n\n#viralvideo\n\n \n\n#blowthisup\n\n \n\n#explorepage\n\n \nmore\n\noriginal sound - dirthavinn352_\n\n00:01 / 00:19\n\n10.7K\n260\n938\n6957\n\ndirthavinn352_\n\n· 8-21\n😂😂😂😭\n\n#fyp\n\n \n\n#blowthisup\n\n \n\n#viralvideo\n\n \n\n#explorepage\n\nmore\n\n00:00 / 00:00\n\n79\n0\n4\n5\nCaptions\nShow captions (unavailable)\nSpeech not recognized\nAlways translate posts\nDescriptions and captions will be translated, except for languages you've excluded.\nDo not translate\nSelect language\nTranslate into\nEnglish"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7685132281656184096",
+        "platform": "TikTok",
+        "author": "true.that872",
+        "url": "https://www.tiktok.com/@true.that872/video/7685132281656184096",
+        "content": "The Lonely Stage is Where You Find Yourself #datingadvice #attractlove #thelawofrhythm #thelawofattraction #divinemasculine",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p16-common-sign.tiktokcdn-us.com/tos-useast2a-p-0037-euttp/osiVDnPeQ3xXyeEAng5gTw2WjWegMGCrI8wgzM~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=aYdexeYPIr%2BJ47%2BUCaTrRQ00YFw%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355538002,
+        "lastObserved": 1789355538002
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@true.that872/video/7685132281656184096",
+        "title": "The Lonely Stage is Where You Find Yourself #datingadvice #attractlove... | the law of attraction | TikTok",
+        "matchedCard": true,
+        "text": "The Lonely Stage is Where You Find Yourself #datingadvice #attractlove #thelawofrhythm #thelawofattraction #divinemasculine ",
+        "bodyExcerpt": "TikTok\n\n17\n\nTrue That\n\n· 5h ago\nThe Lonely Stage is Where You Find Yourself \n\n#datingadvice\n\n \n\n#attractlove\n\n \n\n#thelawofrhythm\n\n \n\n#thelawofattraction\n\n \n\n#divinemasculine\n\n \nmore\n\n00:01 / 04:30\n\n42\n0\n11\n1\n\nTrue That\n\n· 8-12\nYou Don’t Need Motivation. You Need Discipline. \n\n#thelawofrhythm\n\n \n\n#attractlove\n\n \n\n#selfimprovement\n\n \n\n#divinemasculine\n\n \n\n#datingadvice\n\n \nmore\n\n00:00 / 00:00\n\n124\n0\n23\n2"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7684424665749638414",
+        "platform": "TikTok",
+        "author": "mr.riley614",
+        "url": "https://www.tiktok.com/@mr.riley614/video/7684424665749638414",
+        "content": "YO SKINBONE WHEN IM GOING THROUGH IT I JUST WACTH YOUR CONTENT!!!!🤣🤣🤣.#viral #fyp #viraltiktok #fyp #xyzbca @SkinBone",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p16-common-sign.tiktokcdn-us.com/tos-useast5-p-0068-tx/oE87SASDqBjlYMJFEtzITAIfEDhkfpMgiRI6yW~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=dpyNfkrZcGtEMaWOixsfsG2VI10%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355583167,
+        "lastObserved": 1789355583167
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@mr.riley614/video/7684424665749638414",
+        "title": "TikTok - Make Your Day",
+        "matchedCard": true,
+        "text": "",
+        "bodyExcerpt": "TikTok"
+      },
+      "followUp": {
+        "url": "https://www.tiktok.com/@mr.riley614/video/7684424665749638414",
+        "title": "YO SKINBONE WHEN IM GOING THROUGH IT I JUST WACTH YOUR CONTENT!!!!🤣🤣... | skinbone dance | TikTok",
+        "captions": [
+          "YO SKINBONE WHEN IM GOING THROUGH IT I JUST WACTH YOUR CONTENT!!!!🤣🤣🤣.#viral #fyp #viraltiktok #fyp #xyzbca @SkinBone ",
+          "Without a doubt nipsey always went crazy on every verse!#fyp #viral #viralvideo #westcoast "
+        ],
+        "body": "TikTok\n\n17\n\nChicago\n\nKing Riley\n\n· 2d ago\nYO SKINBONE WHEN IM GOING THROUGH IT I JUST WACTH YOUR CONTENT!!!!🤣🤣🤣.\n\n#viral\n\n \n\n#fyp\n\n \n\n#viraltiktok\n\n \n\n#fyp\n\n \n\n#xyzbca\n\n \n\n@SkinBone\n\n \nmore\n\n00:01 / 00:10\n\n110.9K\n2585\n14.4K\n31.5K\n\nKing Riley\n\n· 7-16\nWithout a doubt nipsey always went crazy on every verse!\n\n#fyp\n\n \n\n#viral\n\n \n\n#viralvideo\n\n \n\n#westcoast\n\n \nmore\n\n00:00 / 00:00\n\n154\n7\n33\n31\nComments\nYou may like\nWithout a doubt nipsey always went crazy on every verse!#fyp #viral #viralvideo #westcoast\nKing Riley\n154\n·\n7-16\nMOTIVATED !!!!🏁🏁💯#viral #fyp #viraltiktok #xyzbca #hiphop\nKing Riley\n39\n·\n6d ago\nTHE LEGENDS RESPECTED NIPSEY !!! #viral #fyp #xyzbca #viralvideo #trending @NipseyHussle\nKing Riley\n4013\n·\n8-17\nPAC IS LEGENDARY❤️❤️#viral #fyp #xyzbca #viralvideo #2pac\nKing Riley\n104\n·\n8-22\nThere will be never be another Nipsey Hussle !🏁❤️🏁💯🏁#hiphopmusic #rapper #viral #viralvideo #fyp @NipseyHussle\nKing Riley\n916\n·\n7-20\n[Magic Tiles 3] TRILLIUM HARDTEKK 1000% Vibing!!👌👌👌 #magictiles3 #viral #vibing\nkit\n502.4K\n·\n9-1\nالشعراني\n41.4K\n·\n5d ago\nПочему тренд не работает\nПродюсер Стримеров\n288.4K\n·\n9-2\n#ጫጩቷ🐣🦋የvዋnegest💫👸🎀 #💯🥀💯😔🤌💢fypシ゚viral💖tiktokfyp #fyppppppppppppppppppppppp\nትንሿ🌸~ ye v 🐻ምርኮኛ 🎀🥺\n1.3M\n·\n4d ago\nБуквальное самое позорное и НЕОЖИДАННОЕ знакомство в жизни 😭😭 не знаю, как я не убежала…\nДи про недвижимость\n185K\n·\n9-1\n❤️‍🔥 #BELINDA #MENTIRAS x 300 #LideresMexicanos #quemadrazo #celebritynews @madrazooscar\nOscar Madrazo\n144K\n·\n4d ago\n😭😭#fy #sarawaktiktok #fyp #ibansarawak #CapCut\nAben\n667K\n·\n8-27\n#novios #amor #pareja #viral\nla factoría 💭\n251.5K\n·\n9-5\nWhen you have an annoying sibling.. #animal #catlover #catlovers #kucing #kitten #cute #cat #kucingtiktok #catsoftiktok #fyppppppppppppppppppppppp #fypシ #animals\nnarzzlockon\n657.7K\n·\n9-5\nMic"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7685168129013468429",
+        "platform": "TikTok",
+        "author": "callmeclipssss",
+        "url": "https://www.tiktok.com/@callmeclipssss/video/7685168129013468429",
+        "content": "Q50 car getting picked up and photo of him in car after the incident#fyp #viral #q50 #rapper #yn",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p19-common-sign.tiktokcdn-us.com/tos-useast5-p-0068-tx/oc8RBeMnlAaGGO3IAfVIABFIMOnLIqgfqIet6O~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=S4gySz%2FL%2BxCob1T8PHomBXPqLjA%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355536301,
+        "lastObserved": 1789355537150
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@callmeclipssss/video/7685168129013468429",
+        "title": "Q50 car getting picked up and photo of him in car after the incident#f... | q50 car video footage | TikTok",
+        "matchedCard": true,
+        "text": "Q50 car getting picked up and photo of him in car after the incident#fyp #viral #q50 #rapper #yn",
+        "bodyExcerpt": "TikTok\n\n17\n\ncallmeclips\n\n· 3h ago\nQ50 car getting picked up and photo of him in car after the incident\n\n#fyp\n\n \n\n#viral\n\n \n\n#q50\n\n \n\n#rapper\n\n \n\n#yn\n\nmore\n\n00:01 / 00:17\n\n1074\n24\n265\n254\n\ncallmeclips\n\n· 8-9\nWhy ghost do them like that \n\n#fyp\n\n \n\n#viral\n\n \n\n#funny\n\n \n\n#foryoupage\n\n \n\n#djghost\n\n \nmore\n\n00:00 / 00:00\n\n74\n1\n4\n1"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7674807656728579358",
+        "platform": "TikTok",
+        "author": "walkwithye",
+        "url": "https://www.tiktok.com/@walkwithye/video/7674807656728579358",
+        "content": "Don’t disrespect yourself #thebookofye #philosophy #breakup #disrespecful #relationships",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p16-common-sign.tiktokcdn-us.com/tos-useast8-p-0068-tx2/ooPlIcimy2qxJnjCiABAIJQ8IU1AZAqCiTiIf8~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=6Wl%2BgEqrbvtkvz89UVDqL0Y26xo%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355566136,
+        "lastObserved": 1789355566984
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@walkwithye/video/7674807656728579358",
+        "title": "TikTok - Make Your Day",
+        "matchedCard": true,
+        "text": "",
+        "bodyExcerpt": ""
+      },
+      "followUp": {
+        "url": "https://www.tiktok.com/@walkwithye/video/7674807656728579358",
+        "title": "Don’t disrespect yourself #thebookofye #philosophy #breakup #disrespec... | psychology in relationship | TikTok",
+        "captions": [
+          "Don’t disrespect yourself #thebookofye #philosophy #breakup #disrespecful #relationships ",
+          "The game #thebookofye #philosophy #dms #dating #thankyou "
+        ],
+        "body": "TikTok\n\n17\n\nCapCut · Editing made easy\n\nthebookofye\n\n· 8-16\nDon’t disrespect yourself \n\n#thebookofye\n\n \n\n#philosophy\n\n \n\n#breakup\n\n \n\n#disrespecful\n\n \n\n#relationships\n\n \nmore\n\n00:00 / 06:03\n\nLike\nComments\nFavorites\nShare\n\nCapCut · Editing made easy\n\nthebookofye\n\n· 1d ago\nThe game \n\n#thebookofye\n\n \n\n#philosophy\n\n \n\n#dms\n\n \n\n#dating\n\n \n\n#thankyou\n\n \nmore\n\n00:00 / 00:00\n\nLike\nComments\nFavorites\nShare\nComments\nYou may like\nThe game #thebookofye #philosophy #dms #dating #thankyou\nthebookofye\n1d ago\nIf she look, she took #thebookofye #philosophy #looking #girlfriend #eyes\nthebookofye\n3d ago\nBe this guy #thebookofye #philosophy #heartbroken #standards #ex\nthebookofye\n8-22\nDon’t look back #thebookofye #philosophy #breakups #dating #relationships\nthebookofye\n9-3\nLeave first #thebookofye #philosophy #dating #breakup #heartbreak\nthebookofye\n8-31\nThe Best superpower #thebookofye #philosophy #lust #levelup #superpower\nthebookofye\n8-21\nLame behavior #thebookofye #philosophy #lame #behavior #callthemout\nthebookofye\n8-22\nMove forward #thebookofye #philosophy #dating #patterns #rejection\nthebookofye\n1d ago\nYour ex is watching your every move #thebookofye #philosophy #ex #successful #winner\nthebookofye\n8-23\nSlow it down #thebookofye #philosophy #dating #anxiousattachment #desire\nthebookofye\n8-24\nHow to hold a conversation #thebookofye #philosophy #conversation #talkingstage #dating\nthebookofye\n8-25\nDon’t be a waiter #thebookofye #philosophy #waitforit #her #dating\nthebookofye\n8-26\nStop sign #thebookofye #philosophy #stop #texting #dating\nthebookofye\n8-31\nHeavy hitters #thebookofye #philosophy #questions #dating #relationships\nthebookofye\n5d ago\nLook at her actions #thebookofye #philosophy #heartbreak #breakup #exgirlfriend\nthebookofye\n8-11\nTest her #thebookofye #philosophy #vetting #dati"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7684344730116771103",
+        "platform": "TikTok",
+        "author": "keepitlimited",
+        "url": "https://www.tiktok.com/@keepitlimited/video/7684344730116771103",
+        "content": "Not harder then mine tho #fyp",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p16-common-sign.tiktokcdn-us.com/tos-useast8-p-0068-tx2/oYkwRqxALuRIBiPFuq5aE6PiVRzOB1aAnktIA~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=FNn7f%2FsrP3R%2Bn3ZxxE03E7MBolo%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355586574,
+        "lastObserved": 1789355586574
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@keepitlimited/video/7684344730116771103",
+        "title": "Not harder then mine tho #fyp | photo dump | TikTok",
+        "matchedCard": true,
+        "text": "Not harder then mine tho #fyp ",
+        "bodyExcerpt": "TikTok\n\nkeepitlimited\n\n· 2d ago\nNot harder then mine tho \n\n#fyp\n\n \n\n00:01 / 00:05\n\nLike\nComments\nFavorites\nShare\nComments\nYou may like"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7680312974556302622",
+        "platform": "TikTok",
+        "author": "joshlovescorvettes314",
+        "url": "https://www.tiktok.com/@joshlovescorvettes314/video/7680312974556302622",
+        "content": "Whats blessing my ears rn?🥹 || #giftok #funny #viral #bus #brakes",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p16-common-sign.tiktokcdn-us.com/tos-useast8-p-0068-tx2/ooAO3PYfI1iHWqi6A4BVnnivIAsSAAwIZn92IC~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=K31ZKCfBIca%2B2dRiMYE4BrWvZuo%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355566136,
+        "lastObserved": 1789355566984
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@joshlovescorvettes314/video/7680312974556302622",
+        "title": "Bus brakes so strong? Funny bus driver moment | TikTok",
+        "matchedCard": true,
+        "text": "Whats blessing my ears rn?🥹 || #giftok #funny #viral #bus #brakes ",
+        "bodyExcerpt": "TikTok\n\n17\n\nCapCut · Editing made easy\n\n(⭕️⭕️\\_JoshLovesC6_/⭕️⭕️)\n\n· 8-31\nWhats blessing my ears rn?🥹 || \n\n#giftok\n\n \n\n#funny\n\n \n\n#viral\n\n \n\n#bus\n\n \n\n#brakes\n\n \nmore\n\nоригинальный звук - mistlord11\n\n00:02 / 00:05\n\n416.5K\n1602\n63.3K\n84.9K\n\n(⭕️⭕️\\_JoshLovesC6_/⭕️⭕️)\n\n· 8-29\nWE. ARE. VENOM. || \n\n#venom\n\n \n\n#spiderman\n\n \n\n#symbiote\n\n \n\n#viral\n\n \n\n#edit\n\n \nmore\n\n00:00 / 00:00\n\n22\n1\n6\n6"
+      }
+    },
+    {
+      "evidence": {
+        "id": "tiktok:browser:7685136291976989966",
+        "platform": "TikTok",
+        "author": "1strikerr",
+        "url": "https://www.tiktok.com/@1strikerr/video/7685136291976989966",
+        "content": "#strikerr #nfl #washingtoncommanders #philly #eaglesfootball",
+        "published": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "shares": null,
+        "soundId": null,
+        "soundTitle": null,
+        "coverUrl": "https://p19-common-sign.tiktokcdn-us.com/tos-useast5-p-0068-tx/o4VpSQ0QD9zXxBLPgEfaAkBvhF7UBqDEfrwR7O~tplv-tiktokx-origin.image?dr=9636&x-expires=1789527600&x-signature=6VJyFiqbgQl%2BYgCllqDV%2FUXmOLE%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8",
+        "mediaType": "video",
+        "provenance": "TikTok dedicated discovery observation",
+        "firstObserved": 1789355575504,
+        "lastObserved": 1789355577203
+      },
+      "source": {
+        "url": "https://www.tiktok.com/@1strikerr/video/7685136291976989966",
+        "title": "(17)TikTok - Make Your Day",
+        "matchedCard": true,
+        "text": "",
+        "bodyExcerpt": "TikTok\n\n17"
+      },
+      "followUp": {
+        "url": "https://www.tiktok.com/@1strikerr/video/7685136291976989966",
+        "title": "#strikerr #nfl #washingtoncommanders #philly #eaglesfootball | tyler owens | TikTok",
+        "captions": [
+          "#strikerr #nfl #washingtoncommanders #philly #eaglesfootball ",
+          "#steelersnation #nfl #chargers #justinherbert #kansascity "
+        ],
+        "body": "TikTok\n\n17\n\nStrikerr\n\n· 14h ago\n\n#strikerr\n\n \n\n#nfl\n\n \n\n#washingtoncommanders\n\n \n\n#philly\n\n \n\n#eaglesfootball\n\n \nmore\n\nAll I Need - Jaeychino\n\n00:01 / 00:12\n\n368.4K\n2452\n32K\n75.9K\n\nStrikerr\n\n· 2025-9-5\n\n#steelersnation\n\n \n\n#nfl\n\n \n\n#chargers\n\n \n\n#justinherbert\n\n \n\n#kansascity\n\n \nmore\n\n00:00 / 00:00\n\n129\n2\n1\n1"
+      }
+    }
+  ]
+}
