@@ -145,7 +145,8 @@ export function parseUnderstandingJson(value) {
   const first = fenced.indexOf('{'), last = fenced.lastIndexOf('}');
   if (first < 0 || last <= first) return null;
   try {
-    const raw = JSON.parse(fenced.slice(first, last + 1));
+    const parsed = JSON.parse(fenced.slice(first, last + 1));
+    const raw = parsed.s ? {...parsed,summary:parsed.s,event:parsed.e,entities:parsed.n,onScreenText:parsed.t,memePotential:parsed.m,confidence:parsed.c,uncertainties:parsed.u} : parsed;
     const summary = clean(raw.summary, 420);
     if (!summary) return null;
     return {
@@ -352,7 +353,7 @@ function analysisPrompt(row, capture) {
     'You are Front\'s social-video content understanding layer. Determine what this post is actually about from the chronological frames plus the supplied post context.',
     'Treat the frames as a time sequence. Focus on the event, person/object, action, joke, reaction, visual template, on-screen text, transformation, reveal, or other details that would let an analyst recognize the same narrative in another post.',
     'Do not infer a real person\'s identity from appearance alone. Only use a person/name when the supplied caption, page text, or visible on-screen text supports it. Do not invent dialogue, audio, dates, places, or backstory that are not visible or supplied.',
-    'Return ONLY valid JSON with keys: summary (1-2 specific sentences), event (short event phrase), entities (array), actions (array), onScreenText (array), visualMotifs (array), memePotential (0-1), confidence (0-1), uncertainties (array).',
+    'Return ONLY compact JSON, no extra prose or whitespace. Keys: s (grounded summary, one sentence at most 18 words), e (specific event, at most 6 words), n (up to 3 named entities), t (up to 2 short verbatim visible text phrases), m (meme potential 0-1), c (confidence 0-1), u (brief uncertainty array). Use empty arrays when absent. Describe actions in s/e; do not repeat them in extra fields.',
     `Platform: ${clean(row.platform, 20)}`,
     `Author: ${clean(row.author, 120)}`,
     `Post caption/context: ${clean(row.content, MAX_CONTEXT_TEXT)}`,
@@ -465,7 +466,7 @@ export class ContentUnderstandingEngine {
   }
 
   cacheKey(row) {
-    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v3`;
+    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v4`;
   }
 
   cacheEntry(row) {
@@ -533,7 +534,7 @@ export class ContentUnderstandingEngine {
       const message = error?.name === 'AbortError' ? 'Content analysis timed out.' : clean(error?.message || error, 300);
       this.cache[this.cacheKey(row)] = { at: Date.now(), ok: false, error: message, captureMs, totalMs: Date.now() - started, analysis: null };
       this.persistCache();
-      return { analysis: null, cached: false, error: message };
+      return { analysis: null, cached: false, error: message, captureMs, modelMs:Date.now()-started-captureMs, totalMs:Date.now()-started };
     } finally {
       clearTimeout(timer);
     }
@@ -546,7 +547,7 @@ export class ContentUnderstandingEngine {
     const stats = { requested: selected.length, analyzed: 0, cached: 0, cachedFailures: 0, enriched: 0, failed: 0, skipped: 0, provider: this.provider.provider, model: this.provider.model || null, modelFrameLimit: MODEL_FRAME_LIMIT, timeoutMs:mode === 'deep' ? DEEP_TIMEOUT_MS : SCOUT_TIMEOUT_MS, errors:[], items:[] };
     for (const row of selected) {
       const result = await this.analyzeOne(context, row, { maxFrames: mode === 'deep' ? 16 : 10, timeoutMs: mode === 'deep' ? DEEP_TIMEOUT_MS : SCOUT_TIMEOUT_MS });
-      stats.items.push({url:row.url, cached:Boolean(result.cached), error:result.error || null, confidence:result.analysis?.confidence ?? null, captureMs:result.analysis?.captureMs ?? null, modelMs:result.analysis?.modelMs ?? null});
+      stats.items.push({url:row.url, cached:Boolean(result.cached), error:result.error || null, confidence:result.analysis?.confidence ?? null, captureMs:result.analysis?.captureMs ?? result.captureMs ?? null, modelMs:result.analysis?.modelMs ?? result.modelMs ?? null});
       if (result.error) stats.errors.push(result.error);
       if (result.cached) stats.cached++;
       else if (result.cachedFailure) { stats.cachedFailures++; stats.failed++; }

@@ -11,7 +11,7 @@ import {
   selectVideoCandidates,
 } from '../src/content-understanding.mjs';
 
-const cacheKey=(row,provider='ollama',model='qwen-test')=>`${row.platform}|${row.id}|${row.url}|${provider}|${model}|v17|timeline-sheet-v3`;
+const cacheKey=(row,provider='ollama',model='qwen-test')=>`${row.platform}|${row.id}|${row.url}|${provider}|${model}|v17|timeline-sheet-v4`;
 
 test('frame schedule covers the whole short-video timeline without exploding frame count',()=>{
   const times=frameSchedule(9,16);
@@ -184,3 +184,5 @@ test('low confidence visual response is not counted as evidence enrichment',asyn
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-low-confidence-'));
  try{const engine=new ContentUnderstandingEngine({dataDir:dir});engine.analyzeOne=async()=>({analysis:{summary:'Blank page',confidence:.1},cached:false});const row={id:'1',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/1234567890123',content:'Real caption'};const result=await engine.enrich({},[row],{maxVideos:1});assert.equal(result.stats.enriched,0);assert.equal(result.rows[0].content,'Real caption');}finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('compact visual wire fields retain grounding, uncertainty and confidence',()=>{const result=parseUnderstandingJson(JSON.stringify({s:'Mascot falls onto court during halftime',e:'Mascot halftime fall',n:['mascot'],t:['HALFTIME'],m:.8,c:.9,u:['No audio available']}));assert.equal(result.summary,'Mascot falls onto court during halftime');assert.equal(result.event,'Mascot halftime fall');assert.deepEqual(result.onScreenText,['HALFTIME']);assert.deepEqual(result.uncertainties,['No audio available']);assert.equal(result.confidence,.9);});

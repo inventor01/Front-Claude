@@ -1,4 +1,4 @@
-import { prioritizeAnalysis, newEvidenceRows } from './analysis-priority.mjs';
+import { selectContextCandidates, newEvidenceRows } from './analysis-priority.mjs';
 import { extractX } from './x-feed-extractor.mjs';
 import { scanOutcome } from './scan-outcome-v26.mjs';
 import { scrollFeedPage, nextStalePassCount, feedExhausted, collectVisibleFeeds } from './feed-scroll.mjs';
@@ -299,7 +299,7 @@ async function contextualizePosts(rows, phaseName = 'post-understanding') {
   if (!rows.length || shouldStop()) return rows;
   setPhase(phaseName);
   const maxPosts = Math.max(12, Math.min(180, Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12)));
-  const selected = prioritizeAnalysis(rows).slice(0, maxPosts);
+  const selected = selectContextCandidates(rows, maxPosts);
   const priorRuns = latestLive.stages.postUnderstanding?.runs || [];
   stage('postUnderstanding', { status: 'running', requested: selected.length, totalEvidence: rows.length, engine: postUnderstanding.status() });
   const enriched = await postUnderstanding.enrich(selected, {

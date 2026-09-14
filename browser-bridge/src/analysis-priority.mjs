@@ -12,3 +12,13 @@ export function prioritizeAnalysis(rows, now = Date.now()) {
  return [...rows].sort((a,b)=>score(b)-score(a));
 }
 export const newEvidenceRows = (before, after) => {const ids=new Set(before.map(row=>row.id));return after.filter(row=>!ids.has(row.id));};
+
+export function selectContextCandidates(rows, limit, now = Date.now()) {
+ const ranked=prioritizeAnalysis(rows,now);
+ const platforms=[...new Set(ranked.map(row=>row.platform))];
+ const quota=Math.max(1,Math.floor(limit/Math.max(1,platforms.length)/2));
+ const selected=new Map();
+ for(const platform of platforms)for(const row of ranked.filter(row=>row.platform===platform).slice(0,quota))if(selected.size<limit)selected.set(row.id,row);
+ for(const row of ranked)if(selected.size<limit)selected.set(row.id,row);
+ return [...selected.values()];
+}

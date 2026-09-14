@@ -6,3 +6,6 @@ test('unchanged origin results require no new semantic pass',()=>{const before=[
 test('old origin does not become the current breakout clock',async()=>{
  const {measureNarrativeVelocity,lifecycleForNarrative}=await import('../src/narrative-intelligence-v26.mjs');const now=Date.now();const rows=[{author:'origin',published:now-20*86400000,firstObserved:now},...['a','b','c'].map(author=>({author,published:now-600000,firstObserved:now-60000}))];const velocity=measureNarrativeVelocity({},rows,now);assert.equal(velocity.earliestAt,now-20*86400000);assert.equal(velocity.firstObservedAt,now-60000);assert.equal(velocity.breakoutWindowStart,now-600000);assert.notEqual(lifecycleForNarrative({},velocity),'SATURATED');
 });
+test('missing TikTok publication dates cannot starve its contextual coverage',async()=>{
+ const {selectContextCandidates}=await import('../src/analysis-priority.mjs');const now=Date.now();const rows=[...Array.from({length:20},(_,i)=>({id:'x'+i,platform:'X',author:'x'+i,published:now,content:'New launch announcement'})),...Array.from({length:20},(_,i)=>({id:'t'+i,platform:'TikTok',author:'t'+i,published:null,content:'Specific fresh meme caption'}))];const selected=selectContextCandidates(rows,12,now);assert.equal(selected.length,12);assert(selected.filter(r=>r.platform==='TikTok').length>=3);assert(selected.filter(r=>r.platform==='X').length>=3);
+});
