@@ -24,11 +24,11 @@ test('local vision defaults match the proven 8 GB Mac profile and do not cap dis
   assert.match(env,/FRONT_CONTENT_SCOUT_VIDEOS=2/);
   assert.match(env,/FRONT_CONTENT_BACKGROUND_VIDEOS=1/);
   assert.match(env,/FRONT_CONTEXT_OLLAMA_MODEL=qwen3-vl:4b-instruct/);
-  assert.match(env,/FRONT_CONTEXT_MAX_POSTS=36/);
+  assert.match(env,/FRONT_CONTEXT_MAX_POSTS=12/);
   assert.match(env,/FRONT_CONTEXT_BATCH_SIZE=4/);
   assert.match(env,/FRONT_CONTEXT_TIMEOUT_MS=60000/);
   assert.match(env,/FRONT_CONTEXT_NUM_PREDICT=900/);
-  assert.match(example,/cap EXPENSIVE visual analysis, not X\/TikTok discovery/);
+  assert.match(example,/cap EXPENSIVE visual\/semantic analysis, not X\/TikTok discovery/);
   assert.match(example,/keep visual and contextual understanding on the same model/);
   assert.match(start,/DEFAULT_CONTENT_ENV=.*content\.env/);
   assert.match(start,/FRONT_OLLAMA_MODEL:-qwen3-vl:4b-instruct/);
@@ -40,7 +40,7 @@ test('local vision defaults match the proven 8 GB Mac profile and do not cap dis
   assert.match(start,/FRONT_CONTENT_NUM_PREDICT:-420/);
   assert.match(start,/FRONT_CONTENT_DEEP_VIDEOS:-4/);
   assert.match(start,/FRONT_CONTENT_SCOUT_VIDEOS:-2/);
-  assert.match(start,/FRONT_CONTEXT_MAX_POSTS:-36/);
+  assert.match(start,/FRONT_CONTEXT_MAX_POSTS:-12/);
   assert.match(start,/FRONT_CONTEXT_BATCH_SIZE:-4/);
   assert.match(start,/FRONT_CONTEXT_TIMEOUT_MS:-60000/);
   assert.match(start,/FRONT_CONTEXT_NUM_PREDICT:-900/);
@@ -49,7 +49,8 @@ test('local vision defaults match the proven 8 GB Mac profile and do not cap dis
   assert.match(start,/replacing stale deep visual budget 8 with balanced budget 4/);
   assert.match(start,/replacing stale scout visual budget 4 with balanced budget 2/);
   assert.match(start,/replacing stale background visual budget 2 with balanced budget 1/);
-  assert.match(start,/replacing stale contextual post budget 90 with balanced budget 36/);
+  assert.match(start,/replacing stale contextual post budget \$FRONT_CONTEXT_MAX_POSTS with balanced budget 12/);
+  assert.match(start,/\[ "\$FRONT_CONTEXT_MAX_POSTS" = "90" \].*\[ "\$FRONT_CONTEXT_MAX_POSTS" = "36" \]/s);
   assert.match(start,/replacing stale context batch size 8 with balanced batch size 4/);
   assert.match(start,/replacing stale context timeout 45000ms with validated 60000ms/);
   assert.match(start,/FRONT_CONTEXT_OLLAMA_MODEL:-\$FRONT_OLLAMA_MODEL/);
