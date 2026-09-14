@@ -115,7 +115,7 @@ export FRONT_CONTENT_NUM_PREDICT="${FRONT_CONTENT_NUM_PREDICT:-420}"
 export FRONT_CONTENT_DEEP_VIDEOS="${FRONT_CONTENT_DEEP_VIDEOS:-4}"
 export FRONT_CONTENT_SCOUT_VIDEOS="${FRONT_CONTENT_SCOUT_VIDEOS:-2}"
 export FRONT_CONTENT_BACKGROUND_VIDEOS="${FRONT_CONTENT_BACKGROUND_VIDEOS:-1}"
-export FRONT_CONTEXT_MAX_POSTS="${FRONT_CONTEXT_MAX_POSTS:-36}"
+export FRONT_CONTEXT_MAX_POSTS="${FRONT_CONTEXT_MAX_POSTS:-12}"
 export FRONT_CONTEXT_BATCH_SIZE="${FRONT_CONTEXT_BATCH_SIZE:-4}"
 export FRONT_CONTEXT_TIMEOUT_MS="${FRONT_CONTEXT_TIMEOUT_MS:-60000}"
 export FRONT_CONTEXT_NUM_PREDICT="${FRONT_CONTEXT_NUM_PREDICT:-900}"
@@ -138,9 +138,9 @@ if [ -z "$EXPLICIT_BACKGROUND" ] && [ "$FRONT_CONTENT_BACKGROUND_VIDEOS" = "2" ]
   echo "Front v26: replacing stale background visual budget 2 with balanced budget 1."
   export FRONT_CONTENT_BACKGROUND_VIDEOS="1"
 fi
-if [ -z "$EXPLICIT_CONTEXT_MAX" ] && [ "$FRONT_CONTEXT_MAX_POSTS" = "90" ]; then
-  echo "Front v26: replacing stale contextual post budget 90 with balanced budget 36."
-  export FRONT_CONTEXT_MAX_POSTS="36"
+if [ -z "$EXPLICIT_CONTEXT_MAX" ] && { [ "$FRONT_CONTEXT_MAX_POSTS" = "90" ] || [ "$FRONT_CONTEXT_MAX_POSTS" = "36" ]; }; then
+  echo "Front v26: replacing stale contextual post budget $FRONT_CONTEXT_MAX_POSTS with balanced budget 12."
+  export FRONT_CONTEXT_MAX_POSTS="12"
 fi
 if [ -z "$EXPLICIT_CONTEXT_BATCH" ] && [ "$FRONT_CONTEXT_BATCH_SIZE" = "8" ]; then
   echo "Front v26: replacing stale context batch size 8 with balanced batch size 4."
