@@ -72,17 +72,24 @@ export function measureNarrativeVelocity(topic, rows = [], now = Date.now()) {
   const creatorSpreadPerHour = creators / spanHours;
   const viewsPerMinute = Math.max(Number(topic?.maxViewsPerHour || 0) / 60, ...rows.map((row) => rate(row?.views, row?.published || row?.firstObserved, now)), 0);
   const likesPerMinute = Math.max(...rows.map((row) => rate(row?.likes, row?.published || row?.firstObserved, now)), 0);
-  const recency = ageMinutes == null ? 8 : ageMinutes <= 30 ? 20 : ageMinutes <= 120 ? 17 : ageMinutes <= 360 ? 12 : ageMinutes <= 1440 ? 7 : 2;
+  const observations = rows.map(row => Number(row.firstObserved)).filter(t => Number.isFinite(t) && t > 0);
+  const firstObservedAt = observations.length ? Math.min(...observations) : null;
+  const currentPublications = rows.map(row => Number(row.published)).filter(t => Number.isFinite(t) && t > 0 && t <= now && now - t <= 72 * 3600000);
+  const breakoutWindowStart = currentPublications.length ? Math.min(...currentPublications) : null;
+  const breakoutWindowEnd = currentPublications.length ? Math.max(...currentPublications) : null;
+  const breakoutAgeMinutes = breakoutWindowStart ? (now - breakoutWindowStart) / 60000 : null;
+  const recencyAge = breakoutAgeMinutes ?? ageMinutes;
+  const recency = recencyAge == null ? 8 : recencyAge <= 30 ? 20 : recencyAge <= 120 ? 17 : recencyAge <= 360 ? 12 : recencyAge <= 1440 ? 7 : 2;
   const engagement = Math.min(25, Math.log10(1 + viewsPerMinute) * 7 + Math.log10(1 + likesPerMinute) * 4);
   const spread = Math.min(25, creators * 3 + Math.log10(1 + creatorSpreadPerHour) * 8);
   const crossPlatform = platforms >= 2 ? 15 : 0;
   const repetition = Math.min(15, rows.length * 1.5);
   const score = clamp(recency + engagement + spread + crossPlatform + repetition);
-  return { score: Number(score.toFixed(1)), label: score >= 85 ? 'explosive' : score >= 65 ? 'fast' : score >= 45 ? 'building' : score >= 25 ? 'emerging' : 'slow', viewsPerMinute: Number(viewsPerMinute.toFixed(2)), likesPerMinute: Number(likesPerMinute.toFixed(2)), creatorSpreadPerHour: Number(creatorSpreadPerHour.toFixed(2)), creators, platforms, earliestAt, latestAt, ageMinutes: ageMinutes == null ? null : Number(ageMinutes.toFixed(1)) };
+  return { score: Number(score.toFixed(1)), label: score >= 85 ? 'explosive' : score >= 65 ? 'fast' : score >= 45 ? 'building' : score >= 25 ? 'emerging' : 'slow', viewsPerMinute: Number(viewsPerMinute.toFixed(2)), likesPerMinute: Number(likesPerMinute.toFixed(2)), creatorSpreadPerHour: Number(creatorSpreadPerHour.toFixed(2)), creators, platforms, earliestAt, latestAt, firstObservedAt, breakoutWindowStart, breakoutWindowEnd, breakoutAgeMinutes, ageMinutes: ageMinutes == null ? null : Number(ageMinutes.toFixed(1)) };
 }
 
 export function lifecycleForNarrative(topic, velocity) {
-  const score = Number(velocity?.score || 0), creators = Number(velocity?.creators || 0), age = velocity?.ageMinutes;
+  const score = Number(velocity?.score || 0), creators = Number(velocity?.creators || 0), age = velocity?.breakoutAgeMinutes ?? velocity?.ageMinutes;
   if (age != null && age > 72 * 60) return score >= 65 ? 'VIRAL' : 'SATURATED';
   if (age != null && age > 24 * 60 && score < 45) return 'SATURATED';
   if (score >= 82 && creators >= 5) return 'VIRAL';
@@ -156,7 +163,7 @@ export function enhanceNarrativesV26(topics = [], evidence = [], now = Date.now(
     const velocity = measureNarrativeVelocity(topic, rows, now);
     const lifecycleStage = lifecycleForNarrative(topic, velocity);
     const opportunity = classifyCoinOpportunity(topic);
-    const enriched = { ...topic, narrativeTitle, topic: narrativeTitle, key, intelligenceVersion: 26, firstEvidenceAt: velocity.earliestAt, latestEvidenceAt: velocity.latestAt, ageMinutes: velocity.ageMinutes, originConfidence: originConfidence(rows, velocity), velocity, velocityScore: velocity.score, lifecycleStage, opportunityStatus: opportunity.status, coinOpportunity: opportunity };
+    const enriched = { ...topic, narrativeTitle, topic: narrativeTitle, key, intelligenceVersion: 26, firstObservedAt: velocity.firstObservedAt, breakoutWindowStart: velocity.breakoutWindowStart, breakoutWindowEnd: velocity.breakoutWindowEnd, firstEvidenceAt: velocity.earliestAt, latestEvidenceAt: velocity.latestAt, ageMinutes: velocity.ageMinutes, originConfidence: originConfidence(rows, velocity), velocity, velocityScore: velocity.score, lifecycleStage, opportunityStatus: opportunity.status, coinOpportunity: opportunity };
     const prior = deduped.get(key);
     if (!prior || Number(enriched.score || 0) > Number(prior.score || 0) || Number(enriched.evidenceCount || 0) > Number(prior.evidenceCount || 0)) deduped.set(key, enriched);
   }

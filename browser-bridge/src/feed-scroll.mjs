@@ -15,3 +15,16 @@ export async function scrollFeedPage(page, selector, fallback = 950) {
 }
 
 export const nextStalePassCount = (previous, current, stale) => current > previous ? 0 : stale + 1;
+
+export function feedExhausted(stale, movements) {
+  return stale >= 6 && movements.length >= 4 && movements.slice(-4).every(item => item.after === item.before);
+}
+
+export async function collectVisibleFeeds(jobs) {
+  const settled = [];
+  for (const job of jobs) {
+    try { settled.push({status:'fulfilled', value:await job()}); }
+    catch (reason) { settled.push({status:'rejected', reason}); }
+  }
+  return settled;
+}

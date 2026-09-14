@@ -1,3 +1,4 @@
+import { publicationAgeDays, prioritizeAnalysis } from './analysis-priority.mjs';
 import { canonicalSocialPostUrl } from './social-post-url.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +9,7 @@ const FAILURE_TTL_MS = 5 * 60000;
 const MAX_CONTEXT_TEXT = 2200;
 const OLLAMA_KEEP_ALIVE = String(process.env.FRONT_OLLAMA_KEEP_ALIVE || '30m');
 const MODEL_FRAME_LIMIT = Math.max(4, Math.min(12, Number(process.env.FRONT_CONTENT_MODEL_FRAMES || 8)));
-const DEEP_TIMEOUT_MS = Math.max(30000, Number(process.env.FRONT_CONTENT_TIMEOUT_MS || 60000));
+const DEEP_TIMEOUT_MS = Math.max(30000, Number(process.env.FRONT_CONTENT_TIMEOUT_MS || 75000));
 const SCOUT_TIMEOUT_MS = Math.max(20000, Number(process.env.FRONT_CONTENT_SCOUT_TIMEOUT_MS || 45000));
 const OLLAMA_NUM_PREDICT = Math.max(160, Math.min(900, Number(process.env.FRONT_CONTENT_NUM_PREDICT || 420)));
 
@@ -73,9 +74,9 @@ export function frameSchedule(durationSeconds, maxFrames = 16) {
 }
 
 export function selectVideoCandidates(rows = [], { limit = 4 } = {}) {
-  const videos = rows.filter((row) => row?.id && canonicalSocialPostUrl(row?.url, row?.platform) && looksLikeVideo(row));
+  const videos = prioritizeAnalysis(rows).filter(row => {const age=publicationAgeDays(row);return age === null || age <= 14;}).filter((row) => row?.id && canonicalSocialPostUrl(row?.url, row?.platform) && looksLikeVideo(row));
   const byCreator = new Map();
-  for (const row of videos.sort((a, b) => evidenceScore(b) - evidenceScore(a))) {
+  for (const row of videos) {
     const key = creatorKey(row);
     const list = byCreator.get(key) || [];
     list.push(row);
@@ -281,11 +282,14 @@ async function capturePostFrames(context, row, { maxFrames = 16, timeoutMs = 300
   const started = Date.now();
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Math.min(timeoutMs, 20000) });
-    await page.waitForTimeout(1200);
+    await page.locator('video').first().waitFor({state:'attached', timeout:15000}).catch(() => {});
+    await page.waitForTimeout(300);
     const title = clean(await page.title().catch(() => ''), 300);
     const video = await visibleVideo(page);
     if (!video) {
-      const buffer = await page.screenshot({ type: 'jpeg', quality: 45, fullPage: false }).catch(() => null);
+      const post = page.locator(row.platform === 'X' ? 'article[data-testid="tweet"]' : '[data-e2e="recommend-list-item-container"]').first();
+      await post.waitFor({state:'visible', timeout:5000});
+      const buffer = await post.screenshot({ type: 'jpeg', quality: 60, timeout:5000 }).catch(() => null);
       if (!buffer) return { frames: [], duration: 0, transcript: '', pageTitle: title, captureType: 'none', elapsedMs: Date.now() - started };
       const base64 = buffer.toString('base64');
       return { frames: [{ time: 0, base64, dataUrl: `data:image/jpeg;base64,${base64}` }], duration: 0, transcript: '', pageTitle: title, captureType: 'post-screenshot', elapsedMs: Date.now() - started };
@@ -324,7 +328,7 @@ export async function buildTimelineContactSheet(page, frames) {
       const image = new Image(); image.onload = () => resolve(image); image.onerror = reject; image.src = `data:image/jpeg;base64,${frame.base64}`;
     })));
     const columns = Math.min(3, images.length), rows = Math.ceil(images.length / columns);
-    const cellWidth = 320, imageHeight = Math.min(568, Math.round(cellWidth * images[0].height / images[0].width)), labelHeight = 24;
+    const cellWidth = 224, imageHeight = Math.min(398, Math.round(cellWidth * images[0].height / images[0].width)), labelHeight = 24;
     const canvas = document.createElement('canvas'); canvas.width = columns * cellWidth; canvas.height = rows * (imageHeight + labelHeight);
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
     images.forEach((image,index) => {
@@ -461,7 +465,7 @@ export class ContentUnderstandingEngine {
   }
 
   cacheKey(row) {
-    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v2`;
+    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v3`;
   }
 
   cacheEntry(row) {
@@ -539,15 +543,17 @@ export class ContentUnderstandingEngine {
     const limit = Math.max(0, Math.min(8, Number(maxVideos ?? (mode === 'deep' ? 4 : 2)) || 0));
     const selected = selectVideoCandidates(rows, { limit });
     const byKey = new Map(rows.map((row) => [this.cacheKey(row), row]));
-    const stats = { requested: selected.length, analyzed: 0, cached: 0, cachedFailures: 0, enriched: 0, failed: 0, skipped: 0, provider: this.provider.provider, model: this.provider.model || null, modelFrameLimit: MODEL_FRAME_LIMIT };
+    const stats = { requested: selected.length, analyzed: 0, cached: 0, cachedFailures: 0, enriched: 0, failed: 0, skipped: 0, provider: this.provider.provider, model: this.provider.model || null, modelFrameLimit: MODEL_FRAME_LIMIT, timeoutMs:mode === 'deep' ? DEEP_TIMEOUT_MS : SCOUT_TIMEOUT_MS, errors:[], items:[] };
     for (const row of selected) {
       const result = await this.analyzeOne(context, row, { maxFrames: mode === 'deep' ? 16 : 10, timeoutMs: mode === 'deep' ? DEEP_TIMEOUT_MS : SCOUT_TIMEOUT_MS });
+      stats.items.push({url:row.url, cached:Boolean(result.cached), error:result.error || null, confidence:result.analysis?.confidence ?? null, captureMs:result.analysis?.captureMs ?? null, modelMs:result.analysis?.modelMs ?? null});
+      if (result.error) stats.errors.push(result.error);
       if (result.cached) stats.cached++;
       else if (result.cachedFailure) { stats.cachedFailures++; stats.failed++; }
       else if (result.analysis) stats.analyzed++;
       else if (result.skipped) stats.skipped++;
       else stats.failed++;
-      if (result.analysis?.summary) {
+      if (result.analysis?.summary && result.analysis.confidence >= 0.5) {
         byKey.set(this.cacheKey(row), applyUnderstanding(row, result.analysis));
         stats.enriched++;
       }

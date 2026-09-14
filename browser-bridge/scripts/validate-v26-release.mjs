@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { releaseScanState } from '../src/release-scan-state.mjs';
 
 import { nativeLoopbackScan } from '../src/loopback-scan-fetch-compat.mjs';
 import { spawnSync } from 'node:child_process';
@@ -213,21 +214,27 @@ async function main() {
     let body; try { body = JSON.parse(text); } catch { body = { raw:text }; }
     if (body?.scanId && !scanIdRef.value) scanIdRef.value = body.scanId;
     return { res, body };
-  });
+  }).catch(error => ({transportError:String(error?.message || error)}));
   let scan, live;
   try { [scan, live] = await Promise.all([scanPromise, monitor(scanIdRef)]); }
   finally { clearTimeout(timer); }
+  const snapshots = await Promise.allSettled(['live','health','ledger'].map(endpoint => json(`${BRIDGE}/${endpoint}`, {}, 7000)));
+  const [lastLive,lastHealth,lastLedger] = snapshots.map(result => result.status === 'fulfilled' ? result.value.body : null);
+  const recovery = releaseScanState({scan, live:lastLive || live, health:lastHealth, ledger:lastLedger, scanId:scanIdRef.value, timedOut:ctl.signal.aborted, transportError:scan?.transportError});
+  live = recovery.live || live;
+  check('Scan transport and lifecycle completed', !recovery.running && scan?.res?.ok === true, `${recovery.outcome}; status=${recovery.status || 'unknown'}; evidence=${recovery.counts.evidence ?? 'unknown'}`);
+  for (const transition of live?.phaseHistory || []) phases.add(transition.phase);
 
   fs.mkdirSync(path.dirname(REPORT), { recursive:true });
-  fs.writeFileSync(REPORT.replace(/\.json$/, '') + '-scan.json', JSON.stringify({scan:scan?.body, live}, null, 2));
+  fs.writeFileSync(REPORT.replace(/\.json$/, '') + '-scan.json', JSON.stringify({scan:scan?.body, live, health:lastHealth, ledger:recovery.ledger, recovery}, null, 2));
 
   check('Scan request succeeds', scan?.res?.ok === true, `${scan?.res?.status || 'no response'} ${scan?.body?.error || ''}`);
   check('Scan returns ok=true', scan?.body?.ok === true, scan?.body?.error || 'ok');
   check('Scan reaches complete state', live?.status === 'complete' && live?.phase === 'complete', `${live?.status || 'missing'} / ${live?.phase || 'missing'}`);
   check('No pipeline errors', Array.isArray(live?.errors) && live.errors.length === 0, `${live?.errors?.length || 0} error(s)`);
 
-  const evidence = Array.isArray(scan?.body?.evidence) ? scan.body.evidence : [];
-  const topics = Array.isArray(scan?.body?.inferredTopics) ? scan.body.inferredTopics : [];
+  const evidence = recovery.evidence;
+  const topics = Array.isArray(scan?.body?.inferredTopics) ? scan.body.inferredTopics : (live?.inferredTopics || []);
   const stages = live?.stages || scan?.body?.audit?.stages || {};
   const xs = stages.xDiscovery || {};
   const ts = stages.tiktokDiscovery || {};
@@ -243,7 +250,7 @@ async function main() {
 
   check('Chrome stage connected', stages.chrome?.status === 'connected', stages.chrome?.status || 'missing');
   check('X discovery complete', xs.status === 'complete', `${xs.status || 'missing'} observed=${xObserved}`);
-  check('X collected real posts', xObserved >= 2, `observed=${xObserved}`);
+  check('X collected real posts', xObserved >= 10, `observed=${xObserved}`);
   if (xObserved < 5) warn('X sample below preferred breadth', `observed=${xObserved}; repeated personalized feeds can expose fewer novel posts`);
   check('TikTok discovery complete', ts.status === 'complete', `${ts.status || 'missing'} observed=${n(ts.observed)} grounded=${n(ts.grounded)}`);
   check('TikTok collected real videos', tObserved >= 3, `observed=${tObserved}`);
@@ -296,7 +303,8 @@ async function main() {
 
   const report = {
     at: new Date().toISOString(), ok: failures.length === 0, scanId: scanIdRef.value,
-    counts: { evidence:evidence.length, x:xRows.length, tiktok:tRows.length, narratives:topics.length },
+    outcome:recovery.outcome, running:recovery.running,
+    counts: { ...recovery.counts, narratives:topics.length },
     phases:[...phases], passes, warnings, failures,
   };
   fs.mkdirSync(path.dirname(REPORT), { recursive:true });
@@ -304,7 +312,7 @@ async function main() {
 
   console.log('\n════════════════════════════════════════════════════════');
   console.log(failures.length ? `❌ FRONT v26 RELEASE GATE FAILED (${failures.length})` : '✅ FRONT v26 RELEASE GATE PASSED');
-  console.log(`Evidence ${evidence.length} · X ${xRows.length} · TikTok ${tRows.length} · narratives ${topics.length}`);
+  console.log(`Evidence ${recovery.counts.evidence ?? "unknown"} · X ${recovery.counts.x ?? "unknown"} · TikTok ${recovery.counts.tiktok ?? "unknown"} · narratives ${topics.length} · ${recovery.outcome}`);
   console.log(`Report: ${REPORT}`);
   console.log('════════════════════════════════════════════════════════');
   if (failures.length) process.exitCode = 1;

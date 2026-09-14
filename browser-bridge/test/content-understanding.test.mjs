@@ -11,7 +11,7 @@ import {
   selectVideoCandidates,
 } from '../src/content-understanding.mjs';
 
-const cacheKey=(row,provider='ollama',model='qwen-test')=>`${row.platform}|${row.id}|${row.url}|${provider}|${model}|v17|timeline-sheet-v2`;
+const cacheKey=(row,provider='ollama',model='qwen-test')=>`${row.platform}|${row.id}|${row.url}|${provider}|${model}|v17|timeline-sheet-v3`;
 
 test('frame schedule covers the whole short-video timeline without exploding frame count',()=>{
   const times=frameSchedule(9,16);
@@ -178,4 +178,9 @@ test('reapplying visual cache preserves the caption without duplicating generate
  const analysis={summary:'Mascot falls',event:'mascot halftime fall',confidence:.9};
  const once=applyUnderstanding(row,analysis),twice=applyUnderstanding(once,analysis);
  assert.equal(twice.content,once.content);assert.equal(twice.sourceContent,'source caption');
+});
+
+test('low confidence visual response is not counted as evidence enrichment',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-low-confidence-'));
+ try{const engine=new ContentUnderstandingEngine({dataDir:dir});engine.analyzeOne=async()=>({analysis:{summary:'Blank page',confidence:.1},cached:false});const row={id:'1',platform:'TikTok',author:'a',url:'https://www.tiktok.com/@a/video/1234567890123',content:'Real caption'};const result=await engine.enrich({},[row],{maxVideos:1});assert.equal(result.stats.enriched,0);assert.equal(result.rows[0].content,'Real caption');}finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

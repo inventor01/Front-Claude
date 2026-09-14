@@ -64,6 +64,13 @@ test('Ollama contact sheet preserves twelve ordered frames within one image',asy
   const sheet=await buildTimelineContactSheet(page,Array.from({length:12},(_,time)=>({base64:frame,time})));
   assert.equal(sheet.representedFrames,12);
   const size=await page.evaluate(base64=>new Promise(resolve=>{const i=new Image();i.onload=()=>resolve({w:i.width,h:i.height});i.src=`data:image/jpeg;base64,${base64}`;}),sheet.base64);
-  assert.equal(size.w,960);assert(size.w*size.h<2400000);assert(size.h>2000);
+  assert.equal(size.w,672);assert(size.w*size.h<2400000);assert(size.h>1600);
  }finally{await browser.close();}
+});
+
+test('moving through tall content is not exhaustion; stalled surface is',async()=>{
+ const {feedExhausted}=await import('../src/feed-scroll.mjs');assert.equal(feedExhausted(9,Array.from({length:4},()=>({before:0,after:259}))),false);assert.equal(feedExhausted(9,Array.from({length:4},()=>({before:259,after:259}))),true);
+});
+test('primary collector pages never overlap and a platform failure preserves the other result',async()=>{
+ const {collectVisibleFeeds}=await import('../src/feed-scroll.mjs');let active=false;const result=await collectVisibleFeeds([async()=>{active=true;await new Promise(r=>setTimeout(r,10));active=false;throw Error('X failed');},async()=>{assert.equal(active,false);return ['TikTok row'];}]);assert.equal(result[0].status,'rejected');assert.deepEqual(result[1].value,['TikTok row']);
 });

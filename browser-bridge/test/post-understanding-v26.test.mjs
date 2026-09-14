@@ -107,12 +107,14 @@ test('semantic batching keeps Ollama warm and defaults to four posts per request
     assert.equal(payload.options.num_predict,900);
     const input=JSON.parse(payload.messages[0].content.split('\n').at(-1));
     sizes.push(input.length);
-    const result=input.map((row,index)=>({index,subject:`Specific subject ${row.index}`,event:`specific event ${row.index}`,entities:[],action:'observed',object:'event',context:'social post',narrativeKey:`specific subject ${row.index}`,confidence:.9}));
+    const result=input.map((row,index)=>({i:index,s:`Specific subject ${row.index}`,e:`specific event ${row.index}`,k:`specific subject ${row.index}`,c:.9}));
     return Response.json({message:{content:JSON.stringify(result)}});
   };
   const rows=Array.from({length:5},(_,i)=>({id:String(i+1),platform:'X',author:`a${i}`,url:`https://x.com/a${i}/status/${i+1}`,content:`Specific event caption ${i+1}`}));
   const result=await engine.enrich(rows);
   assert.deepEqual(sizes,[4,1]);
+  assert.equal(result.stats.requestCount,2);
+  assert.equal(result.rows[0].postSubject,'Specific subject 0');
   assert.equal(result.stats.modeled,5);
   assert.equal(result.stats.failed,0);
   assert.deepEqual(result.stats.errors,[]);

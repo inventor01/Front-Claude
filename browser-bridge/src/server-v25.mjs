@@ -1,12 +1,14 @@
+import { prioritizeAnalysis, newEvidenceRows } from './analysis-priority.mjs';
+import { extractX } from './x-feed-extractor.mjs';
 import { scanOutcome } from './scan-outcome-v26.mjs';
-import { scrollFeedPage, nextStalePassCount } from './feed-scroll.mjs';
+import { scrollFeedPage, nextStalePassCount, feedExhausted, collectVisibleFeeds } from './feed-scroll.mjs';
 import { buildScanLedgerEntry } from './scan-ledger-v26.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { cleanEvidenceContent, extractHashtags, normalizeConfig, sanitizeTopic, stableId } from './core.mjs';
+import { cleanEvidenceContent, extractHashtags, normalizeConfig, sanitizeTopic } from './core.mjs';
 import { detectTopics } from './topic-engine.mjs';
 import { attachSoundSignals, consolidateTopicAliases, mergeRichEvidence, normalizeAdaptiveConfig } from './adaptive-intelligence.mjs';
 import { attachVisualSignals, semanticConsolidateTopics } from './advanced-intelligence.mjs';
@@ -56,7 +58,6 @@ function hasText(value) {
   if (/^(?:home|explore|for you|following|search|profile|video|photo|sound|show more|more|views?|likes?|shares?|comments?)$/i.test(text)) return false;
   return true;
 }
-const canonicalXUrl = (raw) => canonicalSocialPostUrl(raw, 'X');
 const canonicalTikTokUrl = (raw) => canonicalSocialPostUrl(raw, 'TikTok');
 function deriveTopics(rows = [], limit = 24) {
   if (!rows.length) return [];
@@ -161,34 +162,6 @@ async function openOwnedPage(url) {
   }
 }
 
-async function extractX(page, provenance, limit = 120) {
-  const raw = await page.evaluate((max) => {
-    return [...document.querySelectorAll('article[data-testid="tweet"]')].slice(0, max).map((article) => {
-      const status = [...article.querySelectorAll('a[href*="/status/"]')].map((a) => a.href || a.getAttribute('href')).find(Boolean) || '';
-      const text = [...article.querySelectorAll('[data-testid="tweetText"]')].map((n) => n.textContent || '').join(' ').trim();
-      const published = article.querySelector('time')?.getAttribute('datetime') || null;
-      const poster = article.querySelector('video')?.getAttribute('poster') || article.querySelector('[data-testid="tweetPhoto"] img')?.getAttribute('src') || null;
-      const video = Boolean(article.querySelector('video,[data-testid="videoPlayer"]'));
-      return { status, text, published, poster, video };
-    });
-  }, Math.max(limit * 2, limit)).catch(() => []);
-  const out = [];
-  for (const row of raw) {
-    const url = canonicalXUrl(row.status);
-    if (!url || !hasText(row.text)) continue;
-    const parts = new URL(url).pathname.split('/').filter(Boolean);
-    const author = parts[0] || 'X';
-    const content = cleanEvidenceContent('X', row.text, author);
-    if (!hasText(content)) continue;
-    out.push({
-      id: stableId('X', url, content), platform: 'X', author, url, content,
-      published: row.published && Number.isFinite(Date.parse(row.published)) ? Date.parse(row.published) : null,
-      views: null, likes: null, coverUrl: row.poster, mediaType: row.video ? 'video' : (row.poster ? 'image' : 'text'),
-      hashtags: extractHashtags(content, 30), provenance, firstObserved: Date.now(),
-    });
-  }
-  return mergeRichEvidence(out).slice(0, limit);
-}
 
 async function collectXFeed(target, maxSeconds = 70) {
   const page = await openOwnedPage('https://x.com/home');
@@ -197,11 +170,13 @@ async function collectXFeed(target, maxSeconds = 70) {
   let scrolls = 0;
   let stale = 0;
   let lastSize = 0;
+  const seenDomIds = new Set();
+  const scrollDiagnostics = [];
   try {
     await page.waitForTimeout(2200);
     const tab = page.getByRole('tab', { name: /^For you$/i }).first();
     if (await tab.count().catch(() => 0)) await tab.click({ timeout: 2000 }).catch(() => {});
-    while (!shouldStop() && Date.now() - started < maxSeconds * 1000 && rows.size < target && scrolls < 24 && stale < 4) {
+    while (!shouldStop() && Date.now() - started < maxSeconds * 1000 && rows.size < target && scrolls < 48) {
       const found = await extractX(page, 'Front v26 · X dedicated For You collector', target);
       for (const row of found) rows.set(row.id, row);
       
@@ -209,13 +184,18 @@ async function collectXFeed(target, maxSeconds = 70) {
       const currentEvidence = mergeRichEvidence([...latestLive.evidence, ...found]);
       latestLive = { ...latestLive, evidence: currentEvidence.slice(-300), updatedAt: Date.now() };
 
-      stale = nextStalePassCount(lastSize, rows.size, stale);
-      lastSize = rows.size;
+      const domIds = await page.locator('article[data-testid="tweet"] a[href*="/status/"]').evaluateAll(links => links.map(a => a.href.match(/status\/(\d+)/)?.[1]).filter(Boolean));
+      for (const id of domIds) seenDomIds.add(id);
+      stale = nextStalePassCount(lastSize, seenDomIds.size, stale);
+      lastSize = seenDomIds.size;
       stage('xDiscovery', { status: 'running', observed: rows.size, target, scrolls, sourcePage: page.url(), stalePasses: stale });
       latestLive = { ...latestLive, sourcePages: [...new Set([...latestLive.sourcePages.filter((x) => !/x\.com/i.test(x)), page.url()])], updatedAt: Date.now() };
       if (rows.size >= target) break;
-      await scrollFeedPage(page, 'article[data-testid="tweet"]', 950);
-      await page.waitForTimeout(800);
+      const movement = await scrollFeedPage(page, 'article[data-testid="tweet"]', 950);
+      scrollDiagnostics.push({scroll:scrolls, ...movement, domIds:[...new Set(domIds)], accepted:found.length, uniqueDomIds:seenDomIds.size});
+      if (feedExhausted(stale, scrollDiagnostics)) break;
+      stage('xDiscovery', {scrollDiagnostics, uniqueDomIds:seenDomIds.size});
+      await page.waitForTimeout(1200);
       scrolls += 1;
     }
     stage('xDiscovery', { status: shouldStop() ? 'stopped' : 'complete', observed: rows.size, target, scrolls, elapsedMs: Date.now() - started });
@@ -318,19 +298,19 @@ async function addOriginResearch(rows, topics, mode) {
 async function contextualizePosts(rows, phaseName = 'post-understanding') {
   if (!rows.length || shouldStop()) return rows;
   setPhase(phaseName);
-  const maxPosts = Math.max(12, Math.min(180, Number(process.env.FRONT_CONTEXT_MAX_POSTS || 90)));
-  const selected = [...rows].sort((a,b) => Number(Boolean(a.postUnderstandingVersion)) - Number(Boolean(b.postUnderstandingVersion))).slice(0, maxPosts);
+  const maxPosts = Math.max(12, Math.min(180, Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12)));
+  const selected = prioritizeAnalysis(rows).slice(0, maxPosts);
   const priorRuns = latestLive.stages.postUnderstanding?.runs || [];
   stage('postUnderstanding', { status: 'running', requested: selected.length, totalEvidence: rows.length, engine: postUnderstanding.status() });
   const enriched = await postUnderstanding.enrich(selected, {
-    batchSize: Math.max(2, Math.min(16, Number(process.env.FRONT_CONTEXT_BATCH_SIZE || 8))),
-    timeoutMs: Math.max(12000, Number(process.env.FRONT_CONTEXT_TIMEOUT_MS || 45000)),
+    batchSize: Math.max(2, Math.min(16, Number(process.env.FRONT_CONTEXT_BATCH_SIZE || 4))),
+    timeoutMs: Math.max(12000, Number(process.env.FRONT_CONTEXT_TIMEOUT_MS || 60000)),
   });
   const byId = new Map(enriched.rows.map((row) => [row.id, row]));
   const output = rows.map((row) => byId.get(row.id) || row);
   const runs = [...priorRuns, {phase:phaseName, ...enriched.stats}];
   const totals = Object.fromEntries(['modeled','cached','fallback','failed'].map(key => [key, runs.reduce((sum,run) => sum + Number(run[key] || 0), 0)]));
-  stage('postUnderstanding', { ...enriched.stats, ...totals, runs, status: totals.failed ? 'degraded' : 'complete', analyzedPosts: selected.length, untouchedPosts: Math.max(0, rows.length - selected.length), engine: postUnderstanding.status() });
+  stage('postUnderstanding', { ...enriched.stats, ...totals, runs, errors: [...new Set(runs.flatMap(run => run.errors || []))], status: totals.failed ? 'degraded' : 'complete', analyzedPosts: selected.length, untouchedPosts: Math.max(0, rows.length - selected.length), engine: postUnderstanding.status() });
   return output;
 }
 
@@ -364,9 +344,9 @@ async function runScan(body = {}) {
     setPhase('discovery');
     const jobs = [];
     const feedSeconds = Number(body.maxFeedScanSeconds || config.maxFeedScanSeconds || 70);
-    if (request.scanXForYou) jobs.push(collectXFeed(request.targetUniqueFeedItems, feedSeconds).then((rows) => ({ platform: 'X', rows })));
-    if (request.scanTikTokForYou) jobs.push(collectTikTokFeed(request.targetUniqueFeedItems, feedSeconds).then((value) => ({ platform: 'TikTok', rows: value.evidence, tiktok: value.snapshot })));
-    const settled = await Promise.allSettled(jobs);
+    if (request.scanXForYou) jobs.push(() => collectXFeed(request.targetUniqueFeedItems, feedSeconds).then((rows) => ({ platform: 'X', rows })));
+    if (request.scanTikTokForYou) jobs.push(() => collectTikTokFeed(request.targetUniqueFeedItems, feedSeconds).then((value) => ({ platform: 'TikTok', rows: value.evidence, tiktok: value.snapshot })));
+    const settled = await collectVisibleFeeds(jobs);
     for (const item of settled) {
       if (item.status === 'fulfilled') resultRows.push(...item.value.rows);
       else latestLive.errors.push(clean(item.reason?.message || item.reason, 500));
@@ -387,7 +367,7 @@ async function runScan(body = {}) {
     setPhase('visual-understanding');
     const context = await ensureContext();
     if (!shouldStop() && understanding.status().enabled && resultRows.length) {
-      const requestedVideos = request.mode === 'deep' ? Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 8) : Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 4);
+      const requestedVideos = request.mode === 'deep' ? Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2) : Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1);
       stage('visualUnderstanding', { status: 'running', requested: requestedVideos });
       const enriched = await understanding.enrich(context, resultRows, { mode: request.mode, maxVideos: requestedVideos });
       resultRows = enriched.rows;
@@ -401,9 +381,13 @@ async function runScan(body = {}) {
     setPhase('narrative-ranking');
     topics = deriveTopics(resultRows, 24);
     stage('narrativeEngine', { status: 'complete', candidates: topics.length, intelligenceVersion: 26 });
+    const beforeOrigin = resultRows;
     resultRows = await addOriginResearch(resultRows, topics, request.mode);
-    if (!shouldStop() && request.mode === 'deep') {
-      resultRows = await contextualizePosts(resultRows, 'post-understanding-origin');
+    const newOrigin = newEvidenceRows(beforeOrigin, resultRows);
+    if (!shouldStop() && newOrigin.length) {
+      const enrichedOrigin = await contextualizePosts(newOrigin, 'post-understanding-origin');
+      const byId = new Map(enrichedOrigin.map(row => [row.id, row]));
+      resultRows = resultRows.map(row => byId.get(row.id) || row);
       topics = deriveTopics(resultRows, 24);
       stage('narrativeEngine', { status: 'complete', candidates: topics.length, rerankedAfterOrigin: true, intelligenceVersion: 26 });
     }
@@ -445,7 +429,7 @@ function health() {
     running: Boolean(current), scanId: current?.id || null, scanPhase: current?.phase || 'idle', scanLedger: { current, retained: scans.length },
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
     contentUnderstanding: understanding.status(), postUnderstanding: postUnderstanding.status(),
-    contentTargets: { deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 8), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 4), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 90) },
+    contentTargets: { deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
     capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','broad-tiktok-observation','caption-light-tiktok-discovery','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
     activePorts: { bridge: PORT, chromeCdp: CDP_PORT },
   };

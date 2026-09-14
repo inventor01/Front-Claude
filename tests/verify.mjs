@@ -65,6 +65,15 @@ assert.equal((await launchRoute.POST(creationRequest('buy'))).status,400);
 const creationResponse=await launchRoute.POST(creationRequest('create'));assert.equal(creationResponse.status,200);assert.equal((await creationResponse.json()).matched,true);
 assert.ok(database.prepare('SELECT COUNT(*) AS n FROM narrative_coins WHERE owner=? AND mint=?').get(coinOwner,mint).n===1);
 console.log('PASS: 4 authenticated creation-route assertions (reject trades, accept create, reverse match, persisted related coin).');
+const beforeMigration=JSON.parse(database.prepare('SELECT data FROM launch_events WHERE owner=? AND mint=?').get(coinOwner,mint).data);
+const migrationResponse=await launchRoute.POST(new Request('https://test.local/api/internal/launch-watch',{method:'POST',headers:{'content-type':'application/json','x-front-internal-key':internalKey},body:JSON.stringify({mint,seen:now+60000,raw:{txType:'migrate',pool:'pump-amm'}})}));
+assert.equal((await migrationResponse.json()).event,'migrate');
+const afterMigration=JSON.parse(database.prepare('SELECT data FROM launch_events WHERE owner=? AND mint=?').get(coinOwner,mint).data);
+assert.equal(afterMigration.creationObservedAt,beforeMigration.creationObservedAt);
+assert.equal(afterMigration.migrationObservedAt,now+60000);
+assert.equal(database.prepare('SELECT COUNT(*) AS n FROM pump_creation_events WHERE owner=? AND mint=?').get(coinOwner,mint).n,1);
+console.log('PASS: migration persists separately and preserves creation timestamp/count.');
+
 console.log('PASS: 8 related-coin SQL integration assertions (no coin, exact/multiple, generic rejection, snapshots, SOL units, caching, revalidation, history retention).');
 
 const r=await import(pathToFileURL(join(folder,'route.mjs')));
