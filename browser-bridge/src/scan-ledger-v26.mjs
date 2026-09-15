@@ -6,9 +6,9 @@ import { attachUnderstandingFrame, assessNarrativeClaims } from './understanding
 import { emptyNarrativeMemory, memoryScanSignals, normalizeNarrativeMemory, updateNarrativeMemory } from './narrative-memory-v26.mjs';
 
 const clean = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
-const MEMORY_PATH=path.join(process.env.FRONT_BRIDGE_DATA||path.join(os.homedir(),'.front-browser-bridge'),'narrative-memory-v26.json');
-const readMemory=()=>{try{return normalizeNarrativeMemory(JSON.parse(fs.readFileSync(MEMORY_PATH,'utf8')));}catch{return emptyNarrativeMemory();}};
-const writeMemory=(value)=>{try{fs.mkdirSync(path.dirname(MEMORY_PATH),{recursive:true});fs.writeFileSync(MEMORY_PATH,JSON.stringify(value,null,2));return true;}catch{return false;}};
+const memoryPath=()=>path.join(process.env.FRONT_BRIDGE_DATA||path.join(os.homedir(),'.front-browser-bridge'),'narrative-memory-v26.json');
+const readMemory=()=>{try{return normalizeNarrativeMemory(JSON.parse(fs.readFileSync(memoryPath(),'utf8')));}catch{return emptyNarrativeMemory();}};
+const writeMemory=(value)=>{try{const target=memoryPath();fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,JSON.stringify(value,null,2));return true;}catch{return false;}};
 
 function mergeSignals(current=[],memory=[]){
   const merged=new Map();
