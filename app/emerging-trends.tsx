@@ -8,6 +8,7 @@ export type ScanEvidence = {
   platform:'X'|'TikTok';
   author:string;
   content:string;
+  transcript?:string|null;
   semanticNarrativeKey?:string|null;
   postSubject?:string|null;
   postEvent?:string|null;
@@ -26,12 +27,14 @@ export type ScanTopic = {
   corroborated?:boolean;
   scanStatus?:'WATCH'|'EARLY'|'RISING'|'QUALIFIED';
   signalScore?:number;
+  signalSource?:'semantic'|'raw-repeat'|'engine';
 };
 
 const clean=(value:unknown,max=120)=>String(value??'').replace(/\s+/g,' ').trim().slice(0,max);
 const clamp=(value:number,min=0,max=100)=>Math.max(min,Math.min(max,value));
-const creatorKey=(row:ScanEvidence)=>String(row.author||'').replace(/^@/,'').trim().toLowerCase();
+const creatorKey=(row:ScanEvidence)=>`${row.platform}:${String(row.author||'').replace(/^@/,'').trim().toLowerCase()}`;
 const topicKey=(topic:ScanTopic)=>normalizeNarrativeText(String(topic.key||topic.topic||''));
+const sourceText=(row:ScanEvidence)=>clean([row.content,row.transcript].filter(Boolean).join(' '),2400);
 
 export function qualifiesForDashboard(topic:ScanTopic){
   const evidenceCount=Math.max(0,Number(topic.evidenceCount||0));
@@ -72,6 +75,33 @@ function bestSubject(rows:ScanEvidence[]){
   return [...counts.entries()].sort((a,b)=>b[1]-a[1]||b[0].length-a[0].length)[0]?.[0]||'';
 }
 
+function rawRepeatedSignals(evidence:ScanEvidence[]){
+  const groups=new Map<string,{terms:string[];rows:ScanEvidence[]}>();
+  for(const row of evidence){
+    const terms=[...new Set(specificNarrativeTerms(sourceText(row)))].slice(0,8);
+    if(terms.length<2)continue;
+    for(let i=0;i<terms.length;i++)for(let j=i+1;j<terms.length;j++){
+      const pair=[terms[i],terms[j]].sort();
+      const key=pair.join(' ');
+      const group=groups.get(key)||{terms:pair,rows:[]};
+      if(!group.rows.some((item)=>item.id===row.id))group.rows.push(row);
+      groups.set(key,group);
+    }
+  }
+  const out:ScanTopic[]=[];
+  for(const [key,group] of groups){
+    const creators=new Set(group.rows.map(creatorKey).filter(Boolean));
+    if(creators.size<2)continue;
+    const platforms=[...new Set(group.rows.map((row)=>row.platform))];
+    const evidenceIds=group.rows.map((row)=>row.id);
+    const signalScore=clamp(25+Math.min(30,creators.size*10)+Math.min(20,group.rows.length*5)+(platforms.length>=2?10:0));
+    const topic:ScanTopic={topic:group.terms.join(' '),key:`raw ${key}`,tier:'pre-breakout',corroborated:false,evidenceCount:group.rows.length,authorCount:creators.size,platforms,evidenceIds,score:signalScore,signalScore,signalSource:'raw-repeat'};
+    topic.scanStatus=signalStatus(topic);
+    out.push(topic);
+  }
+  return out;
+}
+
 export function buildEmergingSignals(evidence:ScanEvidence[]=[],inferredTopics:ScanTopic[]=[],limit=24){
   const groups=new Map<string,ScanEvidence[]>();
   for(const row of evidence){
@@ -88,7 +118,7 @@ export function buildEmergingSignals(evidence:ScanEvidence[]=[],inferredTopics:S
   for(const topic of inferredTopics){
     const key=topicKey(topic);
     if(!key)continue;
-    const base:ScanTopic={...topic,key,signalScore:clamp(Math.round(Number(topic.score||0)))};
+    const base:ScanTopic={...topic,key,signalScore:clamp(Math.round(Number(topic.score||0))),signalSource:topic.signalSource||'engine'};
     base.scanStatus=signalStatus(base);
     merged.set(key,base);
   }
@@ -113,15 +143,32 @@ export function buildEmergingSignals(evidence:ScanEvidence[]=[],inferredTopics:S
       evidenceIds,
       score:Math.max(Number(prior?.score||0),signalScore),
       signalScore,
+      signalSource:'semantic',
     };
     next.scanStatus=signalStatus(next);
     merged.set(key,next);
   }
 
+  for(const raw of rawRepeatedSignals(evidence)){
+    const fingerprint=(raw.evidenceIds||[]).slice().sort().join('|');
+    const semanticMatch=[...merged.values()].some((topic)=>{
+      const other=(topic.evidenceIds||[]).slice().sort().join('|');
+      return fingerprint&&other===fingerprint;
+    });
+    if(!semanticMatch)merged.set(String(raw.key),raw);
+  }
+
   const rank={QUALIFIED:4,RISING:3,EARLY:2,WATCH:1};
+  const fingerprints=new Set<string>();
   return [...merged.values()]
     .filter((topic)=>clean(topic.topic||topic.key,120)&&!isNarrativeLabelJunk(String(topic.topic||topic.key)))
     .sort((a,b)=>(rank[b.scanStatus||'WATCH']-rank[a.scanStatus||'WATCH'])||Number(b.signalScore||0)-Number(a.signalScore||0)||Number(b.authorCount||0)-Number(a.authorCount||0))
+    .filter((topic)=>{
+      const fp=(topic.evidenceIds||[]).slice().sort().join('|');
+      if(!fp)return true;
+      if(fingerprints.has(fp))return false;
+      fingerprints.add(fp);return true;
+    })
     .slice(0,Math.max(1,limit));
 }
 
