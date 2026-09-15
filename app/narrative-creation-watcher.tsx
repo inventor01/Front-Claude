@@ -56,7 +56,10 @@ export default function NarrativeCreationWatcher(){
   const savedHits=readArray<LifecycleHit>(HIT_KEY).slice(0,30);
   const savedWatches=readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string').slice(0,100);
   matchesRef.current=savedMatches;hitsRef.current=savedHits;watchesRef.current=savedWatches;
-  setMatches(savedMatches);setHits(savedHits);
+  const hydrate=window.setTimeout(()=>{
+   setMatches((current)=>current.length?current:savedMatches);
+   setHits((current)=>current.length?current:savedHits);
+  },0);
 
   const unsubscribeRuntime=subscribePumpPortalRuntime((runtime)=>{
    enabledRef.current=runtime.enabled;statusRef.current=runtime.status;
@@ -73,6 +76,7 @@ export default function NarrativeCreationWatcher(){
   window.addEventListener(WATCH_EVENT,refreshWatches);
   ensurePumpPortalRuntime();
   return()=>{
+   window.clearTimeout(hydrate);
    unsubscribeRuntime();
    window.removeEventListener(CONTROL_EVENT,control as EventListener);
    window.removeEventListener(WATCH_EVENT,refreshWatches);
