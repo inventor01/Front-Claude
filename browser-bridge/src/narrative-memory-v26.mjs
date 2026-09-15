@@ -117,11 +117,12 @@ export function memoryScanSignals(memoryInput,{now=Date.now(),currentEvidenceIds
   for(const [key,record] of Object.entries(memory.narratives)){
     const summary=summarizeNarrativeMemory(record,now);
     if(summary.creatorCount<1||summary.weightedSupport<.15)continue;
+    const evidenceIds=(record.evidence||[]).map((item)=>item.id).filter((id)=>id&&currentIds.has(id));
+    if(currentIds.size&&evidenceIds.length===0)continue;
     let scanStatus='WATCH';
     if(summary.independentCreatorCount>=3&&summary.weightedCreators>=2.1&&(summary.platforms.length>=2||summary.acceleration>.5))scanStatus='RISING';
     else if(summary.independentCreatorCount>=2&&summary.weightedCreators>=1.4)scanStatus='EARLY';
     const signalScore=Math.max(1,Math.min(99,Math.round(summary.weightedCreators*18+summary.weightedSupport*7+(summary.platforms.length>=2?10:0)+Math.max(0,summary.acceleration)*6)));
-    const evidenceIds=(record.evidence||[]).map((item)=>item.id).filter((id)=>id&&currentIds.has(id));
     out.push({topic:clean(record.title,140)||key,key,tier:'pre-breakout',corroborated:false,evidenceCount:Math.max(evidenceIds.length,summary.evidenceCount),authorCount:summary.independentCreatorCount,platforms:summary.platforms,evidenceIds,score:signalScore,signalScore,scanStatus,signalSource:'memory',memory:summary,aliases:record.aliases||[]});
   }
   const rank={RISING:3,EARLY:2,WATCH:1};
