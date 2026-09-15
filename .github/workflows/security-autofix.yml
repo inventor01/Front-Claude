@@ -1,0 +1,54 @@
+name: Security Autofix
+
+on:
+  push:
+    branches:
+      - security/npm-audit-hardening-20260915
+
+permissions:
+  contents: write
+
+jobs:
+  update-lock:
+    if: ${{ !contains(github.event.head_commit.message, '[security-lock-update]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: security/npm-audit-hardening-20260915
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply safe direct dependency upgrades
+        run: |
+          npm install --save-exact next@16.3.5 react@19.2.8 react-dom@19.2.8
+          npm install --save-dev --save-exact \
+            @cloudflare/vite-plugin@1.54.9 \
+            vite@8.3.0 \
+            wrangler@4.114.0 \
+            vinext@1.0.0-beta.10 \
+            react-server-dom-webpack@19.2.8
+      - name: Apply safe transitive audit fixes
+        run: npm audit fix --package-lock-only
+      - name: Show remaining audit state
+        shell: bash
+        run: |
+          set +e
+          echo '=== PRODUCTION ==='
+          npm audit --omit=dev
+          echo '=== FULL ==='
+          npm audit
+          exit 0
+      - name: Commit lockfile updates
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo 'No dependency changes to commit.'
+            exit 0
+          fi
+          git commit -m 'fix(security): patch npm dependency advisories [security-lock-update]'
+          git push origin HEAD:security/npm-audit-hardening-20260915
