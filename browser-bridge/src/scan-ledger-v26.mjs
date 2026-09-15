@@ -38,8 +38,9 @@ export function buildScanLedgerEntry({id, finalStatus, startedAt, completedAt=Da
   const framedEvidence=(latestLive.evidence||[]).map(attachUnderstandingFrame);
   const currentSignals=buildScanSignals(framedEvidence,latestLive.inferredTopics||[],24);
   const priorMemory=readMemory();
-  const updatedMemory=updateNarrativeMemory(priorMemory,framedEvidence,latestLive.inferredTopics||[],{now:completedAt,scanId:id});
-  const memoryPersisted=writeMemory(updatedMemory);
+  const memoryEligible=finalStatus==='complete';
+  const updatedMemory=memoryEligible?updateNarrativeMemory(priorMemory,framedEvidence,latestLive.inferredTopics||[],{now:completedAt,scanId:id}):priorMemory;
+  const memoryPersisted=memoryEligible?writeMemory(updatedMemory):false;
   const memorySignals=memoryScanSignals(updatedMemory,{now:completedAt,currentEvidenceIds:framedEvidence.map((row)=>row.id)});
   const scanSignals=attachClaimAssessment(mergeSignals(currentSignals,memorySignals),framedEvidence);
   const scanSignalCounts=countScanSignals(scanSignals);
@@ -53,7 +54,7 @@ export function buildScanLedgerEntry({id, finalStatus, startedAt, completedAt=Da
       vision: { enabled: contentStatus.enabled, provider: contentStatus.provider, model: contentStatus.model, visuallyUnderstood: framedEvidence.filter(row => row.contentSummary).length, scan: latestLive.stages.visualUnderstanding },
       transcriptEvidence: framedEvidence.filter(row=>clean(row.transcript,40)).length,
       understandingFrames: framedEvidence.filter(row=>row.understandingFrame?.subject||row.understandingFrame?.event).length,
-      narrativeMemory: { persisted: memoryPersisted, retained: Object.keys(updatedMemory.narratives||{}).length, updatedAt: updatedMemory.updatedAt },
+      narrativeMemory: { eligible: memoryEligible, persisted: memoryPersisted, retained: Object.keys(updatedMemory.narratives||{}).length, updatedAt: updatedMemory.updatedAt },
       scanSignals, scanSignalCounts,
       observed: latestLive.observed, candidateTopics: latestLive.candidateTopics, platformCounts: latestLive.platformCounts,
       stages: latestLive.stages, errors: latestLive.errors, sourcePages: latestLive.sourcePages,
