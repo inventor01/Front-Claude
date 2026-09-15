@@ -5,11 +5,12 @@ const clamp01=(value,fallback=0)=>{const n=Number(value);return Number.isFinite(
 const uniq=(items=[],limit=20)=>[...new Set(items.filter(Boolean))].slice(0,limit);
 const STOP=new Set('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i me my you your we our they their he she his her not no yes just very really have has had do does did can could would should will may might about into over under after before more most some any all one two what when where who why how'.split(/\s+/));
 const NOISE=new Set('video videos post posts clip clips viral trend trends trending meme memes update news breaking original sound audio tiktok twitter x fyp foryou people thing things'.split(/\s+/));
+const isTextTrackSource=(value)=>/text-track/i.test(String(value||''));
 
 function channelEntries(row={}){
   return [
     {channel:'caption',text:clean(row.content,2200),confidence:.72},
-    {channel:'transcript',text:clean(row.transcript,2600),confidence:row.transcriptSource?.includes('text-track')?.92:.82},
+    {channel:'transcript',text:clean(row.transcript,2600),confidence:isTextTrackSource(row.transcriptSource)?.92:.82},
     {channel:'visual',text:clean([row.contentSummary,row.contentEvent].filter(Boolean).join(' '),1800),confidence:clamp01(row.contentConfidence,.7)},
   ].filter((item)=>item.text);
 }
@@ -104,7 +105,7 @@ export function buildUnderstandingFrame(row={}){
     context:clean(row.postContext,220)||null,
     semanticNarrativeKey,
     eventFingerprint,
-    confidence:{overall:postConfidence,semantic:postConfidence,visual:visualConfidence,transcript:transcriptPresent?(row.transcriptSource?.includes('text-track')?.92:.82):0},
+    confidence:{overall:postConfidence,semantic:postConfidence,visual:visualConfidence,transcript:transcriptPresent?(isTextTrackSource(row.transcriptSource)?.92:.82):0},
     provenance,
     observations,
     evidenceBuckets,
