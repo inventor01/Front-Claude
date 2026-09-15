@@ -113,12 +113,13 @@ export function summarizeNarrativeMemory(record,now=Date.now()){
 export function memoryScanSignals(memoryInput,{now=Date.now(),currentEvidenceIds=[]}={}){
   const memory=normalizeNarrativeMemory(memoryInput);
   const currentIds=new Set(currentEvidenceIds);
+  if(currentIds.size===0)return[];
   const out=[];
   for(const [key,record] of Object.entries(memory.narratives)){
     const summary=summarizeNarrativeMemory(record,now);
     if(summary.creatorCount<1||summary.weightedSupport<.15)continue;
     const evidenceIds=(record.evidence||[]).map((item)=>item.id).filter((id)=>id&&currentIds.has(id));
-    if(currentIds.size&&evidenceIds.length===0)continue;
+    if(evidenceIds.length===0)continue;
     let scanStatus='WATCH';
     if(summary.independentCreatorCount>=3&&summary.weightedCreators>=2.1&&(summary.platforms.length>=2||summary.acceleration>.5))scanStatus='RISING';
     else if(summary.independentCreatorCount>=2&&summary.weightedCreators>=1.4)scanStatus='EARLY';
