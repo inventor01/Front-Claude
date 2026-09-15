@@ -32,7 +32,7 @@ export type ScanTopic = {
 
 const clean=(value:unknown,max=120)=>String(value??'').replace(/\s+/g,' ').trim().slice(0,max);
 const clamp=(value:number,min=0,max=100)=>Math.max(min,Math.min(max,value));
-const creatorKey=(row:ScanEvidence)=>`${row.platform}:${String(row.author||'').replace(/^@/,'').trim().toLowerCase()}`;
+const creatorKey=(row:ScanEvidence)=>String(row.author||'').replace(/^@/,'').trim().toLowerCase();
 const topicKey=(topic:ScanTopic)=>normalizeNarrativeText(String(topic.key||topic.topic||''));
 const sourceText=(row:ScanEvidence)=>clean([row.content,row.transcript].filter(Boolean).join(' '),2400);
 
