@@ -28,6 +28,12 @@ if ! command -v whisper-cli >/dev/null 2>&1; then
   fi
 fi
 
+if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v whisper-cli >/dev/null 2>&1; then
+  echo "Front could not verify ffmpeg + whisper-cli after installation."
+  echo "Fix the Homebrew installation, then run this setup again."
+  exit 1
+fi
+
 if [ ! -s "$MODEL_PATH" ]; then
   echo "Downloading the multilingual Whisper base model..."
   TMP="$MODEL_PATH.part"
