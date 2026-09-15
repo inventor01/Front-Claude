@@ -7,9 +7,18 @@ const settingsPage=fs.readFileSync(new URL('../app/settings/page.tsx',import.met
 const ledgerPage=fs.readFileSync(new URL('../app/settings/ledger/page.tsx',import.meta.url),'utf8');
 const ledgerClient=fs.readFileSync(new URL('../app/settings/ledger/ledger-client.tsx',import.meta.url),'utf8');
 
-test('settings Back to Front uses a hard navigation instead of client Link routing',()=>{
-  assert.match(source,/<a className=\{styles\.back\} href="\/">/);
-  assert.doesNotMatch(source,/import Link from 'next\/link'/);
+test('settings Back to Front uses client routing so live listeners survive navigation',()=>{
+  assert.match(source,/import Link from 'next\/link'/);
+  assert.match(source,/<Link className=\{styles\.back\} href="\/">/);
+  assert.doesNotMatch(source,/<a className=\{styles\.back\} href="\/">/);
+});
+
+test('PumpPortal controls are route-independent and do not own the WebSocket',()=>{
+  assert.match(source,/const CONTROL_EVENT='front-pumpportal-control'/);
+  assert.match(source,/window\.dispatchEvent\(new CustomEvent\(CONTROL_EVENT/);
+  assert.doesNotMatch(source,/new WebSocket\('wss:\/\/pumpportal\.fun\/api\/data'\)/);
+  assert.doesNotMatch(source,/socket\?\.close\(\)/);
+  assert.match(source,/localStorage\.getItem\(LISTENER_KEY\)==='true'/);
 });
 
 test('background health polling does not overwrite unsaved scanner form state',()=>{
