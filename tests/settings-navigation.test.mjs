@@ -7,9 +7,18 @@ const settingsPage=fs.readFileSync(new URL('../app/settings/page.tsx',import.met
 const ledgerPage=fs.readFileSync(new URL('../app/settings/ledger/page.tsx',import.meta.url),'utf8');
 const ledgerClient=fs.readFileSync(new URL('../app/settings/ledger/ledger-client.tsx',import.meta.url),'utf8');
 
-test('settings Back to Front uses a hard navigation instead of client Link routing',()=>{
-  assert.match(source,/<a className=\{styles\.back\} href="\/">/);
-  assert.doesNotMatch(source,/import Link from 'next\/link'/);
+test('settings Back to Front uses client routing so live listeners survive navigation',()=>{
+  assert.match(source,/import Link from 'next\/link'/);
+  assert.match(source,/<Link className=\{styles\.back\} href="\/">/);
+  assert.doesNotMatch(source,/<a className=\{styles\.back\} href="\/">/);
+});
+
+test('PumpPortal controls use the shared runtime instead of a route-owned WebSocket',()=>{
+  assert.match(source,/subscribePumpPortalRuntime/);
+  assert.match(source,/ensurePumpPortalRuntime\(\)/);
+  assert.match(source,/setPumpPortalRuntimeEnabled\(!listening\)/);
+  assert.doesNotMatch(source,/new WebSocket\('wss:\/\/pumpportal\.fun\/api\/data'\)/);
+  assert.doesNotMatch(source,/socket\?\.close\(\)/);
 });
 
 test('background health polling does not overwrite unsaved scanner form state',()=>{

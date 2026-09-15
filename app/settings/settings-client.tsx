@@ -1,7 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import {useEffect,useRef,useState} from 'react';
 import {Activity,ArrowLeft,Bell,CheckCircle2,LogIn,Play,Plus,Radio,RefreshCw,Save,Square,Trash2,TriangleAlert} from 'lucide-react';
+import {ensurePumpPortalRuntime,setPumpPortalRuntimeEnabled,subscribePumpPortalRuntime} from '../pumpportal-client-runtime.mjs';
+import {HIT_EVENT,HIT_KEY,type PumpPortalHit} from '../pumpportal-listener-service';
 import styles from './settings-client.module.css';
 
 const BRIDGE='http://127.0.0.1:43981';
@@ -41,7 +44,7 @@ type BridgeHealth={config:BridgeConfig;version:number;scanner?:string;capabiliti
 type ScanResult={evidence:Evidence[];errors:string[];inferredTopics?:InferredTopic[];at:number;config:BridgeConfig};
 type StoredResult={accepted?:number;newEvidence?:number;replayed?:number;inferredNarratives?:number;error?:string};
 type Watch={id:string;name:string;created:number};
-type Hit={mint:string;name:string;symbol?:string;seen:number};
+type Hit=PumpPortalHit;
 
 const DEFAULT_CONFIG:BridgeConfig={
   enabled:true,
@@ -71,6 +74,7 @@ const DEFAULT_CONFIG:BridgeConfig={
 
 function lines(value:string){return[...new Set(value.split(/[\n,]+/).map((item)=>item.trim()).filter(Boolean))];}
 function normalize(value:string){return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();}
+function readArray<T>(key:string):T[]{try{const value=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(value)?value:[];}catch{return[];}}
 
 async function local<T>(path:string,init?:RequestInit,timeoutMs=LOCAL_TIMEOUT_MS):Promise<T>{
   const controller=new AbortController();
@@ -110,7 +114,6 @@ export default function SettingsClient(){
   const [listening,setListening]=useState(false);
   const [listenStatus,setListenStatus]=useState('Off');
   const [hits,setHits]=useState<Hit[]>([]);
-  const watchesRef=useRef<Watch[]>([]);
   const hydrated=useRef(false);
   const configHydrated=useRef(false);
   const stopRequested=useRef(false);
@@ -225,39 +228,37 @@ export default function SettingsClient(){
   }
 
   useEffect(()=>{
-    const kickoff=window.setTimeout(()=>{void ping(true,true);try{const raw=JSON.parse(localStorage.getItem(WATCH_KEY)||'[]');if(Array.isArray(raw))setWatches(raw.filter((item)=>item&&typeof item.name==='string'));}catch{}hydrated.current=true;},0);
+    const kickoff=window.setTimeout(()=>{
+      void ping(true,true);
+      setWatches(readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string'));
+      setHits(readArray<Hit>(HIT_KEY).filter((item)=>item&&typeof item.mint==='string').slice(0,20));
+      hydrated.current=true;
+    },0);
     const interval=window.setInterval(()=>{void ping(true,false);},30_000);
     return()=>{window.clearTimeout(kickoff);window.clearInterval(interval);};
   },[]);
 
-  useEffect(()=>{watchesRef.current=watches;if(hydrated.current)localStorage.setItem(WATCH_KEY,JSON.stringify(watches));},[watches]);
+  useEffect(()=>{if(hydrated.current)localStorage.setItem(WATCH_KEY,JSON.stringify(watches));},[watches]);
 
   useEffect(()=>{
-    if(!listening)return;
-    let socket:WebSocket|undefined;
-    let retry:ReturnType<typeof setTimeout>;
-    let stopped=false;
-    let attempt=0;
-    const connect=()=>{
-      setListenStatus('Connecting');
-      socket=new WebSocket('wss://pumpportal.fun/api/data');
-      socket.onopen=()=>{attempt=0;setListenStatus('Connected · creations only');socket?.send(JSON.stringify({method:'subscribeNewToken'}));};
-      socket.onmessage=(event)=>{try{
-        const data=JSON.parse(event.data) as {txType?:string;mint?:string;name?:string;symbol?:string};
-        if(data.txType!=='create'||!data.mint||!data.name)return;
-        const match=watchesRef.current.find((watch)=>normalize(watch.name)===normalize(data.name||''));
-        if(!match)return;
-        const hit:Hit={mint:data.mint,name:data.name,symbol:data.symbol,seen:Date.now()};
-        setHits((current)=>[hit,...current.filter((item)=>item.mint!==hit.mint)].slice(0,20));
-        setMessage(`MATCH: ${hit.name} was created on Pump.fun.`);
-        if(typeof Notification!=='undefined'&&Notification.permission==='granted')new Notification('Front creation alert',{body:`${hit.name}${hit.symbol?` · ${hit.symbol}`:''} created on Pump.fun`});
-      }catch{}};
-      socket.onerror=()=>setListenStatus('Connection error');
-      socket.onclose=()=>{if(!stopped){setListenStatus('Reconnecting');retry=setTimeout(connect,Math.min(30_000,1000*2**attempt++));}};
+    const unsubscribe=subscribePumpPortalRuntime((runtime)=>{
+      setListening(runtime.enabled);
+      setListenStatus(runtime.status);
+    });
+    ensurePumpPortalRuntime();
+    return unsubscribe;
+  },[]);
+
+  useEffect(()=>{
+    const onHit=(event:Event)=>{
+      const hit=(event as CustomEvent<Hit>).detail;
+      if(!hit?.mint)return;
+      setHits((current)=>[hit,...current.filter((item)=>item.mint!==hit.mint)].slice(0,20));
+      setMessage(`MATCH: ${hit.name} was created on Pump.fun.`);
     };
-    connect();
-    return()=>{stopped=true;clearTimeout(retry);socket?.close();};
-  },[listening]);
+    window.addEventListener(HIT_EVENT,onHit as EventListener);
+    return()=>window.removeEventListener(HIT_EVENT,onHit as EventListener);
+  },[]);
 
   return <main className={styles.shell}>
     <header className={styles.header}>
@@ -266,7 +267,7 @@ export default function SettingsClient(){
         <h1>Scanner control center</h1>
         <p>Configure the local X/TikTok intelligence bridge and Pump.fun creation alerts without opening floating tool panels.</p>
       </div>
-      <a className={styles.back} href="/"><ArrowLeft size={15}/> Back to Front</a>
+      <Link className={styles.back} href="/"><ArrowLeft size={15}/> Back to Front</Link>
     </header>
 
     {error&&<div className={styles.error}><TriangleAlert size={16}/><span>{error}</span></div>}
@@ -333,7 +334,7 @@ export default function SettingsClient(){
 
       <section className={`${styles.card} ${styles.span2}`}>
         <div className={styles.cardHead}><div><Radio size={18}/><div><h2>Pump.fun creation alerts</h2><p>Exact-name local watches using PumpPortal new-token creation events only</p></div></div><span className={listening?styles.good:styles.muted}>{listenStatus}</span></div>
-        <div className={styles.watchRow}><input value={watchName} onChange={(e)=>setWatchName(e.target.value)} onKeyDown={(e)=>{if(e.key==='Enter')addWatch();}} placeholder="Exact token name"/><button onClick={addWatch}><Plus size={14}/> Add watch</button><button className={listening?styles.danger:styles.primary} onClick={()=>setListening((value)=>!value)}><Radio size={14}/> {listening?'Stop listening':'Start listening'}</button><button onClick={()=>void requestAlerts()}><Bell size={14}/> Browser alerts</button></div>
+        <div className={styles.watchRow}><input value={watchName} onChange={(e)=>setWatchName(e.target.value)} onKeyDown={(e)=>{if(e.key==='Enter')addWatch();}} placeholder="Exact token name"/><button onClick={addWatch}><Plus size={14}/> Add watch</button><button className={listening?styles.danger:styles.primary} onClick={()=>setPumpPortalRuntimeEnabled(!listening)}><Radio size={14}/> {listening?'Stop listening':'Start listening'}</button><button onClick={()=>void requestAlerts()}><Bell size={14}/> Browser alerts</button></div>
         <div className={styles.chips}>{watches.length?watches.map((watch)=><span key={watch.id}>{watch.name}<button aria-label={`Remove ${watch.name}`} onClick={()=>setWatches((current)=>current.filter((item)=>item.id!==watch.id))}><Trash2 size={12}/></button></span>):<small>No exact-name watches yet.</small>}</div>
         {hits.length>0&&<div className={styles.hits}>{hits.map((hit)=><div key={hit.mint}><div><b>{hit.name}{hit.symbol?` · ${hit.symbol}`:''}</b><small>{new Date(hit.seen).toLocaleTimeString()}</small></div><a href={`https://pump.fun/coin/${encodeURIComponent(hit.mint)}`} target="_blank" rel="noreferrer">Open Pump.fun</a></div>)}</div>}
       </section>
