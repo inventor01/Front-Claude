@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {emptyNarrativeMemory,memoryScanSignals,narrativeMemoryWeight,summarizeNarrativeMemory,updateNarrativeMemory} from '../src/narrative-memory-v26.mjs';
 
 const now=1_800_000_000_000;
-const row=(id,author,platform,offsetHours=0)=>({id,platform,author,url:`https://example.test/${id}`,postSubject:'Daejon Love interview meme',postEvent:'interview clip becomes meme',semanticNarrativeKey:'daejon love interview meme',postUnderstandingConfidence:.9,firstObserved:now-offsetHours*3600000});
+const row=(id,author,platform,offsetHours=0,extra={})=>({id,platform,author,url:`https://example.test/${id}`,postSubject:'Daejon Love interview meme',postEvent:'interview clip becomes meme',semanticNarrativeKey:'daejon love interview meme',postUnderstandingConfidence:.9,firstObserved:now-offsetHours*3600000,...extra});
 
 test('weak semantic evidence accumulates across scans without auto-qualifying',()=>{
  let memory=emptyNarrativeMemory();
@@ -27,8 +27,22 @@ test('same creator handle across platforms counts once in rolling memory',()=>{
  const record=memory.narratives['daejon love interview meme'];
  const summary=summarizeNarrativeMemory(record,now);
  assert.equal(summary.creatorCount,1);
+ assert.equal(summary.independentCreatorCount,1);
  const [signal]=memoryScanSignals(memory,{now,currentEvidenceIds:['1','2']});
  assert.equal(signal.scanStatus,'WATCH');
+});
+
+test('many comments remain supporting context and cannot replace independent top-level creators',()=>{
+ let memory=emptyNarrativeMemory();
+ const evidence=[row('top','creator','TikTok'),...Array.from({length:12},(_,i)=>row(`c${i}`,`commenter${i}`,'TikTok',0,{evidenceRole:'comment',parentId:'top'}))];
+ memory=updateNarrativeMemory(memory,evidence,[],{now,scanId:'comments'});
+ const summary=summarizeNarrativeMemory(memory.narratives['daejon love interview meme'],now);
+ assert.equal(summary.independentCreatorCount,1);
+ assert.equal(summary.creatorCount,13);
+ assert(summary.commentSupport>0);
+ const [signal]=memoryScanSignals(memory,{now,currentEvidenceIds:evidence.map(item=>item.id)});
+ assert.equal(signal.scanStatus,'WATCH');
+ assert.equal(signal.authorCount,1);
 });
 
 test('stale evidence decays to history and cannot create current momentum by itself',()=>{
