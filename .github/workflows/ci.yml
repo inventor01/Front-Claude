@@ -28,6 +28,16 @@ jobs:
       - name: Install
         run: npm run install:ci
 
+      # Production is expected to be clean. Block any future high/critical
+      # runtime advisory before browser/build work consumes more CI time.
+      - name: Production dependency security audit
+        run: npm audit --omit=dev --audit-level=high
+
+      # Build tooling currently has one documented Drizzle Kit/esbuild moderate
+      # chain with no safe in-range fix. High/critical tooling regressions fail.
+      - name: Full dependency high-severity audit
+        run: npm audit --audit-level=high
+
       - name: Install browser bridge dependencies
         run: npm install --prefix browser-bridge --no-audit --no-fund
 
