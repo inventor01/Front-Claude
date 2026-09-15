@@ -22,7 +22,10 @@ fi
 
 if ! command -v whisper-cli >/dev/null 2>&1; then
   echo "Installing whisper.cpp..."
-  brew install whisper.cpp
+  if ! brew install whisper.cpp; then
+    echo "Primary Homebrew formula failed; trying whisper-cpp compatibility formula..."
+    brew install whisper-cpp
+  fi
 fi
 
 if [ ! -s "$MODEL_PATH" ]; then

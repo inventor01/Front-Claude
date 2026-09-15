@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isVideoRow, normalizeTranscript, selectMediaCandidates, transcriptTerminal } from '../src/video-transcript-v27.mjs';
-import { enrichVideoMeaning, meaningInput, needsVisualFallback } from '../src/video-meaning-v27.mjs';
+import { enrichVideoMeaning, meaningInput, needsVisualFallback, reusableVideoMeaning } from '../src/video-meaning-v27.mjs';
 
 test('v27 identifies every TikTok and X video as transcript eligible', () => {
   assert.equal(isVideoRow({ platform: 'TikTok', mediaType: 'video' }), true);
@@ -41,6 +41,12 @@ test('video meaning treats transcript + caption as first-class evidence', () => 
 
 test('low-information silent videos require visual fallback', () => {
   assert.equal(needsVisualFallback({ platform:'TikTok', content:'wow', transcript:'', transcriptStatus:'no-speech' }), true);
+});
+
+test('failed or weak video meanings are never reusable cache hits', () => {
+  assert.equal(reusableVideoMeaning({ videoMeaningStatus:'failed', videoAbout:'fallback caption', videoMeaningConfidence:.9 }), false);
+  assert.equal(reusableVideoMeaning({ videoMeaningStatus:'modeled', videoAbout:'specific event', videoMeaningConfidence:.39 }), false);
+  assert.equal(reusableVideoMeaning({ videoMeaningStatus:'modeled', videoAbout:'specific event', videoMeaningConfidence:.8 }), true);
 });
 
 test('meaning enrichment preserves raw caption and makes modeled meaning clusterable', () => {

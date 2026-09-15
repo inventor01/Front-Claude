@@ -69,6 +69,9 @@ function parseArray(value) {
   if (first < 0 || last <= first) return null;
   try { return JSON.parse(fenced.slice(first, last + 1)); } catch { return null; }
 }
+export function reusableVideoMeaning(value) {
+  return value?.videoMeaningStatus === 'modeled' && Boolean(clean(value?.videoAbout, 360)) && clamp01(value?.videoMeaningConfidence, 0) >= 0.4;
+}
 function normalizeResult(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const about = clean(raw.about ?? raw.a, 360);
@@ -209,7 +212,7 @@ export class VideoMeaningEngineV27 {
   }
   status() { return { version:VIDEO_MEANING_VERSION, enabled:this.provider.available, provider:this.provider.provider, model:this.provider.model || null, batchSize:this.batchSize, timeoutMs:this.timeoutMs, cachedVideos:Object.keys(this.cache).length, lastStats:this.lastStats }; }
   key(row) { return createHash('sha256').update(JSON.stringify([row.platform,row.id,row.url,row.sourceContent ?? row.content,row.transcript,row.transcriptStatus,row.contentSummary,this.provider.provider,this.provider.model,VIDEO_MEANING_VERSION])).digest('hex'); }
-  cached(row) { const entry=this.cache[this.key(row)]; return entry && Date.now()-Number(entry.at||0)<=CACHE_TTL_MS ? entry.value : null; }
+  cached(row) { const entry=this.cache[this.key(row)]; return entry && Date.now()-Number(entry.at||0)<=CACHE_TTL_MS && reusableVideoMeaning(entry.value) ? entry.value : null; }
   persist() { this.cache=Object.fromEntries(Object.entries(this.cache).sort((a,b)=>Number(b[1]?.at||0)-Number(a[1]?.at||0)).slice(0,2500)); writeJson(this.cachePath,this.cache); }
   async enrich(context, rows = [], { onRow } = {}) {
     const startedAt=Date.now();
@@ -237,7 +240,7 @@ export class VideoMeaningEngineV27 {
           const result=matches.length===1?normalizeResult(matches[0]):null;
           const value=result || {videoAbout:clean(meaningInput(row).spoken||meaningInput(row).caption,300),videoSubject:'',videoEvent:'',videoMeaningConfidence:.25,videoMeaningMethod:'deterministic-fallback',videoMeaningStatus:'failed',videoMeaningAt:Date.now(),videoMeaningError:error||'Video meaning response missing or invalid.'};
           if(result){stats.modeled++;stats.completed++;}else{stats.failed++;stats.errors.push(`${row.id}: ${value.videoMeaningError}`);}
-          this.cache[this.key(row)]={at:Date.now(),value};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);if(onRow)await onRow(enriched,{...stats});
+          if(reusableVideoMeaning(value)) this.cache[this.key(row)]={at:Date.now(),value};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);if(onRow)await onRow(enriched,{...stats});
         }
         this.persist();
       }
@@ -247,7 +250,7 @@ export class VideoMeaningEngineV27 {
         let value;
         try{value=await analyzeVisualOne(context,row,this.provider,ctl.signal);stats.visualFallback++;stats.completed++;}
         catch(reason){const message=reason?.name==='AbortError'?`Visual video meaning timed out after ${this.timeoutMs}ms.`:clean(reason?.message||reason,300);value={videoAbout:'',videoSubject:'',videoEvent:'',videoMeaningConfidence:0,videoMeaningMethod:'visual-fallback-model',videoMeaningStatus:'failed',videoMeaningAt:Date.now(),videoMeaningError:message};stats.failed++;stats.errors.push(`${row.id}: ${message}`);}finally{clearTimeout(timer);}
-        this.cache[this.key(row)]={at:Date.now(),value};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);this.persist();if(onRow)await onRow(enriched,{...stats});
+        if(reusableVideoMeaning(value)) this.cache[this.key(row)]={at:Date.now(),value};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);this.persist();if(onRow)await onRow(enriched,{...stats});
       }
     }
     stats.elapsedMs=Date.now()-startedAt;stats.status=stats.failed?'degraded':'complete';stats.errors=[...new Set(stats.errors)].slice(0,20);this.lastStats=stats;
