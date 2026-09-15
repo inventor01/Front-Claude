@@ -1,0 +1,29 @@
+name: Security Audit
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Production dependency audit
+        shell: bash
+        run: |
+          set +e
+          npm audit --omit=dev --json
+          exit 0
+      - name: Full dependency audit
+        shell: bash
+        run: |
+          set +e
+          npm audit --json
+          exit 0
