@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, Eye, Filter, Radio, Sparkles } from 'lucide-react';
+import EmergingTrends, { buildEmergingSignals, type ScanTopic } from './emerging-trends';
 import FrontDesk from './front-desk';
 import styles from './front-live-shell.module.css';
 
@@ -18,6 +19,10 @@ type LiveEvidence = {
   views:number|null;
   likes:number|null;
   provenance:string;
+  semanticNarrativeKey?:string|null;
+  postSubject?:string|null;
+  postEvent?:string|null;
+  postUnderstandingConfidence?:number|null;
 };
 
 type LiveTopic = {
@@ -64,7 +69,7 @@ type LiveState = {
 type LiveFilter='all'|'X'|'TikTok'|'early'|'qualified'|'synced';
 type PersistedSync={scanAt:number;ids:string[];topics:string};
 
-const topicName=(topic:LiveTopic)=>String(topic.topic||topic.key||'').replace(/\s+/g,' ').trim();
+const topicName=(topic:LiveTopic|ScanTopic)=>String(topic.topic||topic.key||'').replace(/\s+/g,' ').trim();
 const topicFingerprint=(topics:LiveTopic[])=>topics.slice(0,30).map((topic)=>`${topic.key||topic.topic}:${topic.evidenceCount||0}:${topic.authorCount||0}:${topic.score||0}:${topic.tier||''}:${topic.corroborated===true?'1':'0'}`).join('|');
 const compact=(value:number|null|undefined)=>value==null?'—':new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1}).format(value);
 const ago=(value:number|null|undefined)=>{
@@ -75,14 +80,14 @@ const ago=(value:number|null|undefined)=>{
   return `${Math.round(minutes/1440)}d ago`;
 };
 
-function qualifiesTopic(topic:LiveTopic){
+function qualifiesTopic(topic:LiveTopic|ScanTopic){
   const evidenceCount=Math.max(0,Number(topic.evidenceCount||0));
   const authorCount=Math.max(0,Number(topic.authorCount||0));
   const words=topicName(topic).split(/\s+/).filter(Boolean);
   return evidenceCount>=2&&authorCount>=2&&topic.tier==='candidate'&&topic.corroborated===true&&!(words.length===1&&authorCount<3);
 }
 
-function qualificationReason(topic:LiveTopic){
+function qualificationReason(topic:LiveTopic|ScanTopic){
   const evidenceCount=Math.max(0,Number(topic.evidenceCount||0));
   const authorCount=Math.max(0,Number(topic.authorCount||0));
   const words=topicName(topic).split(/\s+/).filter(Boolean);
@@ -95,7 +100,7 @@ function qualificationReason(topic:LiveTopic){
   return 'Qualified for the narrative feed';
 }
 
-function evidenceMatchesTopics(row:LiveEvidence,topics:LiveTopic[]){
+function evidenceMatchesTopics(row:LiveEvidence,topics:ScanTopic[]){
   const ids=new Set(topics.flatMap((topic)=>topic.evidenceIds||[]));
   if(ids.has(row.id))return true;
   const haystack=row.content.toLowerCase();
@@ -215,7 +220,7 @@ export default function FrontLiveShell(){
     return()=>{stopped=true;if(timer)clearTimeout(timer);};
   },[]);
 
-  const topics=(live?.inferredTopics||[]).filter((topic)=>topicName(topic)).slice(0,24);
+  const topics=useMemo(()=>buildEmergingSignals(live?.evidence||[],live?.inferredTopics||[],24),[live?.evidence,live?.inferredTopics]);
   const qualifiedTopics=topics.filter(qualifiesTopic);
   const earlyTopics=topics.filter((topic)=>!qualifiesTopic(topic));
   const xStageCount=Number(live?.stages?.xDiscovery?.observed||0);
@@ -249,7 +254,7 @@ export default function FrontLiveShell(){
     setExpanded(true);
   }
 
-  function chooseTopic(topic:LiveTopic){
+  function chooseTopic(topic:ScanTopic){
     setSelectedTopic(String(topic.key||topic.topic||''));
     setFilter(qualifiesTopic(topic)?'qualified':'early');
     setExpanded(true);
@@ -280,21 +285,15 @@ export default function FrontLiveShell(){
         <button className={styles.allFilter} data-selected={filter==='all'&&!selectedTopic||undefined} onClick={()=>chooseFilter('all')}><Filter size={11}/>All</button>
         <span className={styles.pulse}>{live.active?`${panelStatus} · live counters updating every 3s`:'last scan stays visible until the next scan'}</span>
       </div>
-      {topics.length>0&&<div className={styles.topicRow}>{topics.map((topic)=>{
-        const qualified=qualifiesTopic(topic);
-        return <button className={styles.topic} data-selected={selectedTopic===String(topic.key||topic.topic)||undefined} data-qualified={qualified||undefined} onClick={()=>chooseTopic(topic)} key={`${topic.key||topic.topic}`}>
-          <span className={styles.topicTitle}><b>{topicName(topic)}</b><em>{qualified?'Qualified':'Early'}</em></span>
-          <small>{qualified?'Qualified for feed':qualificationReason(topic)} · {topic.authorCount||0} creators · {topic.evidenceCount||0} posts</small>
-        </button>;
-      })}</div>}
+      <EmergingTrends topics={topics} selectedTopic={selectedTopic} onChoose={chooseTopic}/>
       {expanded&&<div className={styles.drawer}>
         <div className={styles.drawerHead}>
           <div><b>{selected?topicName(selected):filter==='all'?'Observed posts':filter==='early'?'Early candidates':filter==='qualified'?'Qualified narratives':`${filter} evidence`}</b><span>{evidence.length} visible · {live.active&&evidence.length===0?`${observed} discovered so far; evidence cards appear as grounded rows stream in`:'raw observations stay inspectable even when nothing qualifies'}</span></div>
           <button onClick={()=>setExpanded(false)}>Collapse <ChevronUp size={13}/></button>
         </div>
         {selected&&<div className={styles.qualificationNote} data-qualified={qualifiesTopic(selected)||undefined}><b>{qualifiesTopic(selected)?'Qualified narrative':'Not promoted yet'}</b><span>{qualificationReason(selected)}</span></div>}
-        {emptyCandidateMessage&&<div className={styles.qualificationNote}><b>No repeated candidate topic yet</b><span>Front has discovered {observed} post{observed===1?'':'s'} so far. It waits for repeated, specific evidence from independent creators instead of inventing a narrative.</span></div>}
-        {filter==='early'&&!selected&&earlyTopics.length===0&&observed>0&&<div className={styles.qualificationNote}><b>No early candidate currently survives grouping</b><span>The observed posts are still available under Observed, X, and TikTok once grounded evidence arrives. A candidate needs repeated topic evidence instead of a single unrelated post.</span></div>}
+        {emptyCandidateMessage&&<div className={styles.qualificationNote}><b>No semantic scan signal yet</b><span>Front has discovered {observed} post{observed===1?'':'s'} so far. It will show specific modeled signals here before they become dashboard-worthy, without promoting generic one-off noise.</span></div>}
+        {filter==='early'&&!selected&&earlyTopics.length===0&&observed>0&&<div className={styles.qualificationNote}><b>No early signal currently survives semantic grouping</b><span>The observed posts are still available under Observed, X, and TikTok once grounded evidence arrives. Weak scan signals remain visible only when the contextual model can name a specific subject or event.</span></div>}
         {filter==='qualified'&&!selected&&qualifiedTopics.length===0&&observed>0&&<div className={styles.qualificationNote}><b>No narrative qualified yet</b><span>This is different from finding nothing. Front has discovered {observed} post{observed===1?'':'s'}, but none currently clear the promotion gates.</span></div>}
         {evidence.length?<div className={styles.evidenceGrid}>{evidence.map((row)=><a key={row.id} href={row.url} target='_blank' rel='noreferrer' className={styles.evidenceCard}>
           <div className={styles.evidenceMeta}><b>{row.platform} · @{row.author}</b><ExternalLink size={12}/></div>
