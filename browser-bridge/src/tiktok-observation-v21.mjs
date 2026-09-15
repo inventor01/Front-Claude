@@ -17,6 +17,19 @@ export function meaningfulTikTokText(value) {
   return true;
 }
 
+export function mergeTranscriptFragments(left, right, limit = 4000) {
+  const a = clean(left, limit);
+  const b = clean(right, limit);
+  if (!a) return b;
+  if (!b) return a;
+  const na = a.toLowerCase();
+  const nb = b.toLowerCase();
+  if (na.includes(nb)) return a;
+  if (nb.includes(na)) return b;
+  const pieces = [...new Set([a, b].map((value) => clean(value, limit)).filter(Boolean))];
+  return clean(pieces.join(' · '), limit);
+}
+
 export function parseTikTokVideoUrl(value) {
   try {
     const url = new URL(value, 'https://www.tiktok.com');
@@ -49,12 +62,14 @@ export function bestTikTokText(values = [], author = '') {
 export function normalizeTikTokObservation(raw = {}, at = Date.now()) {
   const parsed = parseTikTokVideoUrl(raw.href || raw.url || '');
   if (!parsed) return null;
+  const transcript = meaningfulTikTokText(raw.transcript) ? clean(raw.transcript, 4000) : '';
   const content = bestTikTokText([
     raw.content,
     raw.aria,
     raw.title,
     raw.alt,
     raw.containerText,
+    transcript,
   ], parsed.author);
   return {
     id: `tiktok:browser:${parsed.id}`,
@@ -62,6 +77,8 @@ export function normalizeTikTokObservation(raw = {}, at = Date.now()) {
     author: parsed.author,
     url: parsed.url,
     content,
+    transcript: transcript || null,
+    transcriptSource: transcript ? clean(raw.transcriptSource || 'platform-visible-captions', 80) : null,
     published: Number.isFinite(Number(raw.published)) ? Number(raw.published) : null,
     views: Number.isFinite(Number(raw.views)) ? Number(raw.views) : null,
     likes: Number.isFinite(Number(raw.likes)) ? Number(raw.likes) : null,
@@ -74,13 +91,14 @@ export function normalizeTikTokObservation(raw = {}, at = Date.now()) {
     provenance: clean(raw.provenance || 'TikTok broad live observation', 240),
     firstObserved: Number.isFinite(Number(raw.firstObserved)) ? Number(raw.firstObserved) : at,
     lastObserved: at,
-    observedOnly: !meaningfulTikTokText(content),
+    observedOnly: !meaningfulTikTokText(content) && !meaningfulTikTokText(transcript),
   };
 }
 
 function quality(row) {
   let score = 0;
   if (meaningfulTikTokText(row?.content)) score += Math.min(40, String(row.content).length / 20);
+  if (meaningfulTikTokText(row?.transcript)) score += Math.min(24, String(row.transcript).length / 35);
   if (Number.isFinite(row?.views)) score += 12;
   if (Number.isFinite(row?.likes)) score += 10;
   if (row?.soundId || row?.soundTitle) score += 8;
@@ -107,13 +125,16 @@ export function mergeTikTokObservations(existing = [], incoming = [], { limit = 
       Number.isFinite(Number(prior.firstObserved)) ? Number(prior.firstObserved) : Date.now(),
       Number.isFinite(Number(row.firstObserved)) ? Number(row.firstObserved) : Date.now(),
     );
+    const transcript = mergeTranscriptFragments(prior.transcript, row.transcript);
     map.set(key, {
       ...secondary,
       ...preferred,
       url: key,
+      transcript: transcript || null,
+      transcriptSource: transcript ? (preferred.transcriptSource || secondary.transcriptSource || 'platform-visible-captions') : null,
       firstObserved,
       lastObserved: Math.max(Number(prior.lastObserved || 0), Number(row.lastObserved || 0), Date.now()),
-      observedOnly: !meaningfulTikTokText(preferred.content || secondary.content),
+      observedOnly: !meaningfulTikTokText(preferred.content || secondary.content) && !meaningfulTikTokText(transcript),
     });
   }
   return [...map.values()]
@@ -122,7 +143,7 @@ export function mergeTikTokObservations(existing = [], incoming = [], { limit = 
 }
 
 export function groundedTikTokEvidence(rows = []) {
-  return rows.filter((row) => row?.platform === 'TikTok' && parseTikTokVideoUrl(row.url) && meaningfulTikTokText(row.content))
+  return rows.filter((row) => row?.platform === 'TikTok' && parseTikTokVideoUrl(row.url) && (meaningfulTikTokText(row.content) || meaningfulTikTokText(row.transcript)))
     .map((row) => ({ ...row, observedOnly: undefined }));
 }
 
@@ -133,11 +154,14 @@ export function mergeScanEvidence(base = [], extra = []) {
     const key = `${row.platform}|${row.url}`;
     const prior = map.get(key);
     if (!prior) return void map.set(key, row);
-    const preferred = String(row.contentSummary || row.content || '').length >= String(prior.contentSummary || prior.content || '').length ? row : prior;
+    const preferred = String(row.contentSummary || row.content || row.transcript || '').length >= String(prior.contentSummary || prior.content || prior.transcript || '').length ? row : prior;
     const secondary = preferred === row ? prior : row;
+    const transcript = mergeTranscriptFragments(prior.transcript, row.transcript);
     map.set(key, {
       ...secondary,
       ...preferred,
+      transcript: transcript || null,
+      transcriptSource: transcript ? (preferred.transcriptSource || secondary.transcriptSource || 'platform-visible-captions') : null,
       firstObserved: Math.min(Number(prior.firstObserved || Infinity), Number(row.firstObserved || Infinity)),
     });
   };
