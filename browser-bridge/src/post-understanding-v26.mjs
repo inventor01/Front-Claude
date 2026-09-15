@@ -166,6 +166,7 @@ async function analyzeOllama(rows, provider, signal, promptOverride) {
       stream: false,
       think: false,
       keep_alive: OLLAMA_KEEP_ALIVE,
+      ...(promptOverride ? {} : { format: { type: 'array', minItems: rows.length, maxItems: rows.length, items: { type: 'object', additionalProperties: false, properties: { i: {type:'integer', minimum:0, maximum:rows.length-1}, s:{type:'string'}, e:{type:'string'}, k:{type:'string'}, c:{type:'number',minimum:0,maximum:1} }, required:['i','s','e','k','c'] } } }),
       messages: [{ role: 'user', content: promptOverride || batchPrompt(rows) }],
       options: { temperature: 0.05, num_predict: CONTEXT_NUM_PREDICT },
     }),
@@ -226,7 +227,7 @@ export class PostUnderstandingEngineV26 {
     this.aliasCache = readJson(this.aliasPath, {});
   }
   key(row) {
-    const fingerprint = createHash('sha256').update(JSON.stringify([row.content, row.transcript, row.transcriptSource, row.contentSummary, row.contentEvent, row.contentEntities, this.provider.provider, this.provider.model, 'grounded-v3-transcript'])).digest('hex');
+    const fingerprint = createHash('sha256').update(JSON.stringify([row.content, row.transcript, row.transcriptSource, row.contentSummary, row.contentEvent, row.contentEntities, this.provider.provider, this.provider.model, 'grounded-v4-structured'])).digest('hex');
     return `${row.platform}|${row.id}|${row.url}|${fingerprint}`;
   }
   cached(row) {
@@ -277,7 +278,13 @@ export class PostUnderstandingEngineV26 {
         const matches = Array.isArray(analyzed) ? analyzed.filter(item => Number.isInteger(item?.index) && item.index === index) : [];
         const raw = matches.length === 1 ? matches[0] : null;
         const valid = raw && typeof raw.subject === 'string' && Number.isFinite(raw.confidence);
-        if (this.provider.available && !valid) failed++;
+        if (this.provider.available && !valid) {
+          failed++;
+          const message = `Context response missing or invalid for input ${index} (${row.id}).`;
+          batchErrors.push(message);
+          const request = requests.at(-1);
+          if (request) { request.status = 'failed'; request.error = request.error ? `${request.error} ${message}` : message; }
+        }
         const frame = valid ? normalizeFrame(raw, fallbacks[index]) : fallbacks[index];
         if (frame.method === 'semantic-model') modeled++;
         this.cache[this.key(row)] = { at: Date.now(), frame };

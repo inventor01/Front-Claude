@@ -108,6 +108,8 @@ test('semantic batching hard-caps local requests at two posts and uses compact t
     assert.equal(payload.options.num_predict,400);
     const input=JSON.parse(payload.messages[0].content.split('\n').at(-1));
     sizes.push(input.length);
+    assert.equal(payload.format.minItems,input.length);
+    assert.deepEqual(payload.format.items.required,['i','s','e','k','c']);
     assert(input.every(row=>Object.hasOwn(row,'spoken')));
     const result=input.map((row,index)=>({i:index,s:`Specific subject ${row.index}`,e:`specific event ${row.index}`,k:`specific subject ${row.index}`,c:.9}));
     return Response.json({message:{content:JSON.stringify(result)}});
@@ -145,3 +147,15 @@ test('same creator handle across platforms and missing creators cannot corrobora
  assert.equal(enhanceNarrativesV26([],[row,{...row,id:'2',platform:'TikTok',author:'@same'}]).length,0);
  assert.equal(enhanceNarrativesV26([],[{...row,author:''},{...row,id:'2',platform:'TikTok',author:''}]).length,0);
 });
+
+ test('missing indexed context row fails its request with a diagnostic',async()=>{
+ const {PostUnderstandingEngineV26}=await import('../src/post-understanding-v26.mjs');
+ const fs=await import('node:fs');const os=await import('node:os');const path=await import('node:path');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-context-missing-'));const original=globalThis.fetch;
+ try{
+ const engine=new PostUnderstandingEngineV26({dataDir:dir});engine.provider={available:true,provider:'ollama',endpoint:'http://model.test',model:'test'};
+ globalThis.fetch=async()=>Response.json({message:{content:'[{"i":0,"s":"Mascot halftime fall","e":"Mascot slips","k":"mascot halftime fall","c":0.9}]'}});
+ const rows=[0,1].map(i=>({id:String(i),platform:'X',author:`a${i}`,url:`https://x.com/a/status/${i}`,content:'Mascot halftime fall'}));
+ const result=await engine.enrich(rows);assert.equal(result.stats.failed,1);assert.equal(result.stats.requests[0].status,'failed');assert.match(result.stats.errors.join(' '),/input 1/);
+ }finally{globalThis.fetch=original;fs.rmSync(dir,{recursive:true,force:true});}
+ });

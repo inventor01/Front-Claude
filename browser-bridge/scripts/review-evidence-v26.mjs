@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import {chromium} from 'playwright';
 import {canonicalSocialPostUrl} from '../src/social-post-url.mjs';
+const outputPath=process.argv[3] || new URL('../../docs/qa/v26-manual-review-sources.json',import.meta.url);
 const artifact=JSON.parse(fs.readFileSync(process.argv[2] || new URL('../../docs/qa/v26-release-current-scan.json',import.meta.url),'utf8'));
 const source=artifact.live || artifact;
 let seed=260913;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
@@ -20,7 +21,7 @@ try{
    },{url,platform:row.platform});
    reviews.push({evidence:row,source:dom});console.log(`${row.platform} ${row.author}: matchedCard=${dom.matchedCard}`);
   }catch(error){reviews.push({evidence:row,error:error.message});console.log(`${row.platform} ${row.author}: ${error.message}`);}
-  fs.writeFileSync(new URL('../../docs/qa/v26-manual-review-sources.json',import.meta.url),JSON.stringify({scanId:source.scanId,seed:260913,reviews},null,2));
+  fs.writeFileSync(outputPath,JSON.stringify({scanId:source.scanId,seed:260913,reviews},null,2));
  }
 }finally{await page.close();}
 process.exit(0);

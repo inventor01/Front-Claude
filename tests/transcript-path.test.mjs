@@ -11,5 +11,5 @@ test('TikTok transcript path is opportunistic and feeds semantic understanding s
   assert.match(observer,/activeCues/);
   assert.match(understanding,/spoken: clean\(row\.transcript/);
   assert.match(understanding,/transcriptSource/);
-  assert.match(understanding,/grounded-v3-transcript/);
+  assert.match(understanding,/grounded-v4-structured/);
 });

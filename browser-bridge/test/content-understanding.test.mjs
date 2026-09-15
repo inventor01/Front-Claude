@@ -11,7 +11,7 @@ import {
   selectVideoCandidates,
 } from '../src/content-understanding.mjs';
 
-const cacheKey=(row,provider='ollama',model='qwen-test')=>`${row.platform}|${row.id}|${row.url}|${provider}|${model}|v17|timeline-sheet-v5`;
+const cacheKey=(row,provider='ollama',model='qwen-test')=>`${row.platform}|${row.id}|${row.url}|${provider}|${model}|v17|timeline-sheet-v7`;
 
 test('frame schedule covers the whole short-video timeline without exploding frame count',()=>{
   const times=frameSchedule(9,16);
@@ -164,7 +164,8 @@ test('frame capture cannot consume the model inference deadline before the reque
     assert.equal(signal.aborted,false);
     const payload=JSON.parse(body);
     assert.equal(payload.keep_alive,'30m');
-    assert.equal(payload.format,'json');
+    assert.equal(payload.format.type,'object');
+    assert.deepEqual(payload.format.required,['s','e','n','t','m','c','u']);
     assert.equal(payload.options.num_predict,420);
     return Response.json({message:{content:JSON.stringify({summary:'Mascot falls during halftime',confidence:.9})}});
   };
@@ -186,3 +187,10 @@ test('low confidence visual response is not counted as evidence enrichment',asyn
 });
 
 test('compact visual wire fields retain grounding, uncertainty and confidence',()=>{const result=parseUnderstandingJson(JSON.stringify({s:'Mascot falls onto court during halftime',e:'Mascot halftime fall',n:['mascot'],t:['HALFTIME'],m:.8,c:.9,u:['No audio available']}));assert.equal(result.summary,'Mascot falls onto court during halftime');assert.equal(result.event,'Mascot halftime fall');assert.deepEqual(result.onScreenText,['HALFTIME']);assert.deepEqual(result.uncertainties,['No audio available']);assert.equal(result.confidence,.9);});
+
+test('contact-sheet annotations never become source text',async()=>{
+ const {excludeCaptureAnnotations}=await import('../src/content-understanding.mjs');
+ const text=['1: 0.0s','2:13.1s','HALFTIME','Cat brain'];
+ assert.deepEqual(excludeCaptureAnnotations(text,true),['HALFTIME','Cat brain']);
+ assert.deepEqual(excludeCaptureAnnotations(text,false),text);
+});

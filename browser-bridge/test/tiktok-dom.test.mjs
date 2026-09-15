@@ -64,7 +64,7 @@ test('Ollama contact sheet preserves twelve ordered frames within one image',asy
   const sheet=await buildTimelineContactSheet(page,Array.from({length:12},(_,time)=>({base64:frame,time})));
   assert.equal(sheet.representedFrames,12);
   const size=await page.evaluate(base64=>new Promise(resolve=>{const i=new Image();i.onload=()=>resolve({w:i.width,h:i.height});i.src=`data:image/jpeg;base64,${base64}`;}),sheet.base64);
-  assert.equal(size.w,672);assert(size.w*size.h<2400000);assert(size.h>1600);
+  assert.equal(size.w,504);assert(size.w*size.h<1000000);assert(size.h>1200);
  }finally{await browser.close();}
 });
 

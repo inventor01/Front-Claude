@@ -197,7 +197,7 @@ async function analyzeOllama(frames, context, provider, signal) {
       stream: false,
       think: false,
       keep_alive: OLLAMA_KEEP_ALIVE,
-      format: 'json',
+      format: { type:'object', additionalProperties:false, properties:{ s:{type:'string',maxLength:100}, e:{type:'string',maxLength:45}, n:{type:'array',maxItems:3,items:{type:'string',maxLength:40}}, t:{type:'array',maxItems:2,items:{type:'string',maxLength:35}}, m:{type:'number',minimum:0,maximum:1}, c:{type:'number',minimum:0,maximum:1}, u:{type:'array',maxItems:1,items:{type:'string',maxLength:60}} }, required:['s','e','n','t','m','c','u'] },
       messages: [{
         role: 'user',
         content: context,
@@ -329,7 +329,7 @@ export async function buildTimelineContactSheet(page, frames) {
       const image = new Image(); image.onload = () => resolve(image); image.onerror = reject; image.src = `data:image/jpeg;base64,${frame.base64}`;
     })));
     const columns = Math.min(3, images.length), rows = Math.ceil(images.length / columns);
-    const cellWidth = 224, imageHeight = Math.min(398, Math.round(cellWidth * images[0].height / images[0].width)), labelHeight = 24;
+    const cellWidth = 168, imageHeight = Math.min(398, Math.round(cellWidth * images[0].height / images[0].width)), labelHeight = 24;
     const canvas = document.createElement('canvas'); canvas.width = columns * cellWidth; canvas.height = rows * (imageHeight + labelHeight);
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
     images.forEach((image,index) => {
@@ -348,6 +348,10 @@ function modelFrames(frames, limit = 12) {
   return Array.from({ length: limit }, (_, index) => frames[Math.round(index * (frames.length - 1) / (limit - 1))]);
 }
 
+export function excludeCaptureAnnotations(texts = [], contactSheet = false) {
+  return contactSheet ? texts.filter(text => !/^\d+\s*:\s*\d+(?:\.\d+)?s$/i.test(String(text).trim())) : texts;
+}
+
 function analysisPrompt(row, capture) {
   return [
     'Identify the specific story/action/joke from these chronological video frames and post context. Names require caption or visible-text support; never identify faces or invent audio, dialogue, dates, places, or backstory.',
@@ -359,7 +363,7 @@ function analysisPrompt(row, capture) {
     `Page title: ${capture.pageTitle || 'unknown'}`,
     `Video duration: ${Number(capture.duration || 0).toFixed(2)} seconds`,
     capture.transcript ? `Available caption track text: ${capture.transcript}` : 'Available caption track text: none',
-    capture.contactSheet ? 'The image is a chronological contact sheet. Read panels left to right, then top to bottom; each panel has a frame number and timestamp. These are successive frames from ONE video, not separate events.' : 'Frames are ordered from early to late and labeled with timestamps.',
+    capture.contactSheet ? 'The image is a chronological contact sheet. Read panels left to right, then top to bottom; each panel has a frame number and timestamp. These are successive frames from ONE video, not separate events. Panel numbers and timestamps are capture annotations, never source on-screen text.' : 'Frames are ordered from early to late and labeled with timestamps.',
   ].join('\n');
 }
 
@@ -464,7 +468,7 @@ export class ContentUnderstandingEngine {
   }
 
   cacheKey(row) {
-    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v5`;
+    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v7`;
   }
 
   cacheEntry(row) {
@@ -516,6 +520,7 @@ export class ContentUnderstandingEngine {
         : await analyzeOpenAI(chosen, prompt, this.provider, controller.signal);
       const analysis = {
         ...raw,
+        onScreenText: excludeCaptureAnnotations(raw.onScreenText, capture.contactSheet),
         provider: this.provider.provider,
         model: this.provider.model,
         frameCount: capture.frames.length,

@@ -1,3 +1,5 @@
+Latest full QA: [September 15 completion report](V26_FULL_QA_2026-09-15.md).
+
 # Front v26 local QA — authenticated gate passed
 
 Final validation: September 14, 2026. Branch: `v26-narrative-intelligence`.
