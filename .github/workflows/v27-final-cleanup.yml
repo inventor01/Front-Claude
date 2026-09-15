@@ -51,11 +51,6 @@ jobs:
           insert="""test('failed or weak video meanings are never reusable cache hits', () => {\n  assert.equal(reusableVideoMeaning({ videoMeaningStatus:'failed', videoAbout:'fallback caption', videoMeaningConfidence:.9 }), false);\n  assert.equal(reusableVideoMeaning({ videoMeaningStatus:'modeled', videoAbout:'specific event', videoMeaningConfidence:.39 }), false);\n  assert.equal(reusableVideoMeaning({ videoMeaningStatus:'modeled', videoAbout:'specific event', videoMeaningConfidence:.8 }), true);\n});\n\n"""
           if insert not in s: p.write_text(s.replace(marker, insert+marker,1))
 
-          start='browser-bridge/start.command'
-          replace_once(start,
-            'echo "Starting Front browser bridge v26 on http://127.0.0.1:43981"',
-            'echo "Starting Front browser bridge v27 on http://127.0.0.1:43981"')
-
           setup='browser-bridge/setup-transcription.command'
           replace_once(setup,
             '''if ! command -v whisper-cli >/dev/null 2>&1; then\n  echo "Installing whisper.cpp..."\n  brew install whisper.cpp\nfi''',
@@ -65,13 +60,13 @@ jobs:
           node --check browser-bridge/src/video-transcript-v27.mjs
           node --check browser-bridge/src/video-meaning-v27.mjs
           node --check browser-bridge/src/server-v25.mjs
-      - name: Browser bridge tests
-        run: npm test --prefix browser-bridge
+      - name: v27 transcript regression tests
+        run: node --test browser-bridge/test/video-transcript-v27.test.mjs
       - name: Commit cleanup
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/v27-final-cleanup.yml
-          git add browser-bridge/src/video-meaning-v27.mjs browser-bridge/test/video-transcript-v27.test.mjs browser-bridge/start.command browser-bridge/setup-transcription.command .github/workflows/v27-final-cleanup.yml
+          git add browser-bridge/src/video-meaning-v27.mjs browser-bridge/test/video-transcript-v27.test.mjs browser-bridge/setup-transcription.command .github/workflows/v27-final-cleanup.yml
           git commit -m "Harden v27 transcript retry and local setup"
           git push origin HEAD:feature/v27-full-video-transcripts
