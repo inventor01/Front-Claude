@@ -1,6 +1,7 @@
 'use client';
 
 import {useEffect,useRef,useState} from 'react';
+import Link from 'next/link';
 import {Activity,ArrowLeft,Bell,CheckCircle2,LogIn,Play,Plus,Radio,RefreshCw,Save,Square,Trash2,TriangleAlert} from 'lucide-react';
 import styles from './settings-client.module.css';
 
@@ -116,8 +117,8 @@ export default function SettingsClient(){
   const [error,setError]=useState('');
   const [watches,setWatches]=useState<Watch[]>([]);
   const [watchName,setWatchName]=useState('');
-  const [listening,setListening]=useState(true);
-  const [listenStatus,setListenStatus]=useState('Starting');
+  const [listening,setListening]=useState(false);
+  const [listenStatus,setListenStatus]=useState('Off');
   const [hits,setHits]=useState<Hit[]>([]);
   const hydrated=useRef(false);
   const configHydrated=useRef(false);
@@ -236,13 +237,13 @@ export default function SettingsClient(){
     setListenStatus(next?'Starting':'Off');
     localStorage.setItem(LISTENER_KEY,String(next));
     window.dispatchEvent(new CustomEvent(CONTROL_EVENT,{detail:{enabled:next}}));
-    setMessage(next?'PumpPortal launch + migration listener enabled across Front pages.':'PumpPortal browser listener paused.');
+    setMessage(next?'PumpPortal new-token listener enabled across Front pages.':'PumpPortal browser listener paused.');
   }
 
   async function requestAlerts(){
     if(typeof Notification==='undefined'){setError('Browser notifications are not available here.');return;}
     const permission=await Notification.requestPermission();
-    setMessage(permission==='granted'?'Browser launch and graduation alerts enabled.':'Browser alerts were not enabled.');
+    setMessage(permission==='granted'?'Browser launch alerts enabled.':'Browser alerts were not enabled.');
   }
 
   useEffect(()=>{
@@ -257,7 +258,7 @@ export default function SettingsClient(){
       void ping(true,true);
       const storedWatches=readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string').slice(0,100);
       const storedHits=readArray<Hit>(HIT_KEY).slice(0,30);
-      const enabled=localStorage.getItem(LISTENER_KEY)!=='false';
+      const enabled=localStorage.getItem(LISTENER_KEY)==='true';
       setWatches(storedWatches);setHits(storedHits);setListening(enabled);if(!enabled)setListenStatus('Off');
       hydrated.current=true;
       window.dispatchEvent(new CustomEvent(CONTROL_EVENT,{detail:{enabled}}));
@@ -277,9 +278,9 @@ export default function SettingsClient(){
       <div>
         <div className={styles.eyebrow}>FRONT · SETTINGS</div>
         <h1>Scanner control center</h1>
-        <p>Configure the local X/TikTok intelligence bridge and persistent PumpPortal launch + graduation alerts.</p>
+        <p>Configure the local X/TikTok intelligence bridge and persistent PumpPortal new-token alerts.</p>
       </div>
-      <a className={styles.back} href="/"><ArrowLeft size={15}/> Back to Front</a>
+      <Link className={styles.back} href="/"><ArrowLeft size={15}/> Back to Front</Link>
     </header>
 
     {error&&<div className={styles.error}><TriangleAlert size={16}/><span>{error}</span></div>}
@@ -288,7 +289,7 @@ export default function SettingsClient(){
     <section className={styles.statusGrid}>
       <div className={styles.statusCard}><span>Browser bridge</span><b data-ok={connected}>{connected?'Connected':'Offline'}</b><small>{connected?`v${health?.version||'—'}${health?.scanner?` · ${health.scanner}`:''}`:'Start the local bridge on this Mac'}</small></div>
       <div className={styles.statusCard}><span>Scanner</span><b>{!connected?'Offline':health?.running?'Running':config.enabled?'Scheduled':'Paused'}</b><small>{connected?`${health?.pendingCount||0} pending · next ${nextRun}`:'Connect the local bridge to read scanner state'}</small></div>
-      <div className={styles.statusCard}><span>Launch + migration alerts</span><b>{listening?'Listening':'Off'}</b><small>{listenStatus} · {watches.length} exact-name watch{watches.length===1?'':'es'}</small></div>
+      <div className={styles.statusCard}><span>Launch alerts</span><b>{listening?'Listening':'Off'}</b><small>{listenStatus} · {watches.length} exact-name watch{watches.length===1?'':'es'}</small></div>
     </section>
 
     <div className={styles.grid}>
@@ -342,9 +343,9 @@ export default function SettingsClient(){
       </section>
 
       <section className={`${styles.card} ${styles.span2}`}>
-        <div className={styles.cardHead}><div><Radio size={18}/><div><h2>PumpPortal launch + graduation alerts</h2><p>One app-level listener follows new Pump.fun tokens plus migration/graduation events and stays alive when you leave Settings.</p></div></div><span className={listening?styles.good:styles.muted}>{listenStatus}</span></div>
+        <div className={styles.cardHead}><div><Radio size={18}/><div><h2>PumpPortal new-token alerts</h2><p>One app-level listener follows new Pump.fun creations and stays alive when you leave Settings.</p></div></div><span className={listening?styles.good:styles.muted}>{listenStatus}</span></div>
         <div className={styles.watchRow}><input value={watchName} onChange={(e)=>setWatchName(e.target.value)} onKeyDown={(e)=>{if(e.key==='Enter')addWatch();}} placeholder="Exact token name"/><button onClick={addWatch}><Plus size={14}/> Add watch</button><button className={listening?styles.danger:styles.primary} onClick={toggleListening}><Radio size={14}/> {listening?'Pause listening':'Start listening'}</button><button onClick={()=>void requestAlerts()}><Bell size={14}/> Browser alerts</button></div>
-        <small className={styles.help}>Creation alerts fire on exact-name watches and strong Front narrative matches. Migration alerts are tracked separately and only surface for coins Front already matched or watched, so a graduation never gets mislabeled as a new launch.</small>
+        <small className={styles.help}>Creation alerts fire only from PumpPortal new-token events, using exact-name watches and strong Front narrative matches.</small>
         <div className={styles.chips}>{watches.length?watches.map((watch)=><span key={watch.id}>{watch.name}<button aria-label={`Remove ${watch.name}`} onClick={()=>setWatches((current)=>current.filter((item)=>item.id!==watch.id))}><Trash2 size={12}/></button></span>):<small>No exact-name watches yet.</small>}</div>
         {hits.length>0&&<div className={styles.hits}>{hits.map((hit)=><div key={`${hit.event}:${hit.mint}`}><div><b>{hit.event==='migrate'?'GRADUATED':'NEW'} · {hit.name}{hit.symbol?` · ${hit.symbol}`:''}</b><small>{new Date(hit.seen).toLocaleTimeString()}{hit.pool?` · ${hit.pool}`:''}</small></div><a href={`https://pump.fun/coin/${encodeURIComponent(hit.mint)}`} target="_blank" rel="noreferrer">Open Pump.fun</a></div>)}</div>}
       </section>
