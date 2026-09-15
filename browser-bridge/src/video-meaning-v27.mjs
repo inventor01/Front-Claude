@@ -15,6 +15,43 @@ const clamp01 = (value, fallback = 0) => { const n = Number(value); return Numbe
 const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } };
 const writeJson = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value, null, 2)); };
 
+export function normalizeMeaningTranscript(value, max = 3600) {
+  const normalized = String(value ?? '')
+    .replace(/<([^<>]+)>/g, (_tag, inside) => {
+      const token = String(inside || '').trim();
+      if (!/\d|\bms\b/i.test(token)) return ' ';
+      const words = token
+        .split(/[-|:]/)
+        .map((part) => part.replace(/^\/+|\/+$/g, '').trim())
+        .filter((part) => /[\p{L}]/u.test(part) && !/^(?:ms|msec|s|sec|secs|second|seconds)$/i.test(part));
+      return words.length ? ` ${words.join(' ')} ` : ' ';
+    })
+    .replace(/\[(?:music|applause|laughter|silence|inaudible)\]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const limit = Math.max(200, Number(max) || 3600);
+  if (normalized.length <= limit) return normalized;
+  const head = Math.floor(limit * 0.72);
+  const tail = Math.max(1, limit - head - 3);
+  return `${normalized.slice(0, head).trim()} … ${normalized.slice(-tail).trim()}`.trim();
+}
+
+export async function mapWithConcurrency(items = [], limit = 1, worker) {
+  const values = Array.from(items || []);
+  if (!values.length) return [];
+  const output = new Array(values.length);
+  let cursor = 0;
+  const workers = Math.max(1, Math.min(values.length, Math.trunc(Number(limit) || 1)));
+  await Promise.all(Array.from({ length: workers }, async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= values.length) break;
+      output[index] = await worker(values[index], index);
+    }
+  }));
+  return output;
+}
+
 function providerConfig() {
   const requested = String(process.env.FRONT_VIDEO_MEANING_PROVIDER || process.env.FRONT_CONTEXT_PROVIDER || process.env.FRONT_CONTENT_PROVIDER || 'auto').toLowerCase();
   if (requested === 'off' || requested === 'disabled') return { available: false, provider: 'off', reason: 'disabled' };
@@ -33,7 +70,7 @@ function providerConfig() {
 
 export function meaningInput(row) {
   const caption = clean(row.sourceContent ?? row.content, 1800);
-  const spoken = clean(row.transcript, 3600);
+  const spoken = normalizeMeaningTranscript(row.transcript, 3600);
   const visual = clean(row.contentSummary, 700);
   return { caption, spoken, visual, combined: clean([caption, spoken, visual].filter(Boolean).join(' '), 5600) };
 }
@@ -45,7 +82,7 @@ export function needsVisualFallback(row) {
 export function enrichVideoMeaning(row, result) {
   const original = clean(row.sourceContent ?? row.content, 6200);
   const about = clean(result?.videoAbout, 360);
-  const spoken = clean(row.transcript, 1400);
+  const spoken = normalizeMeaningTranscript(row.transcript, 1400);
   const additions = [about ? `Video meaning: ${about}` : '', spoken ? `Spoken transcript: ${spoken}` : ''].filter(Boolean);
   return {
     ...row,
@@ -136,8 +173,6 @@ export async function captureRenderedVideoFrame(page, video) {
     return canvas.toDataURL('image/jpeg', .5).split(',')[1];
   }).catch(() => null);
   if (direct) return direct;
-  // A rendered cross-origin video taints canvas. Capture only the actual
-  // video element, then resize the screenshot's safe data URL for inference.
   const screenshot = await video.screenshot({ type: 'jpeg', quality: 55, timeout: 5000 });
   return page.evaluate(base64 => new Promise((resolve, reject) => {
     const image = new Image(); image.onerror = reject;
@@ -212,8 +247,6 @@ export function planMeaningBatches(rows, batchSize, provider) {
   const batches = [];
   let batch = [];
   for (const row of rows) {
-    // Keep the complete per-row evidence while avoiding overflowing the local
-    // context window or spending the whole deadline on a large prompt.
     if (batch.length && (batch.length >= limit || (provider === 'ollama' && textPrompt([...batch, row]).length > 5400))) {
       batches.push(batch);
       batch = [];
@@ -254,9 +287,10 @@ export class VideoMeaningEngineV27 {
     this.provider=providerConfig();
     this.batchSize=Math.max(1,Math.min(8,Number(process.env.FRONT_VIDEO_MEANING_BATCH_SIZE||8)));
     this.timeoutMs=DEFAULT_TIMEOUT_MS;
+    this.visualConcurrency=Math.max(1,Math.min(2,Number(process.env.FRONT_VIDEO_MEANING_VISUAL_CONCURRENCY||2)));
     this.lastStats=null;
   }
-  status(){return{version:VIDEO_MEANING_VERSION,enabled:this.provider.available,provider:this.provider.provider,model:this.provider.model||null,batchSize:this.batchSize,timeoutMs:this.timeoutMs,cachedVideos:Object.keys(this.cache).length,lastStats:this.lastStats};}
+  status(){return{version:VIDEO_MEANING_VERSION,enabled:this.provider.available,provider:this.provider.provider,model:this.provider.model||null,batchSize:this.batchSize,visualConcurrency:this.visualConcurrency,timeoutMs:this.timeoutMs,cachedVideos:Object.keys(this.cache).length,lastStats:this.lastStats};}
   key(row){return createHash('sha256').update(JSON.stringify([row.platform,row.id,row.url,row.sourceContent??row.content,row.transcript,row.transcriptStatus,row.contentSummary,this.provider.provider,this.provider.model,VIDEO_MEANING_VERSION])).digest('hex');}
   cached(row){const entry=this.cache[this.key(row)];return entry&&Date.now()-Number(entry.at||0)<=CACHE_TTL_MS&&reusableVideoMeaning(entry.value)?entry.value:null;}
   persist(){this.cache=Object.fromEntries(Object.entries(this.cache).filter(([,entry])=>reusableVideoMeaning(entry?.value)).sort((a,b)=>Number(b[1]?.at||0)-Number(a[1]?.at||0)).slice(0,2500));writeJson(this.cachePath,this.cache);}
@@ -294,11 +328,15 @@ export class VideoMeaningEngineV27 {
         }
       }
       const visual=pending.filter(needsVisualFallback);
-      for(const row of visual){
-        const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),Math.min(this.timeoutMs,45000));
-        let value;
-        try{value=await analyzeVisualOne(context,row,this.provider,ctl.signal);stats.visualFallback++;stats.completed++;}
-        catch(reason){const message=reason?.name==='AbortError'?`Visual video meaning timed out after ${Math.min(this.timeoutMs,45000)}ms.`:clean(reason?.message||reason,300);value={videoAbout:'',videoSubject:'',videoEvent:'',videoMeaningConfidence:0,videoMeaningMethod:'visual-fallback-model',videoMeaningStatus:'failed',videoMeaningAt:Date.now(),videoMeaningError:message};stats.failed++;stats.errors.push(`${row.id}: ${message}`);}finally{clearTimeout(timer);}
+      const visualResults=await mapWithConcurrency(visual,this.visualConcurrency,async(row)=>{
+        const timeout=Math.min(this.timeoutMs,45000);
+        const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeout);
+        try{return{row,value:await analyzeVisualOne(context,row,this.provider,ctl.signal)}}
+        catch(reason){const message=reason?.name==='AbortError'?`Visual video meaning timed out after ${timeout}ms.`:clean(reason?.message||reason,300);return{row,value:{videoAbout:'',videoSubject:'',videoEvent:'',videoMeaningConfidence:0,videoMeaningMethod:'visual-fallback-model',videoMeaningStatus:'failed',videoMeaningAt:Date.now(),videoMeaningError:message}};}
+        finally{clearTimeout(timer);}
+      });
+      for(const {row,value} of visualResults){
+        if(value.videoMeaningStatus==='failed'){stats.failed++;stats.errors.push(`${row.id}: ${value.videoMeaningError}`);}else{stats.visualFallback++;stats.completed++;}
         if(reusableVideoMeaning(value))this.cache[this.key(row)]={at:Date.now(),value};
         const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);this.persist();if(onRow)await onRow(enriched,{...stats});
       }
