@@ -5,17 +5,16 @@ import { classifyAlias } from '@/lib/coin-matching';
 import { coinLinks } from '@/lib/coin-intelligence';
 import { ExternalLink, Radio } from 'lucide-react';
 import { isPumpPortalCreation, normalizeLaunchName } from '@/lib/live';
+import { ensurePumpPortalRuntime, setPumpPortalRuntimeEnabled, subscribePumpPortalMessages, subscribePumpPortalRuntime, type PumpPortalWireEvent } from './pumpportal-client-runtime.mjs';
 
 type NarrativeCard = { id:string; title:string; aliases:string[]; lastSeen:number };
 type Match = { mint:string; name:string; symbol?:string; narrative:string; seen:number; matchConfidence:number; matchReason:string; marketCapSol?:number };
 type Watch = { id:string; name:string; created:number };
 type LifecycleHit = { mint:string; name:string; symbol?:string; seen:number; event:'create'|'migrate'; poolId?:string; pool?:string };
-type PumpEvent = { txType?:string; mint?:string; name?:string; symbol?:string; marketCapSol?:number; poolId?:string; pool?:string };
 
 const MATCH_KEY='front.narrativeCreationMatches.v1';
 const WATCH_KEY='front.launchWatches.v1';
 const HIT_KEY='front.launchHits.v2';
-const ENABLE_KEY='front.pumpPortalListenerEnabled.v2';
 const CONTROL_EVENT='front-pumpportal-control';
 const STATE_EVENT='front-pumpportal-state';
 const WATCH_EVENT='front-pumpportal-watches-changed';
@@ -28,7 +27,6 @@ export default function NarrativeCreationWatcher(){
  const [cards,setCards]=useState<NarrativeCard[]>([]);
  const [matches,setMatches]=useState<Match[]>([]);
  const [hits,setHits]=useState<LifecycleHit[]>([]);
- const [enabled,setEnabled]=useState(true);
  const [status,setStatus]=useState('Starting');
  const cardsRef=useRef<NarrativeCard[]>([]);
  const matchesRef=useRef<Match[]>([]);
@@ -54,29 +52,31 @@ export default function NarrativeCreationWatcher(){
  },[storeHits]);
 
  useEffect(()=>{
-  const kickoff=window.setTimeout(()=>{
-   const savedMatches=readArray<Match>(MATCH_KEY).slice(0,20);
-   const savedHits=readArray<LifecycleHit>(HIT_KEY).slice(0,30);
-   const savedWatches=readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string').slice(0,100);
-   const savedEnabled=localStorage.getItem(ENABLE_KEY)!=='false';
-   const initialStatus=savedEnabled?'Starting':'Off';
-   matchesRef.current=savedMatches;hitsRef.current=savedHits;watchesRef.current=savedWatches;enabledRef.current=savedEnabled;statusRef.current=initialStatus;
-   setMatches(savedMatches);setHits(savedHits);setEnabled(savedEnabled);setStatus(initialStatus);
-   publish(initialStatus,savedHits,savedEnabled);
-  },0);
+  const savedMatches=readArray<Match>(MATCH_KEY).slice(0,20);
+  const savedHits=readArray<LifecycleHit>(HIT_KEY).slice(0,30);
+  const savedWatches=readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string').slice(0,100);
+  matchesRef.current=savedMatches;hitsRef.current=savedHits;watchesRef.current=savedWatches;
+  setMatches(savedMatches);setHits(savedHits);
+
+  const unsubscribeRuntime=subscribePumpPortalRuntime((runtime)=>{
+   enabledRef.current=runtime.enabled;statusRef.current=runtime.status;
+   setStatus(runtime.status);
+   publish(runtime.status,hitsRef.current,runtime.enabled);
+  });
   const control=(event:Event)=>{
    const detail=(event as CustomEvent<{enabled?:boolean}>).detail;
    if(typeof detail?.enabled!=='boolean')return;
-   const nextStatus=detail.enabled?'Starting':'Off';
-   localStorage.setItem(ENABLE_KEY,String(detail.enabled));
-   enabledRef.current=detail.enabled;statusRef.current=nextStatus;
-   setEnabled(detail.enabled);setStatus(nextStatus);
-   publish(nextStatus,hitsRef.current,detail.enabled);
+   setPumpPortalRuntimeEnabled(detail.enabled);
   };
   const refreshWatches=()=>{watchesRef.current=readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string').slice(0,100);};
   window.addEventListener(CONTROL_EVENT,control as EventListener);
   window.addEventListener(WATCH_EVENT,refreshWatches);
-  return()=>{window.clearTimeout(kickoff);window.removeEventListener(CONTROL_EVENT,control as EventListener);window.removeEventListener(WATCH_EVENT,refreshWatches);};
+  ensurePumpPortalRuntime();
+  return()=>{
+   unsubscribeRuntime();
+   window.removeEventListener(CONTROL_EVENT,control as EventListener);
+   window.removeEventListener(WATCH_EVENT,refreshWatches);
+  };
  },[publish]);
 
  useEffect(()=>{cardsRef.current=cards;},[cards]);
@@ -93,60 +93,38 @@ export default function NarrativeCreationWatcher(){
   return()=>{stopped=true;window.clearTimeout(kickoff);window.clearInterval(timer);window.removeEventListener('front-browser-evidence-saved',refresh);};
  },[]);
 
- useEffect(()=>{
-  enabledRef.current=enabled;
-  if(!enabled){statusRef.current='Off';publish('Off',hitsRef.current,false);return;}
-  let socket:WebSocket|undefined,retry:ReturnType<typeof setTimeout>,stopped=false,attempt=0;
-  const setPublishedStatus=(value:string)=>{statusRef.current=value;setStatus(value);publish(value,hitsRef.current,true);};
-  const connect=()=>{
-   if(stopped)return;
-   setPublishedStatus('Connecting');
-   socket=new WebSocket('wss://pumpportal.fun/api/data');
-   socket.onopen=()=>{
-    attempt=0;
-    setPublishedStatus('Connected · launches + migrations');
-    socket?.send(JSON.stringify({method:'subscribeNewToken'}));
-    socket?.send(JSON.stringify({method:'subscribeMigration'}));
-   };
-   socket.onmessage=(event)=>{try{
-    const data=JSON.parse(event.data) as PumpEvent;
-    if(typeof data.mint!=='string')return;
-    if(isPumpPortalCreation(data)&&typeof data.name==='string'){
-     const exact=watchesRef.current.find((watch)=>normalize(watch.name)===normalize(data.name||''));
-     if(exact){
-      const hit:LifecycleHit={mint:data.mint,name:data.name,symbol:typeof data.symbol==='string'?data.symbol:undefined,seen:Date.now(),event:'create'};
-      addLifecycleHit(hit);
-      notify('Front launch alert',`${hit.name}${hit.symbol?` · ${hit.symbol}`:''} was created on Pump.fun.`);
-     }
-     const target=normalizeLaunchName(data.name);
-     if(!target)return;
-     let best:{narrative:NarrativeCard;score:number;reason:string}|null=null;
-     for(const narrative of cardsRef.current){for(const term of [narrative.title,...(narrative.aliases||[])]){const candidate=classifyAlias(String(data.name),typeof data.symbol==='string'?data.symbol:null,term,narrative.title);if(!candidate||!['exact','strong'].includes(candidate.type))continue;if(!best||candidate.score>best.score)best={narrative,score:candidate.score,reason:candidate.reason};}}
-     if(!best)return;
-     const marketCapSol=Number.isFinite(Number(data.marketCapSol))?Number(data.marketCapSol):undefined;
-     const match:Match={mint:data.mint,name:data.name,symbol:typeof data.symbol==='string'?data.symbol:undefined,narrative:best.narrative.title,seen:Date.now(),matchConfidence:Math.round(best.score*100),matchReason:best.reason,marketCapSol};
-     setMatches((old)=>{const next=[match,...old.filter((x)=>x.mint!==match.mint)].slice(0,20);matchesRef.current=next;localStorage.setItem(MATCH_KEY,JSON.stringify(next));return next;});
-     if(!exact)addLifecycleHit({mint:match.mint,name:match.name,symbol:match.symbol,seen:match.seen,event:'create'});
-     notify('NEW MATCHING COIN',`${match.name} matched “${best.narrative.title}” at ${match.matchConfidence}% confidence.`);
-     return;
-    }
-    if(data.txType==='migrate'){
-     const priorMatch=matchesRef.current.find((item)=>item.mint===data.mint);
-     const priorHit=hitsRef.current.find((item)=>item.mint===data.mint&&item.event==='create');
-     if(!priorMatch&&!priorHit)return;
-     const name=priorMatch?.name||priorHit?.name||data.name||`${data.mint.slice(0,6)}…${data.mint.slice(-4)}`;
-     const symbol=priorMatch?.symbol||priorHit?.symbol||(typeof data.symbol==='string'?data.symbol:undefined);
-     const hit:LifecycleHit={mint:data.mint,name,symbol,seen:Date.now(),event:'migrate',poolId:typeof data.poolId==='string'?data.poolId:undefined,pool:typeof data.pool==='string'?data.pool:undefined};
-     addLifecycleHit(hit);
-     notify('Front graduation alert',`${name}${symbol?` · ${symbol}`:''} migrated${hit.pool?` to ${hit.pool}`:''}.`);
-    }
-   }catch{}};
-   socket.onerror=()=>setPublishedStatus('Connection error');
-   socket.onclose=()=>{if(stopped)return;setPublishedStatus('Reconnecting');retry=setTimeout(connect,Math.min(30000,1000*2**attempt++));};
-  };
-  const kickoff=window.setTimeout(connect,0);
-  return()=>{stopped=true;window.clearTimeout(kickoff);clearTimeout(retry);socket?.close();};
- },[enabled,addLifecycleHit,publish]);
+ useEffect(()=>subscribePumpPortalMessages((data:PumpPortalWireEvent)=>{
+  if(typeof data.mint!=='string')return;
+  if(isPumpPortalCreation(data)&&typeof data.name==='string'){
+   const exact=watchesRef.current.find((watch)=>normalize(watch.name)===normalize(data.name||''));
+   if(exact){
+    const hit:LifecycleHit={mint:data.mint,name:data.name,symbol:typeof data.symbol==='string'?data.symbol:undefined,seen:Date.now(),event:'create'};
+    addLifecycleHit(hit);
+    notify('Front launch alert',`${hit.name}${hit.symbol?` · ${hit.symbol}`:''} was created on Pump.fun.`);
+   }
+   const target=normalizeLaunchName(data.name);
+   if(!target)return;
+   let best:{narrative:NarrativeCard;score:number;reason:string}|null=null;
+   for(const narrative of cardsRef.current){for(const term of [narrative.title,...(narrative.aliases||[])]){const candidate=classifyAlias(String(data.name),typeof data.symbol==='string'?data.symbol:null,term,narrative.title);if(!candidate||!['exact','strong'].includes(candidate.type))continue;if(!best||candidate.score>best.score)best={narrative,score:candidate.score,reason:candidate.reason};}}
+   if(!best)return;
+   const marketCapSol=Number.isFinite(Number(data.marketCapSol))?Number(data.marketCapSol):undefined;
+   const match:Match={mint:data.mint,name:data.name,symbol:typeof data.symbol==='string'?data.symbol:undefined,narrative:best.narrative.title,seen:Date.now(),matchConfidence:Math.round(best.score*100),matchReason:best.reason,marketCapSol};
+   setMatches((old)=>{const next=[match,...old.filter((x)=>x.mint!==match.mint)].slice(0,20);matchesRef.current=next;localStorage.setItem(MATCH_KEY,JSON.stringify(next));return next;});
+   if(!exact)addLifecycleHit({mint:match.mint,name:match.name,symbol:match.symbol,seen:match.seen,event:'create'});
+   notify('NEW MATCHING COIN',`${match.name} matched “${best.narrative.title}” at ${match.matchConfidence}% confidence.`);
+   return;
+  }
+  if(data.txType==='migrate'){
+   const priorMatch=matchesRef.current.find((item)=>item.mint===data.mint);
+   const priorHit=hitsRef.current.find((item)=>item.mint===data.mint&&item.event==='create');
+   if(!priorMatch&&!priorHit)return;
+   const name=priorMatch?.name||priorHit?.name||data.name||`${data.mint.slice(0,6)}…${data.mint.slice(-4)}`;
+   const symbol=priorMatch?.symbol||priorHit?.symbol||(typeof data.symbol==='string'?data.symbol:undefined);
+   const hit:LifecycleHit={mint:data.mint,name,symbol,seen:Date.now(),event:'migrate',poolId:typeof data.poolId==='string'?data.poolId:undefined,pool:typeof data.pool==='string'?data.pool:undefined};
+   addLifecycleHit(hit);
+   notify('Front graduation alert',`${name}${symbol?` · ${symbol}`:''} migrated${hit.pool?` to ${hit.pool}`:''}.`);
+  }
+ }),[addLifecycleHit]);
 
  const visibleHits=hits.slice(0,3);
  const visibleMatches=matches.filter((match)=>!visibleHits.some((hit)=>hit.mint===match.mint&&hit.event==='create')).slice(0,Math.max(0,3-visibleHits.length));
