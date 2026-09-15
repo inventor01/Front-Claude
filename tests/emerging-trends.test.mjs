@@ -5,6 +5,8 @@ import fs from 'node:fs';
 const shell=fs.readFileSync(new URL('../app/front-live-shell.tsx',import.meta.url),'utf8');
 const emerging=fs.readFileSync(new URL('../app/emerging-trends.tsx',import.meta.url),'utf8');
 const evidenceRoute=fs.readFileSync(new URL('../app/api/browser-evidence/route.ts',import.meta.url),'utf8');
+const ledger=fs.readFileSync(new URL('../app/settings/ledger/ledger-client.tsx',import.meta.url),'utf8');
+const scanLedger=fs.readFileSync(new URL('../browser-bridge/src/scan-ledger-v26.mjs',import.meta.url),'utf8');
 
 test('scan UI shows display-only emerging signals without weakening dashboard promotion',()=>{
   assert.match(shell,/buildEmergingSignals\(live\?\.evidence\|\|\[\],live\?\.inferredTopics\|\|\[\],24\)/);
@@ -28,6 +30,14 @@ test('emerging trend strip supports WATCH EARLY RISING and QUALIFIED states',()=
   assert.match(emerging,/only QUALIFIED reaches the dashboard/);
 });
 
+test('active scan can show conservative raw repetition before semantic modeling finishes',()=>{
+  assert.match(emerging,/rawRepeatedSignals/);
+  assert.match(emerging,/creators\.size<2/);
+  assert.match(emerging,/signalSource:'raw-repeat'/);
+  assert.match(emerging,/corroborated:false/);
+  assert.match(emerging,/sourceText=.*row\.transcript/);
+});
+
 test('weak scan signals remain inspectable but cannot self-promote',()=>{
   assert.match(emerging,/tier:prior\?\.tier\|\|'pre-breakout'/);
   assert.match(emerging,/corroborated:prior\?\.corroborated===true/);
@@ -35,4 +45,13 @@ test('weak scan signals remain inspectable but cannot self-promote',()=>{
   assert.match(emerging,/authorCount:Math\.max/);
   assert.match(shell,/Not promoted yet/);
   assert.match(shell,/No narrative qualified yet/);
+});
+
+test('scan ledger persists and renders emerging/rising signal states',()=>{
+  assert.match(scanLedger,/buildScanSignals/);
+  assert.match(scanLedger,/scanSignalCounts/);
+  assert.match(scanLedger,/transcriptEvidence/);
+  assert.match(ledger,/Scan signals/);
+  assert.match(ledger,/emerging\/rising scan signal/);
+  assert.match(ledger,/Transcript evidence/);
 });
