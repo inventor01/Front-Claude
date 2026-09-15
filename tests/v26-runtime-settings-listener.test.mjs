@@ -81,7 +81,7 @@ test('settings does not own a PumpPortal websocket and legacy no-op trend toggle
   assert.match(source,/stays alive when you leave Settings/);
 });
 
-test('one root-mounted lifecycle watcher delegates socket ownership to a persistent browser runtime',()=>{
+test('one root-mounted lifecycle watcher delegates socket ownership to a persistent creation-only browser runtime',()=>{
   const layout=read('app/layout.tsx');
   const watcher=read('app/narrative-creation-watcher.tsx');
   const runtime=read('app/pumpportal-client-runtime.mjs');
@@ -97,12 +97,12 @@ test('one root-mounted lifecycle watcher delegates socket ownership to a persist
   assert.match(runtime,/front\.pumpPortalListenerEnabled\.v2/);
   assert.match(runtime,/new WebSocket\(SOCKET_URL\)/);
   assert.match(runtime,/method:'subscribeNewToken'/);
-  assert.match(runtime,/method:'subscribeMigration'/);
+  assert.doesNotMatch(runtime,/method:'subscribeMigration'/);
   assert.match(runtime,/__frontPumpPortalRuntimeV3/);
   assert.doesNotMatch(watcher,/browser\.close\(/);
 });
 
-test('migration alerts remain distinct from creation alerts',()=>{
+test('migration handling remains separate from the browser creation-only listener',()=>{
   const watcher=read('app/narrative-creation-watcher.tsx');
   const background=read('scripts/pumpportal-watcher.mjs');
   const route=read('app/api/internal/launch-watch/route.ts');
