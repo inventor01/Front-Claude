@@ -26,9 +26,9 @@ test('PumpPortal connection survives route component unmounts and internal navig
   assert.match(runtime,/__frontPumpPortalRuntimeV3/);
   assert.match(runtime,/new WebSocket\(SOCKET_URL\)/);
   assert.match(runtime,/method:'subscribeNewToken'/);
-  assert.match(runtime,/method:'subscribeMigration'/);
+  assert.doesNotMatch(runtime,/method:'subscribeMigration'/);
   assert.match(runtime,/runtime\.socket\?\.readyState===WebSocket\.OPEN/);
-  assert.match(runtime,/repeated enable|Connected · launches \+ migrations/);
+  assert.match(runtime,/Connected · creations only/);
 
   assert.match(watcher,/subscribePumpPortalRuntime/);
   assert.match(watcher,/subscribePumpPortalMessages/);
