@@ -45,6 +45,15 @@ test('many comments remain supporting context and cannot replace independent top
  assert.equal(signal.authorCount,1);
 });
 
+test('recent memory strengthens only a topic actually seen again in the current scan',()=>{
+ let memory=emptyNarrativeMemory();
+ memory=updateNarrativeMemory(memory,[row('1','a','X'),row('2','b','TikTok')],[],{now,scanId:'prior'});
+ assert.equal(memoryScanSignals(memory,{now:now+1000,currentEvidenceIds:['unrelated-current-id']}).length,0);
+ const signals=memoryScanSignals(memory,{now:now+1000,currentEvidenceIds:['2']});
+ assert.equal(signals.length,1);
+ assert.equal(signals[0].scanStatus,'EARLY');
+});
+
 test('stale evidence decays to history and cannot create current momentum by itself',()=>{
  assert.equal(narrativeMemoryWeight(5*3600000),1);
  assert.equal(narrativeMemoryWeight(2*24*3600000),.7);
