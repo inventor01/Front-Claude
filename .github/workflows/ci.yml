@@ -66,6 +66,13 @@ jobs:
       - name: Settings navigation regression tests
         run: node --test tests/settings-navigation.test.mjs
 
+      - name: PumpPortal listener persistence regression tests
+        run: >-
+          node --test
+          tests/pumpportal-navigation-persistence.test.mjs
+          tests/pumpportal-runtime-lifecycle.test.mjs
+          tests/v26-runtime-settings-listener.test.mjs
+
       - name: Front feed quality regression tests
         run: node --test tests/front-feed-quality.test.mjs
 
