@@ -1,3 +1,4 @@
+import { ensureOwnedPageVisible } from './feed-scroll.mjs';
 import { chromium } from 'playwright';
 import {
   groundedTikTokEvidence,
@@ -250,6 +251,9 @@ export class BroadTikTokObserver {
         await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
         await page.waitForTimeout(1800);
       }
+      const visibility = await ensureOwnedPageVisible(page);
+      this.state.visibility = visibility.visibility;
+      this.state.focusRecoveries = (this.state.focusRecoveries || 0) + Number(visibility.recovered);
       const sourceUrl = page.url();
       const extracted = await extractTikTokAnchors(page, 'TikTok dedicated discovery observation');
       this.add(extracted.observations);

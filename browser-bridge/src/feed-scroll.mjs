@@ -28,3 +28,18 @@ export async function collectVisibleFeeds(jobs) {
   }
   return settled;
 }
+
+// Only call for a temporary page owned by this collector.
+export async function ensureOwnedPageVisible(page) {
+ const before=await page.evaluate(()=>document.visibilityState);
+ if(before!=='visible') {
+  await page.bringToFront();
+  await page.waitForFunction(()=>document.visibilityState==='visible',{}, {timeout:3000});
+ }
+ return {visibility:'visible',recovered:before!=='visible'};
+}
+
+export function currentTikTokSnapshot(stage, snapshot) {
+ if(['pending','disabled'].includes(stage?.status))return {...stage,active:false,observed:0,grounded:0,sourcePages:[]};
+ return snapshot;
+}

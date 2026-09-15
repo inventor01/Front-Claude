@@ -43,7 +43,8 @@ test('v26 exposes contextual post understanding and semantic narrative diagnosti
   assert.match(server, /generic-word-rejection/);
   assert.match(server, /tiktokDiscovery: \{/);
   assert.match(server, /\.\.\.tiktokSnap/);
-  assert.match(server, /active: tiktokSnap\.active \|\| latestLive\.stages\?\.tiktokDiscovery\?\.active/);
+  assert.match(server, /active: Boolean\(tiktokSnap\.active\)/);
+  assert.match(server, /currentTikTokSnapshot\(latestLive.stages\?\.tiktokDiscovery, tiktok.snapshot\(\)\)/);
   assert.match(server, /owned-tiktok-page/);
   assert.match(server, /owned-x-page/);
 });

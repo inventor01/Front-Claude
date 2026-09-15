@@ -350,10 +350,8 @@ function modelFrames(frames, limit = 12) {
 
 function analysisPrompt(row, capture) {
   return [
-    'You are Front\'s social-video content understanding layer. Determine what this post is actually about from the chronological frames plus the supplied post context.',
-    'Treat the frames as a time sequence. Focus on the event, person/object, action, joke, reaction, visual template, on-screen text, transformation, reveal, or other details that would let an analyst recognize the same narrative in another post.',
-    'Do not infer a real person\'s identity from appearance alone. Only use a person/name when the supplied caption, page text, or visible on-screen text supports it. Do not invent dialogue, audio, dates, places, or backstory that are not visible or supplied.',
-    'Return ONLY compact JSON, no extra prose or whitespace. Keys: s (grounded summary, one sentence at most 18 words), e (specific event, at most 6 words), n (up to 3 named entities), t (up to 2 short verbatim visible text phrases), m (meme potential 0-1), c (confidence 0-1), u (brief uncertainty array). Use empty arrays when absent. Describe actions in s/e; do not repeat them in extra fields.',
+    'Identify the specific story/action/joke from these chronological video frames and post context. Names require caption or visible-text support; never identify faces or invent audio, dialogue, dates, places, or backstory.',
+    'Return compact JSON only: s (grounded summary <=12 words), e (event <=4 words), n (<=3 entities), t (<=2 visible text phrases, each <=4 words), m (meme potential 0-1), c (confidence 0-1), u (uncertainty, <=1 short phrase). Empty arrays when absent; no redundant prose.',
     `Platform: ${clean(row.platform, 20)}`,
     `Author: ${clean(row.author, 120)}`,
     `Post caption/context: ${clean(row.content, MAX_CONTEXT_TEXT)}`,
@@ -466,7 +464,7 @@ export class ContentUnderstandingEngine {
   }
 
   cacheKey(row) {
-    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v4`;
+    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v5`;
   }
 
   cacheEntry(row) {

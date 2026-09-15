@@ -1,7 +1,7 @@
 import { selectContextCandidates, newEvidenceRows } from './analysis-priority.mjs';
 import { extractX } from './x-feed-extractor.mjs';
 import { scanOutcome } from './scan-outcome-v26.mjs';
-import { scrollFeedPage, nextStalePassCount, feedExhausted, collectVisibleFeeds } from './feed-scroll.mjs';
+import { scrollFeedPage, nextStalePassCount, feedExhausted, collectVisibleFeeds, ensureOwnedPageVisible, currentTikTokSnapshot } from './feed-scroll.mjs';
 import { buildScanLedgerEntry } from './scan-ledger-v26.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -115,7 +115,7 @@ function stage(name, patch = {}) {
   };
 }
 function livePayload() {
-  const tiktokSnap = tiktok.snapshot();
+  const tiktokSnap = currentTikTokSnapshot(latestLive.stages?.tiktokDiscovery, tiktok.snapshot());
   const xObserved = latestLive.stages?.xDiscovery?.observed || 0;
   const tiktokObserved = tiktokSnap.observed || 0;
   
@@ -129,7 +129,7 @@ function livePayload() {
     },
     tiktokDiscovery: {
       ...tiktokSnap,
-      active: tiktokSnap.active || latestLive.stages?.tiktokDiscovery?.active,
+      active: Boolean(tiktokSnap.active),
       target: tiktokSnap.target || latestLive.request?.targetUniqueFeedItems || 90,
     },
   };
@@ -170,6 +170,7 @@ async function collectXFeed(target, maxSeconds = 70) {
   let scrolls = 0;
   let stale = 0;
   let lastSize = 0;
+  let focusRecoveries = 0;
   const seenDomIds = new Set();
   const scrollDiagnostics = [];
   try {
@@ -177,6 +178,9 @@ async function collectXFeed(target, maxSeconds = 70) {
     const tab = page.getByRole('tab', { name: /^For you$/i }).first();
     if (await tab.count().catch(() => 0)) await tab.click({ timeout: 2000 }).catch(() => {});
     while (!shouldStop() && Date.now() - started < maxSeconds * 1000 && rows.size < target && scrolls < 48) {
+      const visibility = await ensureOwnedPageVisible(page);
+      if (visibility.recovered) focusRecoveries++;
+      stage('xDiscovery', {visibility:visibility.visibility,focusRecoveries});
       const found = await extractX(page, 'Front v26 · X dedicated For You collector', target);
       for (const row of found) rows.set(row.id, row);
       
@@ -234,6 +238,7 @@ async function collectSearch(platform, query, limit = 24) {
     await page.waitForTimeout(platform === 'X' ? 1800 : 2300);
     let out = [];
     for (let pass = 0; pass < 4 && out.length < limit && !shouldStop(); pass++) {
+      if (platform === 'X') await ensureOwnedPageVisible(page);
       const rows = platform === 'X'
         ? await extractX(page, `Front v26 · X origin/investigation · ${q}`, limit)
         : await extractTikTokSearch(page, `Front v26 · TikTok origin/investigation · ${q}`, limit);

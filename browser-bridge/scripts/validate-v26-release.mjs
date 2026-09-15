@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { ensureOwnedPageVisible } from '../src/feed-scroll.mjs';
 import { releaseScanState } from '../src/release-scan-state.mjs';
 
 import { nativeLoopbackScan } from '../src/loopback-scan-fetch-compat.mjs';
@@ -82,6 +83,7 @@ async function probe(context) {
   const x = await context.newPage();
   const t = await context.newPage();
   try {
+    await ensureOwnedPageVisible(x);
     await x.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await x.locator('article[data-testid="tweet"]').first().waitFor({timeout:20000});
     const xp = await x.evaluate(() => ({
@@ -95,6 +97,7 @@ async function probe(context) {
     let extracted;
     const readyUntil = Date.now() + 20000;
     do {
+      await ensureOwnedPageVisible(t);
       extracted = await extractTikTokAnchors(t, 'release probe');
       if (extracted.observations.length) break;
       await sleep(500);
