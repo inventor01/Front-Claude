@@ -6,7 +6,8 @@ import styles from './ledger-client.module.css';
 
 const BRIDGE='http://127.0.0.1:43981';
 
-type Sample={platform?:string|null;author?:string|null;url?:string|null;mediaType?:string|null;provenance?:string|null;content?:string|null;contentConfidence?:number|null;views?:number|null;likes?:number|null};
+type Sample={platform?:string|null;author?:string|null;url?:string|null;mediaType?:string|null;provenance?:string|null;content?:string|null;transcript?:string|null;transcriptSource?:string|null;contentConfidence?:number|null;views?:number|null;likes?:number|null};
+type ScanSignal={topic?:string|null;key?:string|null;scanStatus?:'WATCH'|'EARLY'|'RISING'|'QUALIFIED'|string;signalScore?:number|null;authorCount?:number|null;evidenceCount?:number|null;platforms?:string[]};
 type VisionScan={requested?:number;analyzed?:number;cached?:number;cachedFailures?:number;enriched?:number;failed?:number;skipped?:number;provider?:string|null;model?:string|null};
 type ContentStatus={enabled?:boolean;provider?:string|null;model?:string|null;state?:string|null;cachedVideos?:number;successfulCachedVideos?:number;failedCachedVideos?:number;lastRun?:number|null;lastError?:string|null;lastStats?:VisionScan|null;latestSuccess?:{analyzedAt?:number|null;summary?:string|null;confidence?:number|null;frameCount?:number;modelFrameCount?:number;duration?:number;captureType?:string|null}|null;latestFailure?:{cachedAt?:number|null;error?:string|null}|null};
 type Vision={enabled?:boolean;provider?:string|null;model?:string|null;visuallyUnderstood?:number;scan?:VisionScan|null;lastError?:string|null};
@@ -25,6 +26,9 @@ type ScanEntry={
   inferredTopics?:number;
   candidateTopics?:number;
   uniqueCreators?:number|null;
+  transcriptEvidence?:number|null;
+  scanSignals?:ScanSignal[];
+  scanSignalCounts?:Record<string,number>;
   sourceCounts?:Record<string,number>;
   sourcePages?:string[];
   platformCounts?:Record<string,number>;
@@ -49,10 +53,6 @@ function hasNumber(value:unknown){return value!==null&&value!==undefined&&Number
 
 function usableCount(scan:ScanEntry){
   if(hasNumber(scan.usableEvidence))return n(scan.usableEvidence);
-  // v26 ledger entries before the schema-alignment fix stored the final canonical
-  // evidence count as `observed` and kept up to 30 samples, but omitted
-  // `usableEvidence`. Only use this compatibility fallback when samples prove
-  // canonical evidence really existed.
   return scan.samples?.length?Math.max(n(scan.observed),scan.samples.length):0;
 }
 function topicCount(scan:ScanEntry){return hasNumber(scan.inferredTopics)?n(scan.inferredTopics):n(scan.candidateTopics);}
@@ -166,7 +166,7 @@ export default function LedgerClient(){
   const liveVision=contentHealth(current?.contentUnderstanding);
   return <main className={styles.shell}>
     <header className={styles.header}>
-      <div><div className={styles.eyebrow}>FRONT · SCAN LEDGER</div><h1>What Front actually scanned</h1><p>Live and historical local scan diagnostics: coverage, extraction yield, visual recovery, Ollama activity, errors, and sample post URLs.</p></div>
+      <div><div className={styles.eyebrow}>FRONT · SCAN LEDGER</div><h1>What Front actually scanned</h1><p>Live and historical local scan diagnostics: coverage, emerging/rising signals, transcript evidence, visual recovery, Ollama activity, errors, and sample post URLs.</p></div>
       <a className={styles.back} href="/settings"><ArrowLeft size={15}/> Scanner settings</a>
     </header>
 
@@ -193,7 +193,7 @@ export default function LedgerClient(){
     </section>
 
     <section className={styles.history}>
-      <div className={styles.sectionHead}><h2>Recent scans</h2><p>Newest first. Scan health measures collection/extraction health, not whether the internet produced a qualifying narrative. Older v26 rows are interpreted from their stored samples/stages when richer audit fields are absent.</p></div>
+      <div className={styles.sectionHead}><h2>Recent scans</h2><p>Newest first. Scan health measures collection/extraction health, not whether the internet produced a qualifying narrative. Early and rising signals are retained even when they never qualify for the dashboard.</p></div>
       {!ledger?.scans.length?<div className={styles.empty}>No completed scans recorded yet.</div>:ledger.scans.map((scan)=>{
         const usable=usableCount(scan),topics=topicCount(scan),creators=hasNumber(scan.uniqueCreators)?n(scan.uniqueCreators):sampleCreators(scan),sources=sourceCounts(scan),health=scanHealth(scan),vision=derivedVision(scan),video=videoHealth(vision);
         const creatorsApprox=!hasNumber(scan.uniqueCreators)&&creators>0;
@@ -211,11 +211,14 @@ export default function LedgerClient(){
           </div>
           <div className={styles.detail}><b>Sources</b><span>{counts(sources)}</span></div>
           <div className={styles.detail}><b>Platforms</b><span>{counts(scan.platformCounts)}</span></div>
+          <div className={styles.detail}><b>Scan signals</b><span>{counts(scan.scanSignalCounts)}</span></div>
+          <div className={styles.detail}><b>Transcript evidence</b><span>{scan.transcriptEvidence||0} video{Number(scan.transcriptEvidence||0)===1?'':'s'} with captured spoken captions</span></div>
           {scan.fallback?.triggered&&<div className={styles.detail}><b>Visual recovery</b><span>{scan.fallback.failed?'Failed':`Observed ${scan.fallback.rawEvidence||0}; grounded ${scan.fallback.groundedEvidence||0}`}</span></div>}
           {vision&&<div className={styles.detail}><b>Video understanding</b><span>{vision.enabled?`${vision.provider||'provider'} · ${vision.model||'model'} · understood ${vision.visuallyUnderstood||0}`:'inactive'}{vision.lastError?` · ${vision.lastError}`:''}</span></div>}
+          {!!scan.scanSignals?.length&&<details className={styles.details}><summary>{scan.scanSignals.length} emerging/rising scan signal{scan.scanSignals.length===1?'':'s'}</summary><div className={styles.noteList}>{scan.scanSignals.map((signal,i)=><p key={`${signal.key||signal.topic}-${i}`}><b>{signal.scanStatus||'WATCH'} · {signal.topic||signal.key||'Untitled signal'}</b> · signal {Math.round(Number(signal.signalScore||0))} · {signal.authorCount||0} creators · {signal.evidenceCount||0} posts{signal.platforms?.length?` · ${signal.platforms.join(' + ')}`:''}</p>)}</div></details>}
           {!!health.notes.length&&<details className={styles.details}><summary>Why this scan scored {health.score}/100</summary><div className={styles.noteList}>{health.notes.map((item,i)=><p key={i}>{item}</p>)}</div></details>}
           {!!scan.errors?.length&&<details className={styles.details} open={usable===0}><summary>{scan.errors.length} warning/error{scan.errors.length===1?'':'s'}</summary><div className={styles.errorList}>{scan.errors.map((item,i)=><p key={i}>{item}</p>)}</div></details>}
-          {!!scan.samples?.length&&<details className={styles.details}><summary>{scan.samples.length} scanned evidence sample{scan.samples.length===1?'':'s'}</summary><div className={styles.samples}>{scan.samples.map((sample,i)=><div className={styles.sample} key={`${sample.url}-${i}`}><div><b>{sample.platform||'Post'}{sample.author?` · @${sample.author}`:''}{sample.mediaType?` · ${sample.mediaType}`:''}</b><small>{sample.provenance||'Local browser scan'}</small></div>{sample.content&&<p>{sample.content}</p>}{sample.url&&<a href={sample.url} target="_blank" rel="noreferrer">Open scanned post</a>}</div>)}</div></details>}
+          {!!scan.samples?.length&&<details className={styles.details}><summary>{scan.samples.length} scanned evidence sample{scan.samples.length===1?'':'s'}</summary><div className={styles.samples}>{scan.samples.map((sample,i)=><div className={styles.sample} key={`${sample.url}-${i}`}><div><b>{sample.platform||'Post'}{sample.author?` · @${sample.author}`:''}{sample.mediaType?` · ${sample.mediaType}`:''}</b><small>{sample.provenance||'Local browser scan'}</small></div>{sample.content&&<p>{sample.content}</p>}{sample.transcript&&<p><b>Spoken:</b> {sample.transcript}</p>}{sample.url&&<a href={sample.url} target="_blank" rel="noreferrer">Open scanned post</a>}</div>)}</div></details>}
         </article>;
       })}
     </section>
