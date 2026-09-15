@@ -26,6 +26,7 @@ jobs:
           npm install --save-exact next@16.3.5 react@19.2.8 react-dom@19.2.8
           npm install --save-dev --save-exact \
             @cloudflare/vite-plugin@1.54.9 \
+            @vitejs/plugin-rsc@0.5.34 \
             vite@8.3.0 \
             wrangler@4.114.0 \
             vinext@1.0.0-beta.10 \
