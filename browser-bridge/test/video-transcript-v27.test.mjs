@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isVideoRow, normalizeTranscript, selectMediaCandidates, transcriptTerminal } from '../src/video-transcript-v27.mjs';
-import { enrichVideoMeaning, meaningInput, needsVisualFallback, reusableVideoMeaning } from '../src/video-meaning-v27.mjs';
+import { enrichVideoMeaning, mapWithConcurrency, meaningInput, needsVisualFallback, normalizeMeaningTranscript, reusableVideoMeaning } from '../src/video-meaning-v27.mjs';
 
 test('v27 identifies every TikTok and X video as transcript eligible', () => {
   assert.equal(isVideoRow({ platform: 'TikTok', mediaType: 'video' }), true);
@@ -37,6 +37,28 @@ test('video meaning treats transcript + caption as first-class evidence', () => 
   assert.match(input.combined, /sneaker drop/);
   assert.match(input.combined, /releases Friday/);
   assert.equal(needsVisualFallback(row), false);
+});
+
+test('video meaning removes X timing markup while preserving spoken words', () => {
+  const raw = '<123-Hello-ms> <00:01.234> <456-world-ms> [Music] <789-again-ms>';
+  assert.equal(normalizeMeaningTranscript(raw), 'Hello world again');
+  const input = meaningInput({ platform:'X', content:'caption', transcript:raw });
+  assert.equal(input.spoken, 'Hello world again');
+  assert.doesNotMatch(input.combined, /123|456|789|ms|00:01/);
+});
+
+test('bounded meaning work never exceeds the configured concurrency', async () => {
+  let active = 0;
+  let peak = 0;
+  const results = await mapWithConcurrency([1, 2, 3, 4, 5], 2, async (value) => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    active -= 1;
+    return value * 2;
+  });
+  assert.equal(peak, 2);
+  assert.deepEqual(results, [2, 4, 6, 8, 10]);
 });
 
 test('X HLS fragments cannot crowd the complete playlist out of acquisition', () => {
