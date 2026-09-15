@@ -33,6 +33,12 @@ test('PumpPortal runtime survives Settings/watcher unmount and only explicit sto
  assert.equal(messages.length,1);
  assert.equal(states.at(-1)?.connected,true);
 
+ // Settings re-broadcasts the stored enabled state when it mounts. That must be idempotent.
+ const repeatedEnable=setPumpPortalRuntimeEnabled(true);
+ assert.equal(repeatedEnable.status,'Connected · launches + migrations');
+ assert.equal(repeatedEnable.connected,true);
+ assert.equal(MockWebSocket.instances.length,1,'repeated enable must not restart or duplicate an open socket');
+
  // Simulate the Settings/watcher UI unmounting. Unsubscribing UI listeners must not own/close the socket.
  unsubscribeMessages();unsubscribeState();
  assert.equal(first.readyState,MockWebSocket.OPEN);
