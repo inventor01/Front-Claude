@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {ensureOwnedPageVisible,currentTikTokSnapshot} from '../src/feed-scroll.mjs';
+test('hidden owned collector is reactivated, visible collector is not touched',async()=>{let state='hidden',activations=0;const page={evaluate:async()=>state,bringToFront:async()=>{state='visible';activations++;},waitForFunction:async()=>assert.equal(state,'visible')};assert.equal((await ensureOwnedPageVisible(page)).recovered,true);assert.equal((await ensureOwnedPageVisible(page)).recovered,false);assert.equal(activations,1);});
+test('failed activation surfaces instead of reporting collection success',async()=>{await assert.rejects(ensureOwnedPageVisible({evaluate:async()=>'hidden',bringToFront:async()=>{throw Error('activation failed');}}),/activation failed/);});
+test('pending TikTok stage never reuses previous scan observations',()=>{const old={observed:67,grounded:52,active:false};for(const status of ['pending','disabled'])assert.equal(currentTikTokSnapshot({status},old).observed,0);assert.equal(currentTikTokSnapshot({status:'running'},old),old);});

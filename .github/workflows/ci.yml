@@ -66,8 +66,25 @@ jobs:
       - name: Settings navigation regression tests
         run: node --test tests/settings-navigation.test.mjs
 
+      - name: PumpPortal listener persistence regression tests
+        run: >-
+          node --test
+          tests/pumpportal-navigation-persistence.test.mjs
+          tests/pumpportal-runtime-lifecycle.test.mjs
+          tests/v26-runtime-settings-listener.test.mjs
+
       - name: Front feed quality regression tests
         run: node --test tests/front-feed-quality.test.mjs
+
+      - name: Transcript and scan signal regression tests
+        run: >-
+          node --test
+          tests/emerging-trends.test.mjs
+          tests/scan-signal-ledger-ui.test.mjs
+          tests/transcript-path.test.mjs
+          tests/context-profile.test.mjs
+          tests/scan-signal-safety.test.mjs
+          tests/ledger-signal-counts.test.mjs
 
       - name: Browser bridge unit tests
         run: npm test --prefix browser-bridge

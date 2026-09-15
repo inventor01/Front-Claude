@@ -1,15 +1,23 @@
+import { selectContextCandidates, newEvidenceRows } from './analysis-priority.mjs';
+import { extractX } from './x-feed-extractor.mjs';
+import { scanOutcome } from './scan-outcome-v26.mjs';
+import { scrollFeedPage, nextStalePassCount, feedExhausted, collectVisibleFeeds, ensureOwnedPageVisible, currentTikTokSnapshot } from './feed-scroll.mjs';
+import { buildScanLedgerEntry } from './scan-ledger-v26.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { cleanEvidenceContent, extractHashtags, normalizeConfig, sanitizeTopic, stableId } from './core.mjs';
+import { cleanEvidenceContent, extractHashtags, normalizeConfig, sanitizeTopic } from './core.mjs';
 import { detectTopics } from './topic-engine.mjs';
 import { attachSoundSignals, consolidateTopicAliases, mergeRichEvidence, normalizeAdaptiveConfig } from './adaptive-intelligence.mjs';
 import { attachVisualSignals, semanticConsolidateTopics } from './advanced-intelligence.mjs';
 import { rankInvestigationCandidates } from './scout-skill.mjs';
 import { ContentUnderstandingEngine } from './content-understanding.mjs';
-import { BroadTikTokObserver } from './tiktok-observer-v21.mjs';
+import { PostUnderstandingEngineV26 } from './post-understanding-v26.mjs';
+import { enhanceNarrativesV26 } from './narrative-intelligence-v26.mjs';
+import { canonicalSocialPostUrl } from './social-post-url.mjs';
+import { BroadTikTokObserver, extractTikTokAnchors } from './tiktok-observer-v21.mjs';
 import {
   findSystemChrome,
   frontCdpUrl,
@@ -19,15 +27,15 @@ import {
   waitForCdp,
 } from './system-browser.mjs';
 
-export const V25_VERSION = 25;
+export const V25_VERSION = 26;
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.FRONT_BRIDGE_PORT || 43981);
 const CDP_PORT = Number(process.env.FRONT_BRIDGE_CDP_PORT || 43982);
 const CDP_URL = frontCdpUrl(CDP_PORT);
 const DATA_DIR = process.env.FRONT_BRIDGE_DATA || path.join(os.homedir(), '.front-browser-bridge');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
-const LEDGER_PATH = path.join(DATA_DIR, 'scan-ledger-v25.json');
-const PENDING_PATH = path.join(DATA_DIR, 'pending-evidence-v25.json');
+const LEDGER_PATH = path.join(DATA_DIR, 'scan-ledger-v26.json');
+const PENDING_PATH = path.join(DATA_DIR, 'pending-evidence-v26.json');
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://believable-inspiration-production-a68b.up.railway.app',
   'https://front-narrative-desk.austinrock2000.chatgpt.site',
@@ -43,29 +51,14 @@ const clean = (value, max = 500) => String(value ?? '').replace(/\s+/g, ' ').tri
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
 function writeJson(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value, null, 2)); }
-function scanId() { return `v25-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
+function scanId() { return `v26-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
 function hasText(value) {
   const text = clean(value, 2000);
   if (text.length < 3 || !/[\p{L}]/u.test(text)) return false;
   if (/^(?:home|explore|for you|following|search|profile|video|photo|sound|show more|more|views?|likes?|shares?|comments?)$/i.test(text)) return false;
   return true;
 }
-function canonicalXUrl(raw) {
-  try {
-    const url = new URL(raw, 'https://x.com');
-    if (!/(^|\.)(x\.com|twitter\.com)$/i.test(url.hostname)) return null;
-    url.search = ''; url.hash = '';
-    return url.toString();
-  } catch { return null; }
-}
-function canonicalTikTokUrl(raw) {
-  try {
-    const url = new URL(raw, 'https://www.tiktok.com');
-    const match = url.pathname.match(/\/@([^/]+)\/video\/(\d{10,25})/);
-    if (!match) return null;
-    return `https://www.tiktok.com/@${match[1]}/video/${match[2]}`;
-  } catch { return null; }
-}
+const canonicalTikTokUrl = (raw) => canonicalSocialPostUrl(raw, 'TikTok');
 function deriveTopics(rows = [], limit = 24) {
   if (!rows.length) return [];
   const at = Date.now();
@@ -74,7 +67,8 @@ function deriveTopics(rows = [], limit = 24) {
   topics = attachVisualSignals(topics, rows, at);
   topics = semanticConsolidateTopics(topics, rows, at);
   topics = consolidateTopicAliases(topics);
-  return rankInvestigationCandidates(topics, rows, { limit, now: at });
+  topics = rankInvestigationCandidates(topics, rows, { limit, now: at });
+  return enhanceNarrativesV26(topics, rows, at).slice(0, limit);
 }
 function summarizeRows(rows = []) {
   const platformCounts = {};
@@ -106,6 +100,7 @@ let latestLive = {
   observed: 0, candidateTopics: 0, platformCounts: {}, sourcePages: [], errors: [], evidence: [], inferredTopics: [], stages: {},
 };
 const understanding = new ContentUnderstandingEngine({ dataDir: DATA_DIR });
+const postUnderstanding = new PostUnderstandingEngineV26({ dataDir: DATA_DIR });
 const tiktok = new BroadTikTokObserver({ cdpUrl: CDP_URL, intervalMs: Number(process.env.FRONT_TIKTOK_OBSERVER_MS || 850) });
 
 function saveLedger() { writeJson(LEDGER_PATH, scans.slice(-100)); }
@@ -120,11 +115,22 @@ function stage(name, patch = {}) {
   };
 }
 function livePayload() {
+  const tiktokSnap = currentTikTokSnapshot(latestLive.stages?.tiktokDiscovery, tiktok.snapshot());
+  const xObserved = latestLive.stages?.xDiscovery?.observed || 0;
+  const tiktokObserved = tiktokSnap.observed || 0;
+  
   return {
     ...latestLive,
-    tiktokDiscovery: latestLive.stages?.tiktokDiscovery || {
-      observed: 0, grounded: 0, target: latestLive.request?.targetUniqueFeedItems || 90,
-      active: false, status: 'idle', sourcePages: [], errors: [],
+    observed: latestLive.observed || (xObserved + tiktokObserved),
+    platformCounts: {
+      ...latestLive.platformCounts,
+      X: latestLive.platformCounts?.X || xObserved,
+      TikTok: latestLive.platformCounts?.TikTok || tiktokObserved,
+    },
+    tiktokDiscovery: {
+      ...tiktokSnap,
+      active: Boolean(tiktokSnap.active),
+      target: tiktokSnap.target || latestLive.request?.targetUniqueFeedItems || 90,
     },
   };
 }
@@ -132,7 +138,7 @@ function setPhase(phase) {
   if (!current) return;
   current.phase = phase;
   current.heartbeatAt = Date.now();
-  latestLive = { ...latestLive, phase, updatedAt: Date.now() };
+  latestLive = { ...latestLive, phase, phaseHistory: [...(latestLive.phaseHistory || []), {phase, at:Date.now()}], updatedAt: Date.now() };
 }
 function shouldStop() { return Boolean(current?.stopRequested); }
 async function ensureContext() {
@@ -156,34 +162,6 @@ async function openOwnedPage(url) {
   }
 }
 
-async function extractX(page, provenance, limit = 120) {
-  const raw = await page.evaluate((max) => {
-    return [...document.querySelectorAll('article[data-testid="tweet"]')].slice(0, max).map((article) => {
-      const status = [...article.querySelectorAll('a[href*="/status/"]')].map((a) => a.href || a.getAttribute('href')).find(Boolean) || '';
-      const text = [...article.querySelectorAll('[data-testid="tweetText"]')].map((n) => n.textContent || '').join(' ').trim();
-      const published = article.querySelector('time')?.getAttribute('datetime') || null;
-      const poster = article.querySelector('video')?.getAttribute('poster') || article.querySelector('[data-testid="tweetPhoto"] img')?.getAttribute('src') || null;
-      const video = Boolean(article.querySelector('video,[data-testid="videoPlayer"]'));
-      return { status, text, published, poster, video };
-    });
-  }, Math.max(limit * 2, limit)).catch(() => []);
-  const out = [];
-  for (const row of raw) {
-    const url = canonicalXUrl(row.status);
-    if (!url || !hasText(row.text)) continue;
-    const parts = new URL(url).pathname.split('/').filter(Boolean);
-    const author = parts[0] || 'X';
-    const content = cleanEvidenceContent('X', row.text, author);
-    if (!hasText(content)) continue;
-    out.push({
-      id: stableId('X', url, content), platform: 'X', author, url, content,
-      published: row.published && Number.isFinite(Date.parse(row.published)) ? Date.parse(row.published) : null,
-      views: null, likes: null, coverUrl: row.poster, mediaType: row.video ? 'video' : (row.poster ? 'image' : 'text'),
-      hashtags: extractHashtags(content, 30), provenance, firstObserved: Date.now(),
-    });
-  }
-  return mergeRichEvidence(out).slice(0, limit);
-}
 
 async function collectXFeed(target, maxSeconds = 70) {
   const page = await openOwnedPage('https://x.com/home');
@@ -192,19 +170,36 @@ async function collectXFeed(target, maxSeconds = 70) {
   let scrolls = 0;
   let stale = 0;
   let lastSize = 0;
+  let focusRecoveries = 0;
+  const seenDomIds = new Set();
+  const scrollDiagnostics = [];
   try {
     await page.waitForTimeout(2200);
     const tab = page.getByRole('tab', { name: /^For you$/i }).first();
     if (await tab.count().catch(() => 0)) await tab.click({ timeout: 2000 }).catch(() => {});
-    while (!shouldStop() && Date.now() - started < maxSeconds * 1000 && rows.size < target && scrolls < 24 && stale < 4) {
-      for (const row of await extractX(page, 'Front v25 · X dedicated For You collector', target)) rows.set(row.id, row);
-      stale = rows.size <= lastSize + 1 ? stale + 1 : 0;
-      lastSize = rows.size;
+    while (!shouldStop() && Date.now() - started < maxSeconds * 1000 && rows.size < target && scrolls < 48) {
+      const visibility = await ensureOwnedPageVisible(page);
+      if (visibility.recovered) focusRecoveries++;
+      stage('xDiscovery', {visibility:visibility.visibility,focusRecoveries});
+      const found = await extractX(page, 'Front v26 · X dedicated For You collector', target);
+      for (const row of found) rows.set(row.id, row);
+      
+      // PROGRESSIVE STREAMING: update latestLive.evidence immediately
+      const currentEvidence = mergeRichEvidence([...latestLive.evidence, ...found]);
+      latestLive = { ...latestLive, evidence: currentEvidence.slice(-300), updatedAt: Date.now() };
+
+      const domIds = await page.locator('article[data-testid="tweet"] a[href*="/status/"]').evaluateAll(links => links.map(a => a.href.match(/status\/(\d+)/)?.[1]).filter(Boolean));
+      for (const id of domIds) seenDomIds.add(id);
+      stale = nextStalePassCount(lastSize, seenDomIds.size, stale);
+      lastSize = seenDomIds.size;
       stage('xDiscovery', { status: 'running', observed: rows.size, target, scrolls, sourcePage: page.url(), stalePasses: stale });
       latestLive = { ...latestLive, sourcePages: [...new Set([...latestLive.sourcePages.filter((x) => !/x\.com/i.test(x)), page.url()])], updatedAt: Date.now() };
       if (rows.size >= target) break;
-      await page.mouse.wheel(0, Math.max(900, await page.evaluate(() => innerHeight * 0.95).catch(() => 900))).catch(() => {});
-      await page.waitForTimeout(800);
+      const movement = await scrollFeedPage(page, 'article[data-testid="tweet"]', 950);
+      scrollDiagnostics.push({scroll:scrolls, ...movement, domIds:[...new Set(domIds)], accepted:found.length, uniqueDomIds:seenDomIds.size});
+      if (feedExhausted(stale, scrollDiagnostics)) break;
+      stage('xDiscovery', {scrollDiagnostics, uniqueDomIds:seenDomIds.size});
+      await page.waitForTimeout(1200);
       scrolls += 1;
     }
     stage('xDiscovery', { status: shouldStop() ? 'stopped' : 'complete', observed: rows.size, target, scrolls, elapsedMs: Date.now() - started });
@@ -213,11 +208,8 @@ async function collectXFeed(target, maxSeconds = 70) {
 }
 
 async function extractTikTokSearch(page, provenance, limit = 40) {
-  const raw = await page.evaluate((max) => [...document.querySelectorAll('a[href*="/video/"]')].slice(0, max * 4).map((link) => {
-    const container = link.closest('[data-e2e*="search-card"], [data-e2e*="recommend-list-item-container"], article') || link.parentElement?.parentElement?.parentElement || link.parentElement;
-    const image = link.querySelector('img') || container?.querySelector?.('img');
-    return { href: link.href || link.getAttribute('href') || '', text: (container?.innerText || link.getAttribute('aria-label') || image?.getAttribute('alt') || '').slice(0, 5000), coverUrl: image?.getAttribute('src') || null };
-  }), limit).catch(() => []);
+  const extracted = await extractTikTokAnchors(page, provenance);
+  const raw = extracted.observations.map(row => ({ href: row.url, text: row.content, coverUrl: row.coverUrl }));
   const rows = [];
   const seen = new Set();
   for (const item of raw) {
@@ -239,19 +231,20 @@ async function collectSearch(platform, query, limit = 24) {
   const q = sanitizeTopic(query);
   if (!q || shouldStop()) return [];
   const url = platform === 'X'
-    ? `https://x.com/search?q=${encodeURIComponent(`\"${q}\" -filter:replies`)}&src=typed_query&f=live`
+    ? `https://x.com/search?q=${encodeURIComponent(`"${q}" -filter:replies`)}&src=typed_query&f=live`
     : `https://www.tiktok.com/search?q=${encodeURIComponent(q)}`;
   const page = await openOwnedPage(url);
   try {
     await page.waitForTimeout(platform === 'X' ? 1800 : 2300);
     let out = [];
     for (let pass = 0; pass < 4 && out.length < limit && !shouldStop(); pass++) {
+      if (platform === 'X') await ensureOwnedPageVisible(page);
       const rows = platform === 'X'
-        ? await extractX(page, `Front v25 · X origin/investigation · ${q}`, limit)
-        : await extractTikTokSearch(page, `Front v25 · TikTok origin/investigation · ${q}`, limit);
+        ? await extractX(page, `Front v26 · X origin/investigation · ${q}`, limit)
+        : await extractTikTokSearch(page, `Front v26 · TikTok origin/investigation · ${q}`, limit);
       out = mergeRichEvidence([...out, ...rows]);
       if (out.length >= limit) break;
-      await page.mouse.wheel(0, 950).catch(() => {});
+      await scrollFeedPage(page, platform === 'X' ? 'article[data-testid="tweet"]' : '[data-e2e*="search-card"]', 950);
       await page.waitForTimeout(650);
     }
     return out.slice(0, limit);
@@ -264,9 +257,15 @@ async function collectTikTokFeed(target, maxSeconds = 70) {
   try {
     while (!shouldStop() && Date.now() - started < maxSeconds * 1000) {
       const snap = tiktok.snapshot();
+      
+      // PROGRESSIVE STREAMING: update latestLive.evidence immediately
+      const grounded = snap.evidence || [];
+      const currentEvidence = mergeRichEvidence([...latestLive.evidence, ...grounded]);
+      latestLive = { ...latestLive, evidence: currentEvidence.slice(-300), updatedAt: Date.now() };
+
       stage('tiktokDiscovery', {
         status: snap.status, active: snap.active, observed: snap.observed, grounded: snap.grounded, target: snap.target,
-        sourcePages: snap.sourcePages, errors: snap.errors, elapsedMs: Date.now() - started,
+        sourcePages: snap.sourcePages, errors: snap.errors, diagnostics: snap.diagnostics, scrolls: snap.scrolls, elapsedMs: Date.now() - started,
       });
       latestLive = { ...latestLive, sourcePages: [...new Set([...latestLive.sourcePages.filter((x) => !/tiktok\.com/i.test(x)), ...snap.sourcePages])], updatedAt: Date.now() };
       if (snap.observed >= target) break;
@@ -275,7 +274,7 @@ async function collectTikTokFeed(target, maxSeconds = 70) {
     const snap = tiktok.snapshot();
     stage('tiktokDiscovery', {
       status: shouldStop() ? 'stopped' : 'complete', active: false, observed: snap.observed, grounded: snap.grounded,
-      target: snap.target, sourcePages: snap.sourcePages, errors: snap.errors, elapsedMs: Date.now() - started,
+      target: snap.target, sourcePages: snap.sourcePages, errors: snap.errors, diagnostics: snap.diagnostics, scrolls: snap.scrolls, elapsedMs: Date.now() - started,
     });
     return { evidence: tiktok.groundedEvidence(), snapshot: snap };
   } finally {
@@ -301,6 +300,25 @@ async function addOriginResearch(rows, topics, mode) {
   return mergeRichEvidence(merged);
 }
 
+async function contextualizePosts(rows, phaseName = 'post-understanding') {
+  if (!rows.length || shouldStop()) return rows;
+  setPhase(phaseName);
+  const maxPosts = Math.max(12, Math.min(180, Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12)));
+  const selected = selectContextCandidates(rows, maxPosts);
+  const priorRuns = latestLive.stages.postUnderstanding?.runs || [];
+  stage('postUnderstanding', { status: 'running', requested: selected.length, totalEvidence: rows.length, engine: postUnderstanding.status() });
+  const enriched = await postUnderstanding.enrich(selected, {
+    batchSize: Math.max(2, Math.min(16, Number(process.env.FRONT_CONTEXT_BATCH_SIZE || 4))),
+    timeoutMs: Math.max(12000, Number(process.env.FRONT_CONTEXT_TIMEOUT_MS || 60000)),
+  });
+  const byId = new Map(enriched.rows.map((row) => [row.id, row]));
+  const output = rows.map((row) => byId.get(row.id) || row);
+  const runs = [...priorRuns, {phase:phaseName, ...enriched.stats}];
+  const totals = Object.fromEntries(['modeled','cached','fallback','failed'].map(key => [key, runs.reduce((sum,run) => sum + Number(run[key] || 0), 0)]));
+  stage('postUnderstanding', { ...enriched.stats, ...totals, runs, errors: [...new Set(runs.flatMap(run => run.errors || []))], status: totals.failed ? 'degraded' : 'complete', analyzedPosts: selected.length, untouchedPosts: Math.max(0, rows.length - selected.length), engine: postUnderstanding.status() });
+  return output;
+}
+
 async function runScan(body = {}) {
   if (current) throw new Error('A scan is already running. Use Stop scan before starting another one.');
   const request = requestSummary({ ...config, ...body });
@@ -314,6 +332,7 @@ async function runScan(body = {}) {
       xDiscovery: { status: request.scanXForYou ? 'pending' : 'disabled', observed: 0, target: request.targetUniqueFeedItems, updatedAt: Date.now() },
       tiktokDiscovery: { status: request.scanTikTokForYou ? 'pending' : 'disabled', active: request.scanTikTokForYou, observed: 0, grounded: 0, target: request.targetUniqueFeedItems, sourcePages: [], errors: [], updatedAt: Date.now() },
       visualUnderstanding: { status: 'pending', updatedAt: Date.now() },
+      postUnderstanding: { status: 'pending', updatedAt: Date.now() },
       narrativeEngine: { status: 'pending', updatedAt: Date.now() },
       originResearch: { status: request.mode === 'deep' ? 'pending' : 'disabled', updatedAt: Date.now() },
     },
@@ -330,9 +349,9 @@ async function runScan(body = {}) {
     setPhase('discovery');
     const jobs = [];
     const feedSeconds = Number(body.maxFeedScanSeconds || config.maxFeedScanSeconds || 70);
-    if (request.scanXForYou) jobs.push(collectXFeed(request.targetUniqueFeedItems, feedSeconds).then((rows) => ({ platform: 'X', rows })));
-    if (request.scanTikTokForYou) jobs.push(collectTikTokFeed(request.targetUniqueFeedItems, feedSeconds).then((value) => ({ platform: 'TikTok', rows: value.evidence, tiktok: value.snapshot })));
-    const settled = await Promise.allSettled(jobs);
+    if (request.scanXForYou) jobs.push(() => collectXFeed(request.targetUniqueFeedItems, feedSeconds).then((rows) => ({ platform: 'X', rows })));
+    if (request.scanTikTokForYou) jobs.push(() => collectTikTokFeed(request.targetUniqueFeedItems, feedSeconds).then((value) => ({ platform: 'TikTok', rows: value.evidence, tiktok: value.snapshot })));
+    const settled = await collectVisibleFeeds(jobs);
     for (const item of settled) {
       if (item.status === 'fulfilled') resultRows.push(...item.value.rows);
       else latestLive.errors.push(clean(item.reason?.message || item.reason, 500));
@@ -353,7 +372,7 @@ async function runScan(body = {}) {
     setPhase('visual-understanding');
     const context = await ensureContext();
     if (!shouldStop() && understanding.status().enabled && resultRows.length) {
-      const requestedVideos = request.mode === 'deep' ? Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 8) : Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 4);
+      const requestedVideos = request.mode === 'deep' ? Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2) : Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1);
       stage('visualUnderstanding', { status: 'running', requested: requestedVideos });
       const enriched = await understanding.enrich(context, resultRows, { mode: request.mode, maxVideos: requestedVideos });
       resultRows = enriched.rows;
@@ -362,28 +381,37 @@ async function runScan(body = {}) {
       stage('visualUnderstanding', { status: understanding.status().enabled ? (shouldStop() ? 'stopped' : 'skipped-no-video') : 'inactive', engine: understanding.status() });
     }
 
+    resultRows = await contextualizePosts(resultRows);
+
     setPhase('narrative-ranking');
     topics = deriveTopics(resultRows, 24);
-    stage('narrativeEngine', { status: 'complete', candidates: topics.length });
+    stage('narrativeEngine', { status: 'complete', candidates: topics.length, intelligenceVersion: 26 });
+    const beforeOrigin = resultRows;
     resultRows = await addOriginResearch(resultRows, topics, request.mode);
-    if (!shouldStop() && request.mode === 'deep') {
+    const newOrigin = newEvidenceRows(beforeOrigin, resultRows);
+    if (!shouldStop() && newOrigin.length) {
+      const enrichedOrigin = await contextualizePosts(newOrigin, 'post-understanding-origin');
+      const byId = new Map(enrichedOrigin.map(row => [row.id, row]));
+      resultRows = resultRows.map(row => byId.get(row.id) || row);
       topics = deriveTopics(resultRows, 24);
-      stage('narrativeEngine', { status: 'complete', candidates: topics.length, rerankedAfterOrigin: true });
+      stage('narrativeEngine', { status: 'complete', candidates: topics.length, rerankedAfterOrigin: true, intelligenceVersion: 26 });
     }
 
     summary = summarizeRows(resultRows);
+    const outcome = scanOutcome({stopped:shouldStop(), evidenceCount:resultRows.length, stages:latestLive.stages, errors:latestLive.errors});
     latestLive = {
-      ...latestLive, ...summary, active: false, status: shouldStop() ? 'stopped' : (resultRows.length ? 'complete' : 'zero'),
-      phase: shouldStop() ? 'stopped' : 'complete', completedAt: Date.now(), updatedAt: Date.now(),
-      candidateTopics: topics.length, evidence: resultRows.slice(-300), inferredTopics: topics.slice(0, 50), errors: latestLive.errors.slice(-30),
+      ...latestLive, ...summary, active: false, status: outcome.status,
+      phase: outcome.status === 'zero' ? 'complete' : outcome.status, completedAt: Date.now(), updatedAt: Date.now(),
+      candidateTopics: topics.length, evidence: resultRows, inferredTopics: topics.slice(0, 50), errors: outcome.errors.slice(-30),
     };
     finalStatus = latestLive.status;
     pendingEvidence = mergeRichEvidence([...pendingEvidence, ...resultRows]).slice(-500);
     savePending();
     return {
-      ok: true, version: V25_VERSION, scanId: id, evidence: resultRows, inferredTopics: topics, errors: latestLive.errors,
-      audit: { singleProcess: true, stages: latestLive.stages, sourcePages: latestLive.sourcePages, ...summary },
-      contentUnderstanding: { ...understanding.status(), visuallyUnderstood: resultRows.filter((row) => row.contentSummary).length }, at: Date.now(),
+      ok: finalStatus === 'complete', version: V25_VERSION, scanId: id, evidence: resultRows, inferredTopics: topics, errors: latestLive.errors,
+      audit: { singleProcess: true, intelligenceVersion: 26, stages: latestLive.stages, sourcePages: latestLive.sourcePages, ...summary },
+      contentUnderstanding: { ...understanding.status(), visuallyUnderstood: resultRows.filter((row) => row.contentSummary).length },
+      postUnderstanding: postUnderstanding.status(), at: Date.now(),
     };
   } catch (error) {
     latestLive = {
@@ -394,12 +422,7 @@ async function runScan(body = {}) {
     throw error;
   } finally {
     const startedAt = Number(current?.startedAt || latestLive.startedAt || Date.now());
-    const finished = {
-      id, status: finalStatus, startedAt, completedAt: Date.now(), durationMs: Date.now() - startedAt, request,
-      observed: latestLive.observed, candidateTopics: latestLive.candidateTopics, platformCounts: latestLive.platformCounts,
-      stages: latestLive.stages, errors: latestLive.errors, sourcePages: latestLive.sourcePages,
-      samples: latestLive.evidence.slice(0, 30).map((row) => ({ platform: row.platform, author: row.author, url: row.url, content: clean(row.contentSummary || row.content, 260), provenance: row.provenance })),
-    };
+    const finished = buildScanLedgerEntry({id, finalStatus, startedAt, request, latestLive, connected: browserConnection?.isConnected?.(), contentStatus: understanding.status(), postStatus: postUnderstanding.status()});
     scans.push(finished); scans = scans.slice(-100); saveLedger();
     current = null;
   }
@@ -407,11 +430,12 @@ async function runScan(body = {}) {
 
 function health() {
   return {
-    ok: true, service: 'front-browser-bridge', version: V25_VERSION, scanner: 'front-single-process-v25', architecture: 'single-process',
+    ok: true, service: 'front-browser-bridge', version: V25_VERSION, scanner: 'front-single-process-v26', architecture: 'single-process', intelligenceVersion: 26,
     running: Boolean(current), scanId: current?.id || null, scanPhase: current?.phase || 'idle', scanLedger: { current, retained: scans.length },
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
-    contentUnderstanding: understanding.status(), contentTargets: { deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 8), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 4) },
-    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','broad-tiktok-observation','caption-light-tiktok-discovery','visual-understanding','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
+    contentUnderstanding: understanding.status(), postUnderstanding: postUnderstanding.status(),
+    contentTargets: { deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
+    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','broad-tiktok-observation','caption-light-tiktok-discovery','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
     activePorts: { bridge: PORT, chromeCdp: CDP_PORT },
   };
 }
@@ -485,7 +509,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Front browser bridge v25 listening on http://${HOST}:${PORT}`);
+  console.log(`Front browser bridge v26 listening on http://${HOST}:${PORT}`);
   console.log(`Single-process scanner active. Chrome CDP remains on ${CDP_URL}.`);
-  console.log('Pipeline: browser preflight → X/TikTok discovery → visual understanding → narrative ranking → origin research.');
+  console.log('Pipeline: browser preflight → X/TikTok discovery → visual understanding → contextual post understanding → semantic narrative ranking → origin research.');
 });

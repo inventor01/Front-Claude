@@ -1,0 +1,15 @@
+{
+  "startedAt": 1789355776960,
+  "connected": true,
+  "subscriptions": [
+    "subscribeNewToken",
+    "subscribeMigration"
+  ],
+  "counts": {
+    "create": 22,
+    "migrate": 2,
+    "other": 2
+  },
+  "errors": [],
+  "elapsedMs": 45063
+}

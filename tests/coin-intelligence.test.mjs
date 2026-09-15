@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import ts from 'typescript';
+const dir=mkdtempSync(join(tmpdir(),'front-coins-'));
+for(const name of ['coin-intelligence','coin-matching','narrative-quality','live','pumpfun']){
+ const src=readFileSync(new URL(`../lib/${name}.ts`,import.meta.url),'utf8').replaceAll("'./live'","'./live.mjs'").replaceAll("'./narrative-quality'","'./narrative-quality.mjs'");
+ writeFileSync(join(dir,name+'.mjs'),ts.transpileModule(src,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);
+}
+const {trackCoin,coinLinks,rankCoins,coinNumber}=await import(pathToFileURL(join(dir,'coin-intelligence.mjs')));
+const {classifyAlias}=await import(pathToFileURL(join(dir,'coin-matching.mjs')));
+const {isPumpPortalCreation}=await import(pathToFileURL(join(dir,'live.mjs')));
+const {verifiedPumpfunMarket}=await import(pathToFileURL(join(dir,'pumpfun.mjs')));
+process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
+const mint='So11111111111111111111111111111111111111112';
+const identity={mint,name:'Daejon Love',matchScore:.94,createdAt:2000,narrativeDetectedAt:1000};
+test('no generic-word or partial-person matches become strong matches',()=>{for(const word of ['love','grow','face','take','make','look','Daejon'])assert.notEqual(classifyAlias(word,null,'Daejon Love','Daejon Love')?.type,'strong');for(const word of ['love','grow','face','take','make','look'])assert.equal(classifyAlias(word,null,word,word),null);});
+test('exact named entity matches',()=>assert.equal(classifyAlias('Daejon Love','DAEJON','Daejon Love','Daejon Love')?.type,'exact'));
+test('semantic ranking precedes traction',()=>assert.deepEqual([{matchScore:.8,tractionScore:99},{matchScore:.94,tractionScore:1}].sort(rankCoins).map(x=>x.matchScore),[.94,.8]));
+test('market snapshots preserve first and match baselines',()=>{const first=trackCoin({},{marketCap:8200},identity,3000);const next=trackCoin(first,{marketCap:94000},identity,4000);assert.equal(next.marketCapAtFirstSeen,8200);assert.equal(next.marketCapAtMatch,8200);assert.equal(next.peakMarketCap,94000);assert.equal(next.marketCapChangeSinceMatch,85800);assert.ok(Math.abs(next.marketCapChangePctSinceMatch-1046.341463414634)<1e-9);});
+test('peak survives drawdown and restart serialization',()=>{const first=trackCoin({},{marketCap:94000},identity,3000);const next=trackCoin(JSON.parse(JSON.stringify(first)),{marketCap:5000},identity,4000);assert.equal(next.peakMarketCap,94000);assert.equal(next.marketCapAtMatch,94000);});
+test('missing baseline never becomes a retrospective quote',()=>{const first=trackCoin({},{marketCap:null},identity,3000);const next=trackCoin(first,{marketCap:9000},identity,4000);assert.equal(next.marketCapAtMatch,null);assert.equal(next.marketCapAtFirstSeen,9000);assert.equal(next.marketCapChangePctSinceMatch,null);});
+test('missing market data is not zero',()=>{assert.equal(coinNumber(null),null);const next=trackCoin({},{marketCap:null},identity,3000);assert.equal(next.currentMarketCap,null);assert.equal(next.momentumStatus,'UNKNOWN');});
+test('zero baseline does not divide by zero',()=>assert.equal(trackCoin({marketCapAtMatch:0},{marketCap:5},identity,3000).marketCapChangePctSinceMatch,null));
+test('positive and negative lead times',()=>{assert.equal(trackCoin({},{},identity,3000).narrativeLeadMs,1000);assert.equal(trackCoin({},{},{...identity,createdAt:500},3000).narrativeLeadMs,-500);});
+test('creation observation is not exact launch time',()=>assert.equal(trackCoin({},{},{mint,creationObservedAt:2000,narrativeDetectedAt:1000},3000).narrativeLeadMs,null));
+for(const [key,url] of Object.entries({pumpUrl:`https://pump.fun/coin/${mint}`,axiomUrl:`https://axiom.trade/t/${mint}`,dexScreenerUrl:`https://dexscreener.com/solana/${mint}`}))test(key+' uses mint',()=>assert.equal(coinLinks(mint)[key],url));
+test('trade transactions cannot become launch events',()=>{assert.equal(isPumpPortalCreation({mint,txType:'buy'}),false);assert.equal(isPumpPortalCreation({mint,txType:'create'}),true);});
+test('market adapter keeps FDV separate and exposes intervals',async()=>{const original=globalThis.fetch;try{globalThis.fetch=async()=>Response.json([{chainId:'solana',baseToken:{address:mint},fdv:10000,marketCap:null,volume:{m5:100},txns:{m5:{buys:3,sells:2}}}]);const data=await verifiedPumpfunMarket(mint);assert.equal(data.marketCap,null);assert.equal(data.fdv,10000);assert.equal(data.volume5m,100);assert.equal(data.buys5m,3);}finally{globalThis.fetch=original;}});
+test('deployed Agent and CLAUDE false links do not qualify',()=>{assert.equal(classifyAlias('Agent','Visper','Coding Agent','Coding Agent')?.type==='strong',false);assert.equal(classifyAlias('CLAUDE','$CLD','Tesla Roadster Unveil Launch','Tesla Roadster Unveil Launch'),null);});
+test('snapshot data survives closing and reopening SQLite',async()=>{const {DatabaseSync}=await import('node:sqlite');const file=join(dir,'persistence.sqlite');let db=new DatabaseSync(file);db.exec(readFileSync(new URL('../drizzle/0009_coin_observations.sql',import.meta.url),'utf8'));const data=trackCoin({},{marketCap:8200},identity,3000);db.prepare('INSERT INTO coin_market_snapshots VALUES(?,?,?,?,?)').run('qa','narrative',mint,3000,JSON.stringify(data));db.close();db=new DatabaseSync(file);const restored=JSON.parse(db.prepare('SELECT data FROM coin_market_snapshots').get().data);assert.equal(restored.marketCapAtMatch,8200);assert.equal(restored.matchedAt,3000);db.close();});

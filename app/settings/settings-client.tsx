@@ -1,16 +1,19 @@
 'use client';
 
-import Link from 'next/link';
 import {useEffect,useRef,useState} from 'react';
+import Link from 'next/link';
 import {Activity,ArrowLeft,Bell,CheckCircle2,LogIn,Play,Plus,Radio,RefreshCw,Save,Square,Trash2,TriangleAlert} from 'lucide-react';
-import {ensurePumpPortalRuntime,setPumpPortalRuntimeEnabled,subscribePumpPortalRuntime} from '../pumpportal-client-runtime.mjs';
-import {HIT_EVENT,HIT_KEY,type PumpPortalHit} from '../pumpportal-listener-service';
 import styles from './settings-client.module.css';
 
 const BRIDGE='http://127.0.0.1:43981';
 const LOCAL_TIMEOUT_MS=30_000;
 const DEEP_TIMEOUT_MS=20*60_000;
 const WATCH_KEY='front.launchWatches.v1';
+const HIT_KEY='front.launchHits.v2';
+const LISTENER_KEY='front.pumpPortalListenerEnabled.v2';
+const CONTROL_EVENT='front-pumpportal-control';
+const STATE_EVENT='front-pumpportal-state';
+const WATCH_EVENT='front-pumpportal-watches-changed';
 
 type BridgeConfig={
   enabled:boolean;
@@ -40,19 +43,21 @@ type BridgeConfig={
 
 type Evidence={id:string;platform:'X'|'TikTok';author:string;url:string;content:string;published:number|null;views:number|null;likes:number|null;provenance:string};
 type InferredTopic={topic:string;key:string;evidenceCount:number;authorCount:number;platforms:string[];evidenceIds:string[]};
-type BridgeHealth={config:BridgeConfig;version:number;scanner?:string;capabilities?:string[];running:boolean;pendingCount?:number;nextScheduledRun?:number|null;scanConnection?:string;lastError?:string|null};
+type BridgeHealth={config:BridgeConfig;version:number;scanner?:string;capabilities?:string[];running:boolean;pendingCount?:number;nextScheduledRun?:number|null;scanConnection?:string;lastError?:string|null;contentTargets?:{deepVideos?:number;scoutVideos?:number;contextualPosts?:number}};
 type ScanResult={evidence:Evidence[];errors:string[];inferredTopics?:InferredTopic[];at:number;config:BridgeConfig};
 type StoredResult={accepted?:number;newEvidence?:number;replayed?:number;inferredNarratives?:number;error?:string};
 type Watch={id:string;name:string;created:number};
-type Hit=PumpPortalHit;
+type Hit={mint:string;name:string;symbol?:string;seen:number;event:'create'|'migrate';poolId?:string;pool?:string};
 
 const DEFAULT_CONFIG:BridgeConfig={
   enabled:true,
   intervalMinutes:10,
-  scanXExplore:true,
-  scanXHome:true,
-  scanTikTokTrends:true,
-  scanTikTokExplore:true,
+  // v26 discovery is explicitly driven by the two dedicated For You collectors.
+  // Legacy Explore/Home/Trends switches stay false so Settings never promises a surface the v26 runtime does not read.
+  scanXExplore:false,
+  scanXHome:false,
+  scanTikTokTrends:false,
+  scanTikTokExplore:false,
   scrollPasses:4,
   maxFeedItems:40,
   inferredTopicSearches:4,
@@ -74,6 +79,7 @@ const DEFAULT_CONFIG:BridgeConfig={
 
 function lines(value:string){return[...new Set(value.split(/[\n,]+/).map((item)=>item.trim()).filter(Boolean))];}
 function normalize(value:string){return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();}
+function v26Config(value?:Partial<BridgeConfig>):BridgeConfig{return{...DEFAULT_CONFIG,...value,scanXExplore:false,scanXHome:false,scanTikTokTrends:false,scanTikTokExplore:false};}
 function readArray<T>(key:string):T[]{try{const value=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(value)?value:[];}catch{return[];}}
 
 async function local<T>(path:string,init?:RequestInit,timeoutMs=LOCAL_TIMEOUT_MS):Promise<T>{
@@ -119,6 +125,8 @@ export default function SettingsClient(){
   const stopRequested=useRef(false);
 
   const nextRun=health?.nextScheduledRun?new Date(health.nextScheduledRun).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—';
+  const deepVisual=health?.contentTargets?.deepVideos??4;
+  const scoutVisual=health?.contentTargets?.scoutVideos??2;
 
   async function ping(silent=false,hydrateConfig=false){
     try{
@@ -126,9 +134,10 @@ export default function SettingsClient(){
       setConnected(true);
       setHealth(status);
       if(hydrateConfig||!configHydrated.current){
-        setConfig({...DEFAULT_CONFIG,...status.config});
-        setAccounts((status.config?.xAccounts||[]).join('\n'));
-        setKeywords((status.config?.keywords||[]).join('\n'));
+        const next=v26Config(status.config);
+        setConfig(next);
+        setAccounts((next.xAccounts||[]).join('\n'));
+        setKeywords((next.keywords||[]).join('\n'));
         configHydrated.current=true;
       }
       setError('');
@@ -145,13 +154,14 @@ export default function SettingsClient(){
   async function saveConfig(){
     setBusy('save');setMessage('');setError('');
     try{
-      const next={...config,xAccounts:lines(accounts).slice(0,30),keywords:lines(keywords)};
+      const next=v26Config({...config,xAccounts:lines(accounts).slice(0,30),keywords:lines(keywords)});
       const result=await local<{config:BridgeConfig}>('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(next)});
-      setConfig({...DEFAULT_CONFIG,...result.config});
-      setAccounts((result.config.xAccounts||[]).join('\n'));
-      setKeywords((result.config.keywords||[]).join('\n'));
+      const saved=v26Config(result.config);
+      setConfig(saved);
+      setAccounts((saved.xAccounts||[]).join('\n'));
+      setKeywords((saved.keywords||[]).join('\n'));
       configHydrated.current=true;
-      setMessage(`Scanner settings saved. Background Scout runs every ${result.config.intervalMinutes} minutes while the bridge is running.`);
+      setMessage(`Scanner settings saved. Background Scout runs every ${saved.intervalMinutes} minutes while the bridge is running.`);
     }catch(e){setError((e as Error).message);}finally{setBusy('');}
   }
 
@@ -180,7 +190,7 @@ export default function SettingsClient(){
     stopRequested.current=false;
     setBusy('scan');setMessage('Running deep X + TikTok investigation…');setError('');
     try{
-      const result=await local<ScanResult>('/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...config,mode:'deep',xAccounts:lines(accounts).slice(0,30),keywords:lines(keywords)})},DEEP_TIMEOUT_MS);
+      const result=await local<ScanResult>('/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...v26Config(config),mode:'deep',xAccounts:lines(accounts).slice(0,30),keywords:lines(keywords)})},DEEP_TIMEOUT_MS);
       if(!result.evidence.length){
         const detail=(result.errors||[]).slice(-2).join(' ');
         setMessage(`Deep scan finished with 0 usable evidence records.${detail?` ${detail}`:''} Open Scan Ledger for extraction and video diagnostics.`);
@@ -190,7 +200,7 @@ export default function SettingsClient(){
       const stored=await saveEvidence(result.evidence,result.inferredTopics||[],result.at);
       const warnings=result.errors.length?` ${result.errors.length} source warning(s).`:'';
       const replayed=stored.replayed?` ${stored.replayed} already-synced record(s) ignored.`:'';
-      setMessage(`Deep scan finished: ${result.evidence.length} evidence record(s), ${result.inferredTopics?.length||0} candidate topic(s), ${stored.newEvidence??stored.accepted??0} newly saved.${replayed}${warnings}`);
+      setMessage(`Deep scan finished: ${result.evidence.length} evidence record(s), ${result.inferredTopics?.length||0} semantically corroborated narrative candidate(s), ${stored.newEvidence??stored.accepted??0} newly saved.${replayed}${warnings}`);
       window.dispatchEvent(new CustomEvent('front-browser-evidence-saved'));
       await ping(true,false);
     }catch(e){
@@ -221,51 +231,54 @@ export default function SettingsClient(){
     setMessage(`Watching exact normalized token name: ${name}.`);
   }
 
+  function toggleListening(){
+    const next=!listening;
+    setListening(next);
+    setListenStatus(next?'Starting':'Off');
+    localStorage.setItem(LISTENER_KEY,String(next));
+    window.dispatchEvent(new CustomEvent(CONTROL_EVENT,{detail:{enabled:next}}));
+    setMessage(next?'PumpPortal new-token listener enabled across Front pages.':'PumpPortal browser listener paused.');
+  }
+
   async function requestAlerts(){
     if(typeof Notification==='undefined'){setError('Browser notifications are not available here.');return;}
     const permission=await Notification.requestPermission();
-    setMessage(permission==='granted'?'Browser creation alerts enabled.':'Browser alerts were not enabled.');
+    setMessage(permission==='granted'?'Browser launch alerts enabled.':'Browser alerts were not enabled.');
   }
 
   useEffect(()=>{
+    const onState=(event:Event)=>{
+      const detail=(event as CustomEvent<{enabled?:boolean;status?:string;hits?:Hit[]}>).detail;
+      if(typeof detail?.enabled==='boolean')setListening(detail.enabled);
+      if(typeof detail?.status==='string')setListenStatus(detail.status);
+      if(Array.isArray(detail?.hits))setHits(detail.hits.slice(0,30));
+    };
+    window.addEventListener(STATE_EVENT,onState as EventListener);
     const kickoff=window.setTimeout(()=>{
       void ping(true,true);
-      setWatches(readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string'));
-      setHits(readArray<Hit>(HIT_KEY).filter((item)=>item&&typeof item.mint==='string').slice(0,20));
+      const storedWatches=readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string').slice(0,100);
+      const storedHits=readArray<Hit>(HIT_KEY).slice(0,30);
+      const enabled=localStorage.getItem(LISTENER_KEY)==='true';
+      setWatches(storedWatches);setHits(storedHits);setListening(enabled);if(!enabled)setListenStatus('Off');
       hydrated.current=true;
+      window.dispatchEvent(new CustomEvent(CONTROL_EVENT,{detail:{enabled}}));
     },0);
     const interval=window.setInterval(()=>{void ping(true,false);},30_000);
-    return()=>{window.clearTimeout(kickoff);window.clearInterval(interval);};
-  },[]);
-
-  useEffect(()=>{if(hydrated.current)localStorage.setItem(WATCH_KEY,JSON.stringify(watches));},[watches]);
-
-  useEffect(()=>{
-    const unsubscribe=subscribePumpPortalRuntime((runtime)=>{
-      setListening(runtime.enabled);
-      setListenStatus(runtime.status);
-    });
-    ensurePumpPortalRuntime();
-    return unsubscribe;
+    return()=>{window.removeEventListener(STATE_EVENT,onState as EventListener);window.clearTimeout(kickoff);window.clearInterval(interval);};
   },[]);
 
   useEffect(()=>{
-    const onHit=(event:Event)=>{
-      const hit=(event as CustomEvent<Hit>).detail;
-      if(!hit?.mint)return;
-      setHits((current)=>[hit,...current.filter((item)=>item.mint!==hit.mint)].slice(0,20));
-      setMessage(`MATCH: ${hit.name} was created on Pump.fun.`);
-    };
-    window.addEventListener(HIT_EVENT,onHit as EventListener);
-    return()=>window.removeEventListener(HIT_EVENT,onHit as EventListener);
-  },[]);
+    if(!hydrated.current)return;
+    localStorage.setItem(WATCH_KEY,JSON.stringify(watches));
+    window.dispatchEvent(new CustomEvent(WATCH_EVENT));
+  },[watches]);
 
   return <main className={styles.shell}>
     <header className={styles.header}>
       <div>
         <div className={styles.eyebrow}>FRONT · SETTINGS</div>
         <h1>Scanner control center</h1>
-        <p>Configure the local X/TikTok intelligence bridge and Pump.fun creation alerts without opening floating tool panels.</p>
+        <p>Configure the local X/TikTok intelligence bridge and persistent PumpPortal new-token alerts.</p>
       </div>
       <Link className={styles.back} href="/"><ArrowLeft size={15}/> Back to Front</Link>
     </header>
@@ -276,7 +289,7 @@ export default function SettingsClient(){
     <section className={styles.statusGrid}>
       <div className={styles.statusCard}><span>Browser bridge</span><b data-ok={connected}>{connected?'Connected':'Offline'}</b><small>{connected?`v${health?.version||'—'}${health?.scanner?` · ${health.scanner}`:''}`:'Start the local bridge on this Mac'}</small></div>
       <div className={styles.statusCard}><span>Scanner</span><b>{!connected?'Offline':health?.running?'Running':config.enabled?'Scheduled':'Paused'}</b><small>{connected?`${health?.pendingCount||0} pending · next ${nextRun}`:'Connect the local bridge to read scanner state'}</small></div>
-      <div className={styles.statusCard}><span>Pump.fun alerts</span><b>{listening?'Listening':'Off'}</b><small>{watches.length} exact-name watch{watches.length===1?'':'es'}</small></div>
+      <div className={styles.statusCard}><span>Launch alerts</span><b>{listening?'Listening':'Off'}</b><small>{listenStatus} · {watches.length} exact-name watch{watches.length===1?'':'es'}</small></div>
     </section>
 
     <div className={styles.grid}>
@@ -295,12 +308,9 @@ export default function SettingsClient(){
         <div className={styles.toggleGrid}>
           <label className={styles.toggle}><input type="checkbox" checked={config.enabled} onChange={(e)=>setConfig({...config,enabled:e.target.checked})}/><span><b>Background Scout</b><small>Run scheduled discovery while the local bridge is open.</small></span></label>
           <label className={styles.toggle}><input type="checkbox" checked={config.scanXForYou??true} onChange={(e)=>setConfig({...config,scanXForYou:e.target.checked})}/><span><b>X For You</b><small>Primary X discovery surface.</small></span></label>
-          <label className={styles.toggle}><input type="checkbox" checked={config.scanXHome} onChange={(e)=>setConfig({...config,scanXHome:e.target.checked})}/><span><b>X Home</b><small>Personalized X home-feed coverage.</small></span></label>
-          <label className={styles.toggle}><input type="checkbox" checked={config.scanXExplore} onChange={(e)=>setConfig({...config,scanXExplore:e.target.checked})}/><span><b>X Explore seeds</b><small>Use trend pages to seed investigations.</small></span></label>
           <label className={styles.toggle}><input type="checkbox" checked={config.scanTikTokForYou??true} onChange={(e)=>setConfig({...config,scanTikTokForYou:e.target.checked})}/><span><b>TikTok For You</b><small>Primary TikTok discovery surface.</small></span></label>
-          <label className={styles.toggle}><input type="checkbox" checked={config.scanTikTokTrends} onChange={(e)=>setConfig({...config,scanTikTokTrends:e.target.checked})}/><span><b>TikTok Trends</b><small>Trend discovery and seed coverage.</small></span></label>
-          <label className={styles.toggle}><input type="checkbox" checked={config.scanTikTokExplore} onChange={(e)=>setConfig({...config,scanTikTokExplore:e.target.checked})}/><span><b>TikTok Explore</b><small>Broaden discovery outside the For You feed.</small></span></label>
         </div>
+        <small className={styles.help}>v26 promotes semantic narratives from the dedicated For You collectors only after independent creator corroboration. Legacy X Explore/Home and TikTok Trends/Explore switches are intentionally disabled because the v26 runtime did not consume them. A scan can collect dozens of TikToks while sending only the top {deepVisual} deep / {scoutVisual} scout videos to Qwen.</small>
 
         <div className={styles.fields}>
           <label><span>Scout interval</span><div className={styles.number}><input type="number" min={10} max={240} value={config.intervalMinutes} onChange={(e)=>setConfig({...config,intervalMinutes:Number(e.target.value)})}/><small>minutes</small></div></label>
@@ -333,10 +343,11 @@ export default function SettingsClient(){
       </section>
 
       <section className={`${styles.card} ${styles.span2}`}>
-        <div className={styles.cardHead}><div><Radio size={18}/><div><h2>Pump.fun creation alerts</h2><p>Exact-name local watches using PumpPortal new-token creation events only</p></div></div><span className={listening?styles.good:styles.muted}>{listenStatus}</span></div>
-        <div className={styles.watchRow}><input value={watchName} onChange={(e)=>setWatchName(e.target.value)} onKeyDown={(e)=>{if(e.key==='Enter')addWatch();}} placeholder="Exact token name"/><button onClick={addWatch}><Plus size={14}/> Add watch</button><button className={listening?styles.danger:styles.primary} onClick={()=>setPumpPortalRuntimeEnabled(!listening)}><Radio size={14}/> {listening?'Stop listening':'Start listening'}</button><button onClick={()=>void requestAlerts()}><Bell size={14}/> Browser alerts</button></div>
+        <div className={styles.cardHead}><div><Radio size={18}/><div><h2>PumpPortal new-token alerts</h2><p>One app-level listener follows new Pump.fun creations and stays alive when you leave Settings.</p></div></div><span className={listening?styles.good:styles.muted}>{listenStatus}</span></div>
+        <div className={styles.watchRow}><input value={watchName} onChange={(e)=>setWatchName(e.target.value)} onKeyDown={(e)=>{if(e.key==='Enter')addWatch();}} placeholder="Exact token name"/><button onClick={addWatch}><Plus size={14}/> Add watch</button><button className={listening?styles.danger:styles.primary} onClick={toggleListening}><Radio size={14}/> {listening?'Pause listening':'Start listening'}</button><button onClick={()=>void requestAlerts()}><Bell size={14}/> Browser alerts</button></div>
+        <small className={styles.help}>Creation alerts fire only from PumpPortal new-token events, using exact-name watches and strong Front narrative matches.</small>
         <div className={styles.chips}>{watches.length?watches.map((watch)=><span key={watch.id}>{watch.name}<button aria-label={`Remove ${watch.name}`} onClick={()=>setWatches((current)=>current.filter((item)=>item.id!==watch.id))}><Trash2 size={12}/></button></span>):<small>No exact-name watches yet.</small>}</div>
-        {hits.length>0&&<div className={styles.hits}>{hits.map((hit)=><div key={hit.mint}><div><b>{hit.name}{hit.symbol?` · ${hit.symbol}`:''}</b><small>{new Date(hit.seen).toLocaleTimeString()}</small></div><a href={`https://pump.fun/coin/${encodeURIComponent(hit.mint)}`} target="_blank" rel="noreferrer">Open Pump.fun</a></div>)}</div>}
+        {hits.length>0&&<div className={styles.hits}>{hits.map((hit)=><div key={`${hit.event}:${hit.mint}`}><div><b>{hit.event==='migrate'?'GRADUATED':'NEW'} · {hit.name}{hit.symbol?` · ${hit.symbol}`:''}</b><small>{new Date(hit.seen).toLocaleTimeString()}{hit.pool?` · ${hit.pool}`:''}</small></div><a href={`https://pump.fun/coin/${encodeURIComponent(hit.mint)}`} target="_blank" rel="noreferrer">Open Pump.fun</a></div>)}</div>}
       </section>
     </div>
   </main>;

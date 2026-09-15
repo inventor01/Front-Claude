@@ -1,0 +1,291 @@
+{
+  "at": "2026-09-15T08:35:23.263Z",
+  "ok": false,
+  "scanId": "v26-1789460884185-c04nfm",
+  "outcome": "scan-failed-internally",
+  "running": false,
+  "counts": {
+    "evidence": 100,
+    "x": 39,
+    "tiktok": 61,
+    "narratives": 0
+  },
+  "phases": [
+    "discovery",
+    "browser-preflight",
+    "visual-understanding",
+    "post-understanding",
+    "failed",
+    "narrative-ranking"
+  ],
+  "passes": [
+    {
+      "name": "Bridge healthy",
+      "ok": true,
+      "detail": "version=26"
+    },
+    {
+      "name": "No scan already running",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "Visual understanding configured",
+      "ok": true,
+      "detail": "ollama · qwen3-vl:4b-instruct"
+    },
+    {
+      "name": "Post understanding configured",
+      "ok": true,
+      "detail": "ollama · qwen3-vl:4b-instruct"
+    },
+    {
+      "name": "Chrome CDP reachable",
+      "ok": true,
+      "detail": "Chrome/152.0.7977.83"
+    },
+    {
+      "name": "Playwright attaches to existing Front Chrome",
+      "ok": true,
+      "detail": "1 context(s)"
+    },
+    {
+      "name": "X authenticated home surface",
+      "ok": true,
+      "detail": "https://x.com/home · 3 tweet article(s)"
+    },
+    {
+      "name": "TikTok discovery surface",
+      "ok": true,
+      "detail": "https://www.tiktok.com/foryou"
+    },
+    {
+      "name": "TikTok renders real video identities",
+      "ok": true,
+      "detail": "anchors=0, playerCards=2, feedContainers=8"
+    },
+    {
+      "name": "TikTok feed filter admits current For You cards",
+      "ok": true,
+      "detail": "{\"rawVideoAnchors\":0,\"feedContainers\":3,\"acceptedAnchors\":0,\"playerCardsAccepted\":2,\"acceptedCards\":2,\"transcriptCards\":0,\"withoutContainer\":0,\"localActivityRejected\":0,\"containerRejected\":0,\"activityTextRejected\":0}"
+    },
+    {
+      "name": "TikTok not login-walled",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "TikTok not challenged",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "Scan transport and lifecycle completed",
+      "ok": true,
+      "detail": "scan-failed-internally; status=failed; evidence=100"
+    },
+    {
+      "name": "Scan request succeeds",
+      "ok": true,
+      "detail": "200 "
+    },
+    {
+      "name": "Chrome stage connected",
+      "ok": true,
+      "detail": "connected"
+    },
+    {
+      "name": "X discovery complete",
+      "ok": true,
+      "detail": "complete observed=39"
+    },
+    {
+      "name": "X collected real posts",
+      "ok": true,
+      "detail": "observed=39"
+    },
+    {
+      "name": "TikTok discovery complete",
+      "ok": true,
+      "detail": "complete observed=71 grounded=61"
+    },
+    {
+      "name": "TikTok collected real videos",
+      "ok": true,
+      "detail": "observed=71"
+    },
+    {
+      "name": "TikTok produced grounded evidence",
+      "ok": true,
+      "detail": "grounded=61"
+    },
+    {
+      "name": "TikTok source pages remain discovery-only",
+      "ok": true,
+      "detail": "https://www.tiktok.com/foryou"
+    },
+    {
+      "name": "Qwen/video understanding actually exercised",
+      "ok": true,
+      "detail": "requested=2, enriched=1, cached=0"
+    },
+    {
+      "name": "Semantic post understanding used",
+      "ok": true,
+      "detail": "modeled=10, cached=0"
+    },
+    {
+      "name": "Narrative engine complete",
+      "ok": true,
+      "detail": "candidates=0"
+    },
+    {
+      "name": "Origin research complete",
+      "ok": true,
+      "detail": "searched=0"
+    },
+    {
+      "name": "Final evidence contains X",
+      "ok": true,
+      "detail": "39"
+    },
+    {
+      "name": "Final evidence contains TikTok",
+      "ok": true,
+      "detail": "61"
+    },
+    {
+      "name": "All X rows use canonical status URLs",
+      "ok": true,
+      "detail": "0 invalid"
+    },
+    {
+      "name": "No X notification leakage",
+      "ok": true,
+      "detail": "0 violations"
+    },
+    {
+      "name": "All TikTok rows use canonical video URLs",
+      "ok": true,
+      "detail": "0 invalid"
+    },
+    {
+      "name": "No TikTok activity/notification leakage",
+      "ok": true,
+      "detail": "0 violations"
+    },
+    {
+      "name": "No duplicate platform+URL rows",
+      "ok": true,
+      "detail": "0 duplicate(s)"
+    },
+    {
+      "name": "X has creator diversity",
+      "ok": true,
+      "detail": "38 creators"
+    },
+    {
+      "name": "TikTok has creator diversity",
+      "ok": true,
+      "detail": "60 creators"
+    },
+    {
+      "name": "At least one visual summary exists",
+      "ok": true,
+      "detail": "1 summarized rows"
+    },
+    {
+      "name": "At least one semantic-model frame exists",
+      "ok": true,
+      "detail": "10 semantic rows"
+    },
+    {
+      "name": "Successful visual analysis persisted",
+      "ok": true,
+      "detail": "21 cached successes"
+    },
+    {
+      "name": "Malformed URL poison absent",
+      "ok": true,
+      "detail": "Content analysis timed out."
+    },
+    {
+      "name": "Finished scan persisted to ledger",
+      "ok": true,
+      "detail": "v26-1789460884185-c04nfm"
+    },
+    {
+      "name": "Ledger status agrees with live result",
+      "ok": true,
+      "detail": "ledger=failed, live=failed"
+    },
+    {
+      "name": "Ledger observed agrees with response",
+      "ok": true,
+      "detail": "ledger=100, evidence=100"
+    },
+    {
+      "name": "Ledger topic count agrees with response",
+      "ok": true,
+      "detail": "ledger=0, response=0"
+    },
+    {
+      "name": "Discovery phase observed",
+      "ok": true,
+      "detail": "discovery → browser-preflight → visual-understanding → post-understanding → failed → narrative-ranking"
+    },
+    {
+      "name": "Visual-understanding phase observed",
+      "ok": true,
+      "detail": "discovery → browser-preflight → visual-understanding → post-understanding → failed → narrative-ranking"
+    },
+    {
+      "name": "Narrative-ranking phase observed",
+      "ok": true,
+      "detail": "discovery → browser-preflight → visual-understanding → post-understanding → failed → narrative-ranking"
+    }
+  ],
+  "warnings": [],
+  "failures": [
+    {
+      "name": "Scan returns ok=true",
+      "ok": false,
+      "detail": "ok"
+    },
+    {
+      "name": "Scan reaches complete state",
+      "ok": false,
+      "detail": "failed / failed"
+    },
+    {
+      "name": "No pipeline errors",
+      "ok": false,
+      "detail": "2 error(s)"
+    },
+    {
+      "name": "Visual understanding complete",
+      "ok": false,
+      "detail": "degraded requested=2 enriched=1 cached=0 failed=1"
+    },
+    {
+      "name": "Visual understanding has zero failures",
+      "ok": false,
+      "detail": "failed=1"
+    },
+    {
+      "name": "Post understanding complete",
+      "ok": false,
+      "detail": "degraded modeled=10 cached=0 failed=2"
+    },
+    {
+      "name": "Post understanding has zero failures",
+      "ok": false,
+      "detail": "failed=2"
+    },
+    {
+      "name": "Content understanding remains healthy",
+      "ok": false,
+      "detail": "degraded"
+    }
+  ]
+}

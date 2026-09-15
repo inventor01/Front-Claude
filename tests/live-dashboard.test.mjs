@@ -17,7 +17,7 @@ test('live dashboard polls local findings and syncs them before final scan compl
   assert.match(shell,/setTimeout\(poll,3000\)/);
   assert.match(shell,/saveLive\(fresh,next\.inferredTopics\|\|\[\],scanAt\)/);
   assert.match(shell,/\/api\/browser-evidence/);
-  assert.match(shell,/dashboard updating every 3s/);
+  assert.match(shell,/live counters updating every 3s/);
 });
 
 test('live sync is stable across polls and page reloads instead of replaying observations as new',()=>{

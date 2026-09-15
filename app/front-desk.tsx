@@ -1,11 +1,12 @@
 'use client';
+import RelatedCoin from './related-coin';
 
 import { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
+
   Flame,
   RefreshCw,
   Settings,
@@ -30,6 +31,8 @@ type Coin = {
   price:number|null;
   seen:number;
   verifiedPumpfun:true;
+  opportunityStatus?:string;
+  marketCapChangePctSinceMatch?:number|null;
 };
 
 type HotPost = {
@@ -202,7 +205,7 @@ function CoinPill({coin}:{coin:Coin}){
   return <span className={styles.coinPill}>
     <span className={styles.match} data-type={coin.matchType}>{coin.matchType}</span>
     <b>{coin.symbol||coin.name||'coin'}</b>
-    <span>MC {usd(coin.marketCap)}</span>
+    <span>MC {usd(coin.marketCap)} · {coin.opportunityStatus||'CONFIRMING'}{coin.marketCapChangePctSinceMatch!=null?` · ${coin.marketCapChangePctSinceMatch.toFixed(1)}% since match`:''}</span>
   </span>;
 }
 
@@ -224,11 +227,19 @@ export default function FrontDesk(){
     }
   },[]);
 
+  useEffect(()=>{
+    if(!expanded)return;
+    let active=true;
+    const timer=window.setInterval(()=>{void json<Detail>('/api/narrative-detail?id='+encodeURIComponent(expanded)).then(detail=>{if(active)setDetails(old=>({...old,[expanded]:detail}));}).catch(()=>{});},15000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[expanded]);
+
   const syncPending = useCallback(async()=>{
     try{
       const pending = await local<Pending>('/pending');
       if(!pending.evidence?.length){
         setStatus('Scanner connected');
+        void post('/api/front-feed',{action:'refreshCoins'}).then(()=>load()).catch(()=>{});
         return;
       }
       await saveBrowser({evidence:pending.evidence,inferredTopics:pending.lastTopics||[]});
@@ -237,7 +248,7 @@ export default function FrontDesk(){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({ids:pending.evidence.map((x)=>String(x.id||''))}),
       });
-      await post('/api/front-feed',{action:'refreshCoins'});
+      void post('/api/front-feed',{action:'refreshCoins'}).then(()=>load()).catch(()=>{});
       setStatus(`Synced ${pending.evidence.length} background posts`);
       await load();
     }catch{
@@ -269,7 +280,7 @@ export default function FrontDesk(){
       },10*60_000);
       setStatus(`Analyzed ${result.evidence.length} unique posts · saving narratives…`);
       await saveBrowser(result);
-      await post('/api/front-feed',{action:'refreshCoins'});
+      void post('/api/front-feed',{action:'refreshCoins'}).then(()=>load()).catch(()=>{});
       await load();
       setStatus('Scan complete · highest-velocity narratives ranked first');
     }catch(e){
@@ -402,6 +413,7 @@ export default function FrontDesk(){
                 {row.reasons.slice(0,5).map((reason)=><span key={reason}>{reason}</span>)}
                 {row.learnedAdjustment!==0&&<span>learned {row.learnedAdjustment>0?'+':''}{row.learnedAdjustment.toFixed(1)} rank</span>}
               </div>
+              {!row.coins.length&&<small>PRE-COIN · Watching Pump.fun for matching launches</small>}
               {row.coins.length>0&&<div className={styles.coinRow}>{row.coins.slice(0,3).map((coin)=><CoinPill coin={coin} key={coin.mint}/>)}</div>}
             </div>
             <div className={styles.right}>
@@ -424,9 +436,7 @@ export default function FrontDesk(){
 
 function Expanded({detail,row,now,feedbackLabel,feedbackBusy,onFeedback}:{detail:Detail;row:Row;now:number;feedbackLabel?:'useful'|'not-relevant';feedbackBusy:boolean;onFeedback:(label:'useful'|'not-relevant')=>void}){
   const launchByMint = new Map(detail.launches.map((launch)=>[launch.mint,launch]));
-  const verified = detail.coins.filter((coin)=>launchByMint.has(coin.mint)&&coin.data.verifiedPumpfun===true);
-  const coin = (mint:string) => verified.find((entry)=>entry.mint===mint)?.data||{};
-  const exactStrong = detail.launches.filter((launch)=>launch.match_type==='exact'||launch.match_type==='strong');
+  const verified = detail.coins.filter((coin)=>(launchByMint.has(coin.mint)||coin.data.verificationSource==='DEX Screener direct Pump.fun pool')&&coin.data.verifiedPumpfun===true);
   const possible = detail.launches.filter((launch)=>launch.match_type==='possible');
 
   return <>
@@ -464,23 +474,8 @@ function Expanded({detail,row,now,feedbackLabel,feedbackBusy,onFeedback}:{detail
     </section>}
 
     <section className={styles.section}>
-      <h4>Verified Pump.fun coins</h4>
-      <p className={styles.hint}>A coin appears here only after Front observed its PumpPortal <code>subscribeNewToken</code> create event. DEX data is used only for market stats.</p>
-      {exactStrong.length?<div className={styles.coinGrid}>{exactStrong.map((launch)=>{
-        const data = coin(launch.mint);
-        return <div className={styles.coinCard} key={launch.mint}>
-          <div>
-            <span className={styles.match} data-type={launch.match_type}>{launch.match_type}</span>
-            <h5>{launch.name}{launch.symbol?` · ${launch.symbol}`:''}</h5>
-            <p>Market cap <b>{usd(metric(data.marketCap))}</b> · liq {usd(metric(data.liquidity))} · 24h vol {usd(metric(data.volume24h))}</p>
-            <small>{String(data.matchReason||launch.match_type)}</small>
-          </div>
-          <div>
-            <a href={pump(launch.mint)} target='_blank' rel='noreferrer'>Pump.fun <ExternalLink size={11}/></a>
-            <a href={axiom(launch.mint)} target='_blank' rel='noreferrer'>Axiom <ExternalLink size={11}/></a>
-          </div>
-        </div>;
-      })}</div>:<div className={styles.subtle}>No Exact or Strong Pump.fun match yet.</div>}
+      <h4>Related Coins ({verified.length})</h4>
+      {verified.length?<div className={styles.coinGrid}>{verified.map(entry=><RelatedCoin key={entry.mint} mint={entry.mint} data={entry.data}/>)}</div>:<div className={styles.subtle}><b>PRE-COIN</b> · Watching Pump.fun for matching launches</div>}
       {possible.length>0&&<details className={styles.possible}>
         <summary>Possible matches ({possible.length})</summary>
         {possible.map((launch)=><div key={launch.mint}><span>{launch.name}{launch.symbol?` · ${launch.symbol}`:''}</span><a href={pump(launch.mint)} target='_blank' rel='noreferrer'>Inspect</a></div>)}

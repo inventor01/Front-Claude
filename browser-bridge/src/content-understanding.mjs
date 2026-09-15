@@ -1,3 +1,5 @@
+import { publicationAgeDays, prioritizeAnalysis } from './analysis-priority.mjs';
+import { canonicalSocialPostUrl } from './social-post-url.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -5,6 +7,11 @@ export const CONTENT_UNDERSTANDING_VERSION = 17;
 const CACHE_TTL_MS = 7 * 24 * 3600000;
 const FAILURE_TTL_MS = 5 * 60000;
 const MAX_CONTEXT_TEXT = 2200;
+const OLLAMA_KEEP_ALIVE = String(process.env.FRONT_OLLAMA_KEEP_ALIVE || '30m');
+const MODEL_FRAME_LIMIT = Math.max(4, Math.min(12, Number(process.env.FRONT_CONTENT_MODEL_FRAMES || 8)));
+const DEEP_TIMEOUT_MS = Math.max(30000, Number(process.env.FRONT_CONTENT_TIMEOUT_MS || 75000));
+const SCOUT_TIMEOUT_MS = Math.max(20000, Number(process.env.FRONT_CONTENT_SCOUT_TIMEOUT_MS || 45000));
+const OLLAMA_NUM_PREDICT = Math.max(160, Math.min(900, Number(process.env.FRONT_CONTENT_NUM_PREDICT || 420)));
 
 const clean = (value, max = 500) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const finite = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
@@ -67,9 +74,9 @@ export function frameSchedule(durationSeconds, maxFrames = 16) {
 }
 
 export function selectVideoCandidates(rows = [], { limit = 4 } = {}) {
-  const videos = rows.filter((row) => row?.id && row?.url && looksLikeVideo(row));
+  const videos = prioritizeAnalysis(rows).filter(row => {const age=publicationAgeDays(row);return age === null || age <= 14;}).filter((row) => row?.id && canonicalSocialPostUrl(row?.url, row?.platform) && looksLikeVideo(row));
   const byCreator = new Map();
-  for (const row of videos.sort((a, b) => evidenceScore(b) - evidenceScore(a))) {
+  for (const row of videos) {
     const key = creatorKey(row);
     const list = byCreator.get(key) || [];
     list.push(row);
@@ -138,7 +145,8 @@ export function parseUnderstandingJson(value) {
   const first = fenced.indexOf('{'), last = fenced.lastIndexOf('}');
   if (first < 0 || last <= first) return null;
   try {
-    const raw = JSON.parse(fenced.slice(first, last + 1));
+    const parsed = JSON.parse(fenced.slice(first, last + 1));
+    const raw = parsed.s ? {...parsed,summary:parsed.s,event:parsed.e,entities:parsed.n,onScreenText:parsed.t,memePotential:parsed.m,confidence:parsed.c,uncertainties:parsed.u} : parsed;
     const summary = clean(raw.summary, 420);
     if (!summary) return null;
     return {
@@ -187,12 +195,15 @@ async function analyzeOllama(frames, context, provider, signal) {
     body: JSON.stringify({
       model: provider.model,
       stream: false,
+      think: false,
+      keep_alive: OLLAMA_KEEP_ALIVE,
+      format: { type:'object', additionalProperties:false, properties:{ s:{type:'string',maxLength:100}, e:{type:'string',maxLength:45}, n:{type:'array',maxItems:3,items:{type:'string',maxLength:40}}, t:{type:'array',maxItems:2,items:{type:'string',maxLength:35}}, m:{type:'number',minimum:0,maximum:1}, c:{type:'number',minimum:0,maximum:1}, u:{type:'array',maxItems:1,items:{type:'string',maxLength:60}} }, required:['s','e','n','t','m','c','u'] },
       messages: [{
         role: 'user',
         content: context,
         images: frames.map((frame) => frame.base64),
       }],
-      options: { temperature: 0.1 },
+      options: { temperature: 0.1, num_predict: OLLAMA_NUM_PREDICT },
     }),
   });
   const data = await response.json().catch(() => ({}));
@@ -265,16 +276,21 @@ async function textTrackTranscript(video) {
   }).catch(() => '');
 }
 
-async function capturePostFrames(context, row, { maxFrames = 16, timeoutMs = 30000 } = {}) {
+async function capturePostFrames(context, row, { maxFrames = 16, timeoutMs = 30000, contactSheet = false } = {}) {
+  const url = canonicalSocialPostUrl(row?.url, row?.platform);
+  if (!url) throw new Error('Unsupported or malformed social post URL');
   const page = await context.newPage();
   const started = Date.now();
   try {
-    await page.goto(row.url, { waitUntil: 'domcontentloaded', timeout: Math.min(timeoutMs, 20000) });
-    await page.waitForTimeout(1200);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Math.min(timeoutMs, 20000) });
+    await page.locator('video').first().waitFor({state:'attached', timeout:15000}).catch(() => {});
+    await page.waitForTimeout(300);
     const title = clean(await page.title().catch(() => ''), 300);
     const video = await visibleVideo(page);
     if (!video) {
-      const buffer = await page.screenshot({ type: 'jpeg', quality: 45, fullPage: false }).catch(() => null);
+      const post = page.locator(row.platform === 'X' ? 'article[data-testid="tweet"]' : '[data-e2e="recommend-list-item-container"]').first();
+      await post.waitFor({state:'visible', timeout:5000});
+      const buffer = await post.screenshot({ type: 'jpeg', quality: 60, timeout:5000 }).catch(() => null);
       if (!buffer) return { frames: [], duration: 0, transcript: '', pageTitle: title, captureType: 'none', elapsedMs: Date.now() - started };
       const base64 = buffer.toString('base64');
       return { frames: [{ time: 0, base64, dataUrl: `data:image/jpeg;base64,${base64}` }], duration: 0, transcript: '', pageTitle: title, captureType: 'post-screenshot', elapsedMs: Date.now() - started };
@@ -286,16 +302,45 @@ async function capturePostFrames(context, row, { maxFrames = 16, timeoutMs = 300
       if (Date.now() - started > timeoutMs) break;
       await seekVideo(video, time);
       await page.waitForTimeout(80);
-      const buffer = await video.screenshot({ type: 'jpeg', quality: 45 }).catch(() => null);
+      const decoded = await video.evaluate(element => {
+        if (!element.videoWidth || !element.videoHeight || element.readyState < 2) return null;
+        const scale = Math.min(1, 640 / Math.max(element.videoWidth, element.videoHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(element.videoWidth * scale); canvas.height = Math.round(element.videoHeight * scale);
+        canvas.getContext('2d').drawImage(element, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+      }).catch(() => null);
+      const buffer = decoded ? Buffer.from(decoded, 'base64') : await video.screenshot({ type: 'jpeg', quality: 45, timeout: 2500 }).catch(() => null);
       if (!buffer) continue;
       const base64 = buffer.toString('base64');
       frames.push({ time, base64, dataUrl: `data:image/jpeg;base64,${base64}` });
     }
     const transcript = clean(await textTrackTranscript(video), 4000);
-    return { frames, duration: metadata.duration || 0, transcript, pageTitle: title, captureType: 'video-timeline', elapsedMs: Date.now() - started };
+    const sheet = contactSheet && frames.length > 1 ? await buildTimelineContactSheet(page, modelFrames(frames, MODEL_FRAME_LIMIT)) : null;
+    return { frames, modelFrames: sheet ? [sheet] : null, contactSheet: Boolean(sheet), duration: metadata.duration || 0, transcript, pageTitle: title, captureType: 'video-timeline', elapsedMs: Date.now() - started };
   } finally {
     await page.close().catch(() => {});
   }
+}
+
+export async function buildTimelineContactSheet(page, frames) {
+  const base64 = await page.evaluate(async input => {
+    const images = await Promise.all(input.map(frame => new Promise((resolve,reject) => {
+      const image = new Image(); image.onload = () => resolve(image); image.onerror = reject; image.src = `data:image/jpeg;base64,${frame.base64}`;
+    })));
+    const columns = Math.min(3, images.length), rows = Math.ceil(images.length / columns);
+    const cellWidth = 168, imageHeight = Math.min(398, Math.round(cellWidth * images[0].height / images[0].width)), labelHeight = 24;
+    const canvas = document.createElement('canvas'); canvas.width = columns * cellWidth; canvas.height = rows * (imageHeight + labelHeight);
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    images.forEach((image,index) => {
+      const x = (index % columns) * cellWidth, y = Math.floor(index / columns) * (imageHeight + labelHeight);
+      const scale = Math.min(cellWidth/image.width,imageHeight/image.height);
+      ctx.drawImage(image,x+(cellWidth-image.width*scale)/2,y+labelHeight,image.width*scale,image.height*scale);
+      ctx.fillStyle = '#fff'; ctx.font = '16px sans-serif'; ctx.fillText(`${index+1}: ${Number(input[index].time).toFixed(1)}s`,x+6,y+18);
+    });
+    return canvas.toDataURL('image/jpeg',0.7).split(',')[1];
+  }, frames.map(({base64,time})=>({base64,time})));
+  return {base64, representedFrames:frames.length, time:0};
 }
 
 function modelFrames(frames, limit = 12) {
@@ -303,12 +348,14 @@ function modelFrames(frames, limit = 12) {
   return Array.from({ length: limit }, (_, index) => frames[Math.round(index * (frames.length - 1) / (limit - 1))]);
 }
 
+export function excludeCaptureAnnotations(texts = [], contactSheet = false) {
+  return contactSheet ? texts.filter(text => !/^\d+\s*:\s*\d+(?:\.\d+)?s$/i.test(String(text).trim())) : texts;
+}
+
 function analysisPrompt(row, capture) {
   return [
-    'You are Front\'s social-video content understanding layer. Determine what this post is actually about from the chronological frames plus the supplied post context.',
-    'Treat the frames as a time sequence. Focus on the event, person/object, action, joke, reaction, visual template, on-screen text, transformation, reveal, or other details that would let an analyst recognize the same narrative in another post.',
-    'Do not infer a real person\'s identity from appearance alone. Only use a person/name when the supplied caption, page text, or visible on-screen text supports it. Do not invent dialogue, audio, dates, places, or backstory that are not visible or supplied.',
-    'Return ONLY valid JSON with keys: summary (1-2 specific sentences), event (short event phrase), entities (array), actions (array), onScreenText (array), visualMotifs (array), memePotential (0-1), confidence (0-1), uncertainties (array).',
+    'Identify the specific story/action/joke from these chronological video frames and post context. Names require caption or visible-text support; never identify faces or invent audio, dialogue, dates, places, or backstory.',
+    'Return compact JSON only: s (grounded summary <=12 words), e (event <=4 words), n (<=3 entities), t (<=2 visible text phrases, each <=4 words), m (meme potential 0-1), c (confidence 0-1), u (uncertainty, <=1 short phrase). Empty arrays when absent; no redundant prose.',
     `Platform: ${clean(row.platform, 20)}`,
     `Author: ${clean(row.author, 120)}`,
     `Post caption/context: ${clean(row.content, MAX_CONTEXT_TEXT)}`,
@@ -316,7 +363,7 @@ function analysisPrompt(row, capture) {
     `Page title: ${capture.pageTitle || 'unknown'}`,
     `Video duration: ${Number(capture.duration || 0).toFixed(2)} seconds`,
     capture.transcript ? `Available caption track text: ${capture.transcript}` : 'Available caption track text: none',
-    'Frames are ordered from early to late and labeled with timestamps.',
+    capture.contactSheet ? 'The image is a chronological contact sheet. Read panels left to right, then top to bottom; each panel has a frame number and timestamp. These are successive frames from ONE video, not separate events. Panel numbers and timestamps are capture annotations, never source on-screen text.' : 'Frames are ordered from early to late and labeled with timestamps.',
   ].join('\n');
 }
 
@@ -330,11 +377,12 @@ export function applyUnderstanding(row, analysis) {
     analysis.onScreenText?.length ? `On-screen text: ${analysis.onScreenText.join(' · ')}` : '',
     analysis.visualMotifs?.length ? `Visual motifs: ${analysis.visualMotifs.join(', ')}` : '',
   ].filter(Boolean);
-  const original = clean(row.content, 6200);
+  const original = clean(row.sourceContent ?? row.content, 6200);
   const enriched = clean(`${original} ${parts.join('. ')}`, 8000);
   return {
     ...row,
     content: enriched,
+    sourceContent: original,
     contentSummary: analysis.summary,
     contentEvent: analysis.event || null,
     contentEntities: analysis.entities || [],
@@ -412,10 +460,16 @@ export class ContentUnderstandingEngine {
       lastRun: this.lastRun,
       lastError: this.lastError,
       lastStats: this.lastStats,
+      modelFrameLimit: MODEL_FRAME_LIMIT,
+      deepTimeoutMs: DEEP_TIMEOUT_MS,
+      scoutTimeoutMs: SCOUT_TIMEOUT_MS,
+      keepAlive: this.provider.provider === 'ollama' ? OLLAMA_KEEP_ALIVE : null,
     };
   }
 
-  cacheKey(row) { return `${row.platform}|${row.id}|${row.url}`; }
+  cacheKey(row) {
+    return `${row.platform}|${row.id}|${row.url}|${this.provider.provider}|${this.provider.model || 'none'}|v${CONTENT_UNDERSTANDING_VERSION}|timeline-sheet-v7`;
+  }
 
   cacheEntry(row) {
     const entry = this.cache[this.cacheKey(row)];
@@ -443,29 +497,36 @@ export class ContentUnderstandingEngine {
     writeJson(this.cachePath, this.cache);
   }
 
-  async analyzeOne(context, row, { maxFrames = 16, timeoutMs = 45000 } = {}) {
+  capture(context, row, options) { return capturePostFrames(context, row, options); }
+
+  async analyzeOne(context, row, { maxFrames = 16, timeoutMs = DEEP_TIMEOUT_MS } = {}) {
     const cachedEntry = this.cacheEntry(row);
     if (cachedEntry?.ok === true && cachedEntry.analysis?.summary) return { analysis: cachedEntry.analysis, cached: true };
     if (cachedEntry?.ok === false) return { analysis: null, cached: false, cachedFailure: true, error: clean(cachedEntry.error, 300) || 'Recent content-analysis failure is cooling down.' };
     if (!this.provider.available) return { analysis: null, cached: false, skipped: this.provider.reason || 'provider-unavailable' };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timer;
+    const started = Date.now();
+    let captureMs = 0;
     try {
-      const capture = await capturePostFrames(context, row, { maxFrames, timeoutMs: Math.max(8000, timeoutMs - 8000) });
+      const capture = await this.capture(context, row, { maxFrames, contactSheet: this.provider.provider === 'ollama', timeoutMs: Math.max(8000, timeoutMs - 8000) });
+      captureMs = Date.now() - started;
       if (!capture.frames.length) throw new Error('No visual frames could be captured from the post.');
-      const chosen = modelFrames(capture.frames, Math.min(12, maxFrames));
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+      const chosen = capture.modelFrames || modelFrames(capture.frames, Math.min(MODEL_FRAME_LIMIT, maxFrames));
       const prompt = analysisPrompt(row, capture);
       const raw = this.provider.provider === 'ollama'
         ? await analyzeOllama(chosen, prompt, this.provider, controller.signal)
         : await analyzeOpenAI(chosen, prompt, this.provider, controller.signal);
       const analysis = {
         ...raw,
+        onScreenText: excludeCaptureAnnotations(raw.onScreenText, capture.contactSheet),
         provider: this.provider.provider,
         model: this.provider.model,
         frameCount: capture.frames.length,
-        modelFrameCount: chosen.length,
+        modelFrameCount: chosen.reduce((sum, frame) => sum + (frame.representedFrames || 1), 0), modelImageCount: chosen.length,
         duration: Number(capture.duration || 0),
-        captureType: capture.captureType,
+        captureType: capture.captureType, captureMs, modelMs: Date.now() - started - captureMs,
         analyzedAt: Date.now(),
         version: CONTENT_UNDERSTANDING_VERSION,
       };
@@ -474,9 +535,9 @@ export class ContentUnderstandingEngine {
       return { analysis, cached: false };
     } catch (error) {
       const message = error?.name === 'AbortError' ? 'Content analysis timed out.' : clean(error?.message || error, 300);
-      this.cache[this.cacheKey(row)] = { at: Date.now(), ok: false, error: message, analysis: null };
+      this.cache[this.cacheKey(row)] = { at: Date.now(), ok: false, error: message, captureMs, totalMs: Date.now() - started, analysis: null };
       this.persistCache();
-      return { analysis: null, cached: false, error: message };
+      return { analysis: null, cached: false, error: message, captureMs, modelMs:Date.now()-started-captureMs, totalMs:Date.now()-started };
     } finally {
       clearTimeout(timer);
     }
@@ -486,15 +547,17 @@ export class ContentUnderstandingEngine {
     const limit = Math.max(0, Math.min(8, Number(maxVideos ?? (mode === 'deep' ? 4 : 2)) || 0));
     const selected = selectVideoCandidates(rows, { limit });
     const byKey = new Map(rows.map((row) => [this.cacheKey(row), row]));
-    const stats = { requested: selected.length, analyzed: 0, cached: 0, cachedFailures: 0, enriched: 0, failed: 0, skipped: 0, provider: this.provider.provider, model: this.provider.model || null };
+    const stats = { requested: selected.length, analyzed: 0, cached: 0, cachedFailures: 0, enriched: 0, failed: 0, skipped: 0, provider: this.provider.provider, model: this.provider.model || null, modelFrameLimit: MODEL_FRAME_LIMIT, timeoutMs:mode === 'deep' ? DEEP_TIMEOUT_MS : SCOUT_TIMEOUT_MS, errors:[], items:[] };
     for (const row of selected) {
-      const result = await this.analyzeOne(context, row, { maxFrames: mode === 'deep' ? 16 : 10, timeoutMs: mode === 'deep' ? 45000 : 30000 });
+      const result = await this.analyzeOne(context, row, { maxFrames: mode === 'deep' ? 16 : 10, timeoutMs: mode === 'deep' ? DEEP_TIMEOUT_MS : SCOUT_TIMEOUT_MS });
+      stats.items.push({url:row.url, cached:Boolean(result.cached), error:result.error || null, confidence:result.analysis?.confidence ?? null, captureMs:result.analysis?.captureMs ?? result.captureMs ?? null, modelMs:result.analysis?.modelMs ?? result.modelMs ?? null});
+      if (result.error) stats.errors.push(result.error);
       if (result.cached) stats.cached++;
       else if (result.cachedFailure) { stats.cachedFailures++; stats.failed++; }
       else if (result.analysis) stats.analyzed++;
       else if (result.skipped) stats.skipped++;
       else stats.failed++;
-      if (result.analysis?.summary) {
+      if (result.analysis?.summary && result.analysis.confidence >= 0.5) {
         byKey.set(this.cacheKey(row), applyUnderstanding(row, result.analysis));
         stats.enriched++;
       }

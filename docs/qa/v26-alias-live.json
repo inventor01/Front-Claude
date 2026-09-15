@@ -1,0 +1,258 @@
+{
+  "rows": [
+    {
+      "id": "x:browser:65b5f15d0ae3eaa2e327e1ca4916",
+      "platform": "X",
+      "author": "0x0SojalSec",
+      "url": "https://x.com/0x0SojalSec/status/2099164779713900781",
+      "content": "Google mapped every neuron in a male fruit fly. 166,000 neurons, Millions of synapses playing Subway Surfers Real dopamine, of trial and error. For the first time, scientists have mapped the complete brain and central nervous system of an adult male fruit fly — a key model organism in science. 🪰 Working alongside HHMI Janelia Research Campus and the scientific community, @GoogleResearch scientists and researchers used Visual summary: A video shows a Subway Surfers game where a fruit fly character navigates a track, with the game's visual style and mechanics being used to represent the mapping of a fruit fly's brain.. Event: Fruit fly character navigating Subway Surfers track. Entities: fruit fly, Subway Surfers game character, Google Research. Actions: navigating track, jumping over obstacles, collecting coins, avoiding enemies. On-screen text: 0:0.0s · 2:2.9s · 3:4.3s · 5:10.0s · 6:12.9s · 7:14.3s · 8:17.1s. Visual motifs: Subway Surfers game interface, fruit fly character, neural network visualization overlay, neuron mapping graphics",
+      "published": 1789314858000,
+      "views": null,
+      "likes": null,
+      "coverUrl": "https://pbs.twimg.com/amplify_video_thumb/2099164703918546945/img/84PlLN2nbIkkB9lI.jpg",
+      "mediaType": "video",
+      "hashtags": [],
+      "provenance": "Front v26 · X dedicated For You collector",
+      "firstObserved": 1789355460075,
+      "sourceContent": "Google mapped every neuron in a male fruit fly. 166,000 neurons, Millions of synapses playing Subway Surfers Real dopamine, of trial and error. For the first time, scientists have mapped the complete brain and central nervous system of an adult male fruit fly — a key model organism in science. 🪰 Working alongside HHMI Janelia Research Campus and the scientific community, @GoogleResearch scientists and researchers used",
+      "contentSummary": "A video shows a Subway Surfers game where a fruit fly character navigates a track, with the game's visual style and mechanics being used to represent the mapping of a fruit fly's brain.",
+      "contentEvent": "Fruit fly character navigating Subway Surfers track",
+      "contentEntities": [
+        "fruit fly",
+        "Subway Surfers game character",
+        "Google Research"
+      ],
+      "contentActions": [
+        "navigating track",
+        "jumping over obstacles",
+        "collecting coins",
+        "avoiding enemies"
+      ],
+      "onScreenText": [
+        "0:0.0s",
+        "2:2.9s",
+        "3:4.3s",
+        "5:10.0s",
+        "6:12.9s",
+        "7:14.3s",
+        "8:17.1s"
+      ],
+      "visualMotifs": [
+        "Subway Surfers game interface",
+        "fruit fly character",
+        "neural network visualization overlay",
+        "neuron mapping graphics"
+      ],
+      "contentConfidence": 0.95,
+      "memePotential": 1,
+      "contentProvider": "ollama",
+      "contentModel": "qwen3-vl:4b-instruct",
+      "contentFrameCount": 13,
+      "contentDuration": 17.2,
+      "contentAnalyzedAt": 1789355654554,
+      "contentUnderstandingVersion": 17,
+      "contentUnderstanding": {
+        "summary": "A video shows a Subway Surfers game where a fruit fly character navigates a track, with the game's visual style and mechanics being used to represent the mapping of a fruit fly's brain.",
+        "event": "Fruit fly character navigating Subway Surfers track",
+        "entities": [
+          "fruit fly",
+          "Subway Surfers game character",
+          "Google Research"
+        ],
+        "actions": [
+          "navigating track",
+          "jumping over obstacles",
+          "collecting coins",
+          "avoiding enemies"
+        ],
+        "onScreenText": [
+          "0:0.0s",
+          "2:2.9s",
+          "3:4.3s",
+          "5:10.0s",
+          "6:12.9s",
+          "7:14.3s",
+          "8:17.1s"
+        ],
+        "visualMotifs": [
+          "Subway Surfers game interface",
+          "fruit fly character",
+          "neural network visualization overlay",
+          "neuron mapping graphics"
+        ],
+        "memePotential": 1,
+        "confidence": 0.95,
+        "uncertainties": [],
+        "provider": "ollama",
+        "model": "qwen3-vl:4b-instruct",
+        "frameCount": 13,
+        "modelFrameCount": 8,
+        "modelImageCount": 1,
+        "duration": 17.2,
+        "captureType": "video-timeline",
+        "captureMs": 4054,
+        "modelMs": 61795,
+        "analyzedAt": 1789355654554,
+        "version": 17
+      },
+      "postSubject": "Google fruit fly brain map",
+      "postEvent": "Subway Surfers game visualization",
+      "postEntities": [],
+      "postAction": null,
+      "postObject": null,
+      "postContext": null,
+      "semanticNarrativeKey": "google fruit fly brain map",
+      "postUnderstandingConfidence": 0.9,
+      "postUnderstandingMethod": "semantic-model",
+      "postUnderstandingVersion": 26
+    },
+    {
+      "id": "x:browser:46d455888c021d5d1469e81e831f",
+      "platform": "X",
+      "author": "ZentrixHQ",
+      "url": "https://x.com/ZentrixHQ/status/2099005466630140309",
+      "content": "GPT-6 ASTRA DID IN 7 DAYS WHAT SCIENTISTS SPENT 20 YEARS MAPPING. Scientists spent two decades reconstructing the brain of a fruit fly, and now AI has taken that map and turned it into something that actually works. The fly has just 166,700 neurons, packed into a brain roughly Visual summary: A video showcases an AI system using a fruit fly's brain map to enable complex behaviors, such as navigating environments and solving puzzles, in a simulated setting.. Event: AI-driven fruit fly behavior simulation. Entities: fruit fly, AI system. Actions: navigating urban environment, solving puzzle, moving in grid room, displaying brain map, performing complex movements. On-screen text: 0:0s · 2:3.1s · 3:6.1s · 4:9.2s · 5:13.8s · 6:16.8s · 7:19.9s · 8:22.9s · the fly is solving millenium prize problems · 50 Hz. Visual motifs: fruit fly in various simulated environments, brain map interface, grid room, urban street scene, AI control panel",
+      "published": 1789276875000,
+      "views": null,
+      "likes": null,
+      "coverUrl": "https://pbs.twimg.com/amplify_video_thumb/2099005423080583175/img/7Qlza8iXOAxNbv-E.jpg",
+      "mediaType": "video",
+      "hashtags": [],
+      "provenance": "Front v26 · X dedicated For You collector",
+      "firstObserved": 1789355466163,
+      "sourceContent": "GPT-6 ASTRA DID IN 7 DAYS WHAT SCIENTISTS SPENT 20 YEARS MAPPING. Scientists spent two decades reconstructing the brain of a fruit fly, and now AI has taken that map and turned it into something that actually works. The fly has just 166,700 neurons, packed into a brain roughly",
+      "contentSummary": "A video showcases an AI system using a fruit fly's brain map to enable complex behaviors, such as navigating environments and solving puzzles, in a simulated setting.",
+      "contentEvent": "AI-driven fruit fly behavior simulation",
+      "contentEntities": [
+        "fruit fly",
+        "AI system"
+      ],
+      "contentActions": [
+        "navigating urban environment",
+        "solving puzzle",
+        "moving in grid room",
+        "displaying brain map",
+        "performing complex movements"
+      ],
+      "onScreenText": [
+        "0:0s",
+        "2:3.1s",
+        "3:6.1s",
+        "4:9.2s",
+        "5:13.8s",
+        "6:16.8s",
+        "7:19.9s",
+        "8:22.9s",
+        "the fly is solving millenium prize problems",
+        "50 Hz"
+      ],
+      "visualMotifs": [
+        "fruit fly in various simulated environments",
+        "brain map interface",
+        "grid room",
+        "urban street scene",
+        "AI control panel"
+      ],
+      "contentConfidence": 0.95,
+      "memePotential": 1,
+      "contentProvider": "ollama",
+      "contentModel": "qwen3-vl:4b-instruct",
+      "contentFrameCount": 16,
+      "contentDuration": 23,
+      "contentAnalyzedAt": 1789355715465,
+      "contentUnderstandingVersion": 17,
+      "contentUnderstanding": {
+        "summary": "A video showcases an AI system using a fruit fly's brain map to enable complex behaviors, such as navigating environments and solving puzzles, in a simulated setting.",
+        "event": "AI-driven fruit fly behavior simulation",
+        "entities": [
+          "fruit fly",
+          "AI system"
+        ],
+        "actions": [
+          "navigating urban environment",
+          "solving puzzle",
+          "moving in grid room",
+          "displaying brain map",
+          "performing complex movements"
+        ],
+        "onScreenText": [
+          "0:0s",
+          "2:3.1s",
+          "3:6.1s",
+          "4:9.2s",
+          "5:13.8s",
+          "6:16.8s",
+          "7:19.9s",
+          "8:22.9s",
+          "the fly is solving millenium prize problems",
+          "50 Hz"
+        ],
+        "visualMotifs": [
+          "fruit fly in various simulated environments",
+          "brain map interface",
+          "grid room",
+          "urban street scene",
+          "AI control panel"
+        ],
+        "memePotential": 1,
+        "confidence": 0.95,
+        "uncertainties": [],
+        "provider": "ollama",
+        "model": "qwen3-vl:4b-instruct",
+        "frameCount": 16,
+        "modelFrameCount": 8,
+        "modelImageCount": 1,
+        "duration": 23,
+        "captureType": "video-timeline",
+        "captureMs": 6119,
+        "modelMs": 54782,
+        "analyzedAt": 1789355715465,
+        "version": 17
+      },
+      "postSubject": "AI fruit fly brain map",
+      "postEvent": "behavior simulation",
+      "postEntities": [],
+      "postAction": null,
+      "postObject": null,
+      "postContext": null,
+      "semanticNarrativeKey": "ai fruit fly brain map",
+      "postUnderstandingConfidence": 0.8,
+      "postUnderstandingMethod": "semantic-model",
+      "postUnderstandingVersion": 26
+    }
+  ],
+  "stats": {
+    "semanticAliases": [
+      {
+        "left": "x:browser:65b5f15d0ae3eaa2e327e1ca4916",
+        "right": "x:browser:46d455888c021d5d1469e81e831f",
+        "key": "fruit fly brain map",
+        "same": false,
+        "confidence": 0.1,
+        "at": 1789386106715
+      }
+    ],
+    "total": 2,
+    "elapsedMs": 11046,
+    "requestCount": 1,
+    "timeoutMs": 60000,
+    "requests": [
+      {
+        "kind": "semantic-alias",
+        "batchSize": 1,
+        "timeoutMs": 60000,
+        "elapsedMs": 11042,
+        "status": "complete",
+        "error": null
+      }
+    ],
+    "cached": 2,
+    "modeled": 0,
+    "fallback": 0,
+    "failed": 0,
+    "batchSize": 4,
+    "provider": "ollama",
+    "model": "qwen3-vl:4b-instruct",
+    "errors": []
+  }
+}

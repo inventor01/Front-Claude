@@ -1,5 +1,5 @@
 export type PumpPortalRuntimeState={enabled:boolean;status:string;connected:boolean};
-export type PumpPortalWireEvent={txType?:string;mint?:string;name?:string;symbol?:string};
+export type PumpPortalWireEvent={txType?:string;mint?:string;name?:string;symbol?:string;marketCapSol?:number;poolId?:string;pool?:string};
 export const PUMPPORTAL_ENABLE_KEY:string;
 export function ensurePumpPortalRuntime():PumpPortalRuntimeState;
 export function setPumpPortalRuntimeEnabled(enabled:boolean):PumpPortalRuntimeState;

@@ -141,3 +141,98 @@ Front was previously too close to a text scraper: social feed/search captions co
 - mixed real-topic + one-off-noise replay.
 
 A release should not merge if this quality gate or the existing browser bridge, build, migration, lint, or typecheck gates fail.
+
+## 2026-09-12 — TikTok discovery regressed to personal/activity content
+
+### Root cause
+The v26 branch was created from the Golden v25 checkpoint before the TikTok feed-card-only isolation fixes were incorporated. The observer used a broad DOM ancestor fallback that accidentally climbed into profile, activity, and notification containers, causing personal content to be scanned as discovery evidence.
+
+### Permanent fix
+- Updated `browser-bridge/src/tiktok-observer-v21.mjs` to use a strict allow-list of feed/discovery containers: `[data-e2e*="recommend-list-item-container"], [data-e2e*="search-card"], [data-e2e*="recommend-item"], [data-e2e*="feed-item"], article`.
+- Removed the broad parent-climbing fallback.
+- Verified that TikTok discovery now exclusively grounds actual feed/discovery cards.
+
+## 2026-09-12 — Current Scan box looked empty during active discovery
+
+### Root cause
+The UI in `app/front-live-shell.tsx` relied on top-level `live.observed` and `live.evidence` arrays. While the backend was actively finding posts via the TikTok observer, the top-level counts were not updated until the discovery phase finished and grounded evidence was merged.
+
+### Permanent fix
+- Modified `server-v25.mjs` to dynamically compute the total `observed` count and `platformCounts` in the `/live` endpoint by combining the X discovery state with the real-time snapshot from the `BroadTikTokObserver`.
+- This ensures the UI shows "Observed: X" and "TikTok: Y" immediately as the scanner progresses.
+
+## 2026-09-12 — Discovery evidence only appeared after scan completion
+
+### Root cause
+The scanner waited for the entire discovery phase (both X and TikTok) to complete before exposing the grounded evidence array to the `/live` endpoint.
+
+### Permanent fix
+- Implemented progressive grounded evidence streaming in `server-v25.mjs`.
+- In `collectXFeed` and `collectTikTokFeed`, discovered grounded evidence is now merged into `latestLive.evidence` immediately during the polling loop.
+- The UI now displays evidence cards progressively as they are found, while keeping them separate from the final narrative intelligence gates.
+
+### Regression / release gate
+Verified that:
+1. TikTok discovery excludes personal/profile/activity rows.
+2. Current Scan UI updates counts live during discovery.
+3. Grounded evidence streams progressively to the UI.
+4. Full unit test suite passes (except for environment-blocked loopback tests).
+
+## 2026-09-13 — Related coin tracking and false association repair
+
+- Root cause: alias containment was symmetric, so a partial token name such as Agent qualified against Coding Agent. Require the complete phrase in the coin name, reject generic singleton aliases and require multiple distinctive terms for overlap. Revalidate old links and preserve their historical snapshots when rejected.
+- Root cause: enrichment replaced data on every refresh, coercing missing values to zero and falling back from MC to FDV. Preserve immutable first/match baselines, keep unavailable MC null, keep FDV separate, and atomically append coin_market_snapshots with current records. Never assign a later quote to an unknown match-time baseline.
+- Retain unmatched PumpPortal create events for later narrative discovery. Add independently labeled discovery of direct Pump.fun pools; never fabricate a creation event from a search result. Cache queries and mint requests; rank semantic confidence before traction.
+- Add shared related-coin detail cards, all three mint-based links, Copy CA, window metrics, momentum, timing and explicit PRE-COIN states. Background enrichment proceeds separately from scan completion and rotates through narrative pages.
+- Persist exact launch timestamps only when verified; creation-event observation and pool-creation times remain distinct. SOL-denominated event market caps are not labeled USD. Unknown holder/curve data remain unavailable.
+- Integration also preserved remote v26 feed protections and live counters. Fixed pre-existing invalid escaped template delimiters in the local scanner source; added syntax regression coverage. Updated counter-layout/copy assertions to the combined current UI while retaining polling and feed-protection assertions.
+
+## 2026-09-13 — v26 full pipeline QA (release validation pending)
+
+- **TikTok anchorless feed / wrong scroll surface:** authenticated probes reproduced 10 `/video/` anchors, all inside `inbox-list-item`, while real `recommend-list-item-container` cards exposed `xgwrapper-<index>-<videoId>` and a local `video-author-avatar` link. The prior diagnosis incorrectly treated the inbox links as feed links. Golden also depended on anchors, so reverting would restore contamination rather than acquire this DOM. Added card-local identity extraction and caption-only text extraction; retained personal-surface exclusions. The feed's parent is a scrollable div (2391px content / 288px viewport); window scrolling cannot advance it. Scroll that ancestor. Regression: real Chromium DOM fixtures cover anchorless identity, persistent inbox shells, local activity, and unknown parents. Live release validation pending.
+- **Origin collector broad ancestor fallback:** source inspection confirmed `parentElement.parentElement.parentElement` still admitted unrelated page content. Both Golden and v26 had the unsafe fallback. Origin now reuses the same constrained TikTok extractor with explicit investigation provenance. Regression: shared DOM extraction tests. Live search validation pending.
+- **Malformed media navigation:** reproduced `selectVideoCandidates` selecting the literal `chmod +x browser-bridge/start.command`. Golden/v26 capture passed row.url directly to goto. Added absolute HTTP(S), exact supported host and post-path validation at selection and capture; collectors canonicalize through the same validator. Regression: poison, credentials, unsupported hosts/protocols, malformed paths, platform mismatch, canonical URLs. Existing candidate diversity fixture updated from impossible one-digit TikTok IDs to valid IDs without changing assertions. Live model validation pending.
+- **Incomplete ledger schema:** writer omitted usable evidence, complete creator/source counts and canonical vision/context fields; UI inferred these from at most 30 samples. Added versioned ledger builder with full evidence counts and model/stage metadata. Regression: 40-row fixture verifies totals beyond sample truncation. Live persistence validation pending.
+- **Legacy narrative bypass:** reproduced a lexical Office Opening candidate with no semantic key being returned by v26. Legacy candidates now contribute metadata only to semantically corroborated narratives; model key, subject, confidence and independent creator gates remain mandatory. Regression covers bypass, low confidence and repeated single creator. Live quality review pending.
+- **Context cache / silent parse failure:** malformed model JSON previously fell back with zero failures; fallback frames were then reused as successful cache entries, and richer visual input did not invalidate cache. Added per-row indexed response validation, failure counts, retryable fallback and input/model fingerprinting. Regression supplies malformed JSON and changed visual input. Live model validation pending.
+- **Coin age impure render:** lint reproduced Date.now during render in new related-coin UI (absent in Golden). Moved the clock to an effect-driven interval with cleanup. Typecheck and lint revalidation pending; coin matching and market-cap logic unchanged.
+
+Baseline before edits: bridge 126/126; production build passed. App regressions 43/43 and SQL/coin verification passed. Golden remains `5701717964eab8caef3d3c86c12be358c2d7b55a`. No merge/deployment performed. CDP 43982 was not restarted.
+
+- **X/origin hidden-tab wheel deadlock:** live scan stayed at X=1, scrolls=0 while TikTok advanced to 24 observed/22 grounded. Isolated reproduction: hidden X `mouse.wheel` did not resolve within 3 seconds; DOM scrolling immediately changed scrollY from 0 to 950. Golden used the same wheel path. Replaced wheel dispatch with direct scrolling of the actual scrollable ancestor/root; origin searches use the same helper. Regression exercises nested and document surfaces in real Chromium. Live revalidation pending.
+- **Validator readiness and lifecycle:** raw TikTok anchors were exclusively inbox links; required card-local extraction readiness now replaces duplicated anchor filtering. Player elements alone can precede author hydration, so readiness requires a complete normalized observation. Validator exits its own process after completion (prior failures left CDP client processes running); it never closes the authenticated browser. Final scan payload is retained for manual review.
+
+- **Qwen context overflow and shared deadline:** real diagnostic captured 16 frames in 9.8s, then Ollama rejected 13,199 tokens against its 4,096-token window. A chronological timestamped contact sheet preserves 12 model-selected timeline frames in one image; the corrected request is 2,520 tokens. Decode video frames directly with a bounded screenshot fallback. Inference deadline starts after capture. Regression covers sheet dimensions/frame count and capture/deadline independence. **Not release-validated:** corrected request still times out during image encoding on this memory-constrained host; see docs/qa/V26_OLLAMA_FINDINGS.md.
+- **False success / overwritten errors:** nonempty evidence previously caused complete/ok even with degraded stages; the second context pass could overwrite earlier failures. Final outcome now incorporates stage failures and empty requested collectors; context pass totals preserve earlier failures. Regression covers nonempty evidence with failures, disabled versus empty requested sources, and manual stop.
+- **Repeated visual enrichment:** applying cache twice appended the same generated text again. Preserve sourceContent and build enrichment from it; regression proves idempotence.
+- **Creator independence:** same handle across platforms, or absent author fields, must not create independent corroboration. Conservative normalized-handle gate now excludes both; regression added.
+
+## v26 resumed QA: runtime and X diagnosis (2026-09-13)
+Before edits: clean HEAD 11e79b1, v26 branch. Latest ledger scan dg80qm retained 64 evidence (X2/TikTok62), duration1116059ms, visual1success/3failures, semantic4failures. Origin searched0 yet unconditional second context call processed36 more rows (333s). Validator reads evidence only from aborted response, losing live evidence on499. Root fixes: restrict origin contextualization to newly added identities, use target2/1/12 model budgets, preserve snapshots and distinguish transport failures.
+Live owned X diagnostic: For You selected, viewport288px, scroll moves259px each attempt, virtualized IDs change. First status link for valid textual post is /status/2082496145994248488/analytics; extractor chooses first link then rejects it instead of actual timestamp permalink. Other cards are media-only and rejected for absent text. Four stale accepted-row passes can stop while feed itself advances. Fix must select canonical permalink, preserve grounded media cards, and measure stale discovery IDs independently from accepted text rows. Chrome session untouched; temporary diagnostic page closed individually.
+
+Live follow-up: the first repaired gate still stopped X at1 after8 scrolls. Its retained diagnostics prove every scroll moved259px (0→2072), with only3 DOM IDs through a tall feed region. Counting unchanged IDs alone still mistakes traversal for exhaustion. Root fix: require both repeated unchanged IDs AND blocked scroll movement before early termination; retain48-scroll/70-second bounds. This does not lower evidence or narrative quality gates.
+
+Age audit reproduction: measureNarrativeVelocity currently calculates age and recency from the earliest related evidence, then lifecycleForNarrative marks age>72h SATURATED regardless a fresh corroborated burst. Thus adding old origin evidence changes current-breakout classification. Fix: retain earliest evidence/age as history, separately expose first Front observation and the current72-hour publication window; use that window's age for lifecycle/recency when it exists. Unknown publication is not manufactured from observation.
+
+Hidden-tab reproduction confirmed: same owned X page visibility=hidden, scroll259→1813, identical rendered IDs for6passes; activating only that owned page immediately replaced virtualized IDs at2072. Parallel X/TikTok page creation hides X while TikTok owns active tab. Permanent fix is sequential primary collection on the existing context, each with unchanged independent discovery budgets. No browser flag/profile/port changes. Also visual capture slept1.2s then screenshot a blank X shell; confidence0.1 was counted as enriched despite applyUnderstanding rejecting it. Require rendered media readiness, crop fallback to actual post, and count enrichment only at existing0.5 confidence threshold. Contact sheet costs2172prompttokens for8frames and timed out75s; reduce panel pixel dimensions while retaining all8 chronological frames and text labels, then validate quality/model runtime.
+
+Semantic timeout reproduction: all3four-post requests exceeded60s; Ollama logs show generation at~6tokens/sec and313–347tokens emitted before cancellation, so this is output latency, not a hung collector. The9-field frame repeats subject/event in action/object/context and narrativeKey. Keep required semantic subject,event,key,confidence, but use compact wire keys and short phrases; normalize back to the public frame. Do not truncate token budgets or relax confidence/corroboration. Regression accepts compact output and retains legacy structured responses. Per-request elapsed/batch/timeout/error diagnostics added.
+
+Final quality audit: the passing78-row scan contained two independent model-understood fruit-fly-brain-map posts, keyed `google fruit fly brain map` and `ai fruit fly brain map`. deriveSemanticNarrativesV26 buckets only exact keys, so even strongly overlapping semantic identities cannot be checked for equivalence. Root fix: bounded semantic alias adjudication for at most3pairs sharing at least4specific semantic-key terms; a model must explicitly confirm the same concrete story with>=0.85confidence. Lexical overlap only nominates pairs, never promotes or merges them. Different events, generic words, same creators, and ambiguous responses remain separate. Preserve existing creator and confidence gates; cache decisions to avoid repeated unchanged analysis.
+
+Final repeatability gate (29X/42TikTok) exposed visual output latency: first request spent35.5sprompt+35.7sgenerating249tokens; second reached only135generated tokens at~4tokens/sec before75stimeout. Image decoding succeeded, so collector/capture is not the cause. Apply the proven compact-wire approach to visual output too: concise grounded summary,event,entities,visible text,confidence,uncertainty and meme score; keep8frames and75sdeadline. Omit redundant action/motif prose (event/summary retain visible actions). Normalize to existing public fields and version the cache. Failures now also return elapsed capture/model times rather than null diagnostics.
+
+Selection audit found a coverage gap: all12semantic selections in the passing scan were X posts because X exposes publication time while TikTok leaves it unknown. A35-point recency difference makes even repeated TikTok captions lose every slot. Preserve the12-post budget and freshness ranking, but reserve a small share (3of12when both platforms exist) for each discovered platform before filling remaining slots by priority. This changes analysis selection, never discovery volume or inferred publication dates. Regression verifies mixed-platform coverage within the same budget.
+
+## Post-push repeatability: collector page loses visibility
+Reproduced a1-post X scan with39successful DOM scrolls but the same2rendered IDs. A separate owned-page probe became hidden after3passes and its virtualized IDs froze. Sequential platforms prevent mutual hiding but do not guarantee continued page visibility. Root fix: check visibility of the owned X collector before each extraction, activate only that owned page when hidden, and report visibility recovery/failure. No Chrome process/profile/port changes. Also /live exposed the previous TikTok observer counts while the new scan's TikTok stage was pending; use the current pending/disabled stage until the observer starts. Regression covers recovery and pending-counter isolation.
+
+TikTok follow-up: scan 4ap844 retained only2 identities after78 scrolls; an owned hidden-page reproduction repeatedly returned no identities. Apply the same owned-page visibility guard to TikTok polling and authenticated release probes; preserve the failed run and unchanged evidence requirements.
+
+Visible-both scan vop3wg:96posts (36X/60TikTok), context succeeds, visual second request times out75s. Ollama task245 processed1519prompttokens, generated100tokens at2.4tokens/sec before cancellation; capture took9.1s and succeeded. Reduce repetitive visual instruction text and requested prose lengths while preserving8frames, grounded entity/text/uncertainty fields, confidence gates, and75s model deadline. Version cache so validation uses the new prompt.
+
+## Full QA completion, September 15
+Restarted f925ccf gate retained100posts (39X/61TikTok), but visual item ArchiveExplorer/2099526750656933987 exceeded75s and context returned10valid frames for12inputs while all6requests reported complete with no errors. Root causes: unconstrained context output can omit/mistype indexed rows and request success is counted before row validation; portrait contact sheets retain substantial image-token overhead despite concise prompts. Enforce compact Ollama response schemas, report missing/invalid indexed rows as request errors, and reduce contact-sheet panel size from224to168pixels while preserving8chronological frames andconfidence gates. Cache versions must change; fresh live validation must exercise new outputs.
+
+Final semantic review of passing8dei6o scan found generated frame labels (`1: 0.0s`, `2: 13.1s`) in onScreenText. They are collector annotations, not source content. Filter annotation-shaped entries only for contact sheets, instruct the model to ignore panel labels, and invalidate visual cache. Preserve genuine caption text and non-contact-sheet time text. Regression covers both paths.

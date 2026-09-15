@@ -11,7 +11,7 @@ class MockWebSocket{
   close(){this.readyState=MockWebSocket.CLOSED;this.onclose?.();}
 }
 
-test('PumpPortal runtime survives Settings unmount and only explicit stop closes the socket',()=>{
+test('PumpPortal runtime survives Settings/watcher unmount and only explicit stop closes the socket',()=>{
   const store=new Map([['front.pumpPortalListenerEnabled.v2','true']]);
   const listeners=new Map();
   globalThis.WebSocket=MockWebSocket;
@@ -36,7 +36,7 @@ test('PumpPortal runtime survives Settings unmount and only explicit stop closes
   const repeatedEnable=setPumpPortalRuntimeEnabled(true);
   assert.equal(repeatedEnable.status,'Connected · creations only');
   assert.equal(repeatedEnable.connected,true);
-  assert.equal(MockWebSocket.instances.length,1);
+  assert.equal(MockWebSocket.instances.length,1,'repeated enable must not restart or duplicate an open socket');
 
   unsubscribeMessages();unsubscribeState();
   assert.equal(first.readyState,MockWebSocket.OPEN,'UI unmount must not close the shared socket');
@@ -47,6 +47,6 @@ test('PumpPortal runtime survives Settings unmount and only explicit stop closes
   assert.equal(first.readyState,MockWebSocket.CLOSED);
   assert.equal(store.get('front.pumpPortalListenerEnabled.v2'),'false');
   setPumpPortalRuntimeEnabled(true);
-  assert.equal(MockWebSocket.instances.length,2,'explicit restart creates one replacement socket');
+  assert.equal(MockWebSocket.instances.length,2,'explicit restart creates exactly one replacement socket');
   assert.equal(store.get('front.pumpPortalListenerEnabled.v2'),'true');
 });
