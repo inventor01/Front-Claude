@@ -13,7 +13,7 @@ const V26_START = 'node --import ./src/playwright-cdp-compat.mjs src/server-v25.
 test('v26 is the default browser bridge runtime', () => {
   assert.equal(pkg.scripts.start, V26_START);
   assert.equal(pkg.scripts['start:v26'], V26_START);
-  assert.match(launcher, /Starting Front browser bridge v26/);
+  assert.match(launcher, /Starting Front browser bridge v27/);
 });
 
 test('v26 preserves the single-process architecture', () => {

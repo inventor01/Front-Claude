@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { canonicalSocialPostUrl } from './social-post-url.mjs';
 import { isVideoRow } from './video-transcript-v27.mjs';
+import { ensureOwnedPageVisible } from './feed-scroll.mjs';
 
 export const VIDEO_MEANING_VERSION = 27;
 const CACHE_TTL_MS = 7 * 24 * 3600000;
@@ -124,15 +125,44 @@ async function analyzeTextBatch(rows, provider, signal) {
   return parseArray(text);
 }
 
+export async function captureRenderedVideoFrame(page, video) {
+  const direct = await video.evaluate((element) => {
+    if (!element.videoWidth || !element.videoHeight || element.readyState < 2) return null;
+    const scale = Math.min(1, 336 / Math.max(element.videoWidth, element.videoHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(element.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(element.videoHeight * scale));
+    canvas.getContext('2d').drawImage(element, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', .5).split(',')[1];
+  }).catch(() => null);
+  if (direct) return direct;
+  // A rendered cross-origin video taints canvas. Capture only the actual
+  // video element, then resize the screenshot's safe data URL for inference.
+  const screenshot = await video.screenshot({ type: 'jpeg', quality: 55, timeout: 5000 });
+  return page.evaluate(base64 => new Promise((resolve, reject) => {
+    const image = new Image(); image.onerror = reject;
+    image.onload = () => {
+      const scale = Math.min(1, 336 / Math.max(image.width, image.height));
+      const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale));
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', .5).split(',')[1]);
+    };
+    image.src = `data:image/jpeg;base64,${base64}`;
+  }), screenshot.toString('base64'));
+}
+
 async function captureFallbackFrame(context, row) {
+  if (row.videoFrame) return row.videoFrame;
   const url = canonicalSocialPostUrl(row?.url, row?.platform);
   if (!url) return null;
   const page = await context.newPage();
   try {
     await page.goto(url, {waitUntil:'domcontentloaded',timeout:18000});
+    await ensureOwnedPageVisible(page);
     const video = page.locator('video').first();
     await video.waitFor({state:'attached',timeout:10000}).catch(() => {});
     if (!(await video.count().catch(() => 0))) return null;
+    await page.waitForFunction(() => { const v = document.querySelector('video'); return v?.readyState >= 2 && v.videoWidth > 0; }, {}, { timeout: 10000 });
     await video.evaluate(async (element) => {
       element.muted = true;
       await element.play().catch(() => {});
@@ -144,14 +174,7 @@ async function captureFallbackFrame(context, row) {
         await new Promise((resolve) => { const done=()=>resolve(); element.addEventListener('seeked',done,{once:true}); element.currentTime=target; setTimeout(done,1200); });
       }
     }).catch(() => {});
-    return video.evaluate((element) => {
-      if (!element.videoWidth || !element.videoHeight || element.readyState < 2) return null;
-      const scale = Math.min(1, 448 / Math.max(element.videoWidth, element.videoHeight));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(element.videoWidth * scale)); canvas.height = Math.max(1, Math.round(element.videoHeight * scale));
-      canvas.getContext('2d').drawImage(element,0,0,canvas.width,canvas.height);
-      return canvas.toDataURL('image/jpeg',0.5).split(',')[1];
-    }).catch(() => null);
+    return captureRenderedVideoFrame(page, video);
   } finally { await page.close().catch(() => {}); }
 }
 async function analyzeVisualOne(context, row, provider, signal) {
@@ -184,23 +207,41 @@ async function analyzeVisualOne(context, row, provider, signal) {
   return {...normalized,videoMeaningMethod:'visual-fallback-model'};
 }
 
-async function analyzeTextBatchResilient(rows, provider, timeoutMs) {
+export function planMeaningBatches(rows, batchSize, provider) {
+  const limit = provider === 'ollama' ? Math.min(4, batchSize) : batchSize;
+  const batches = [];
+  let batch = [];
+  for (const row of rows) {
+    // Keep the complete per-row evidence while avoiding overflowing the local
+    // context window or spending the whole deadline on a large prompt.
+    if (batch.length && (batch.length >= limit || (provider === 'ollama' && textPrompt([...batch, row]).length > 5400))) {
+      batches.push(batch);
+      batch = [];
+    }
+    batch.push(row);
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
+export async function analyzeTextBatchResilient(rows, provider, timeoutMs, analyze = analyzeTextBatch) {
   const runBatch = async (batch) => {
     const ctl=new AbortController(); const timer=setTimeout(()=>ctl.abort(),timeoutMs);
     try {
-      const analyzed=await analyzeTextBatch(batch,provider,ctl.signal);
+      const analyzed=await analyze(batch,provider,ctl.signal);
       if(!Array.isArray(analyzed))throw new Error('Video meaning response missing or invalid.');
       const normalized=batch.map((_,index)=>{const matches=analyzed.filter((item)=>Number(item?.i)===index);return matches.length===1?normalizeResult(matches[0]):null;});
-      if(normalized.every(Boolean))return normalized;
+      if(normalized.every(reusableVideoMeaning))return normalized;
       throw new Error('Video meaning response omitted one or more inputs.');
     } finally { clearTimeout(timer); }
   };
   try { return await runBatch(rows); }
   catch(error){
-    if(rows.length<=1)throw error;
+    if(rows.length<=1)return [{ videoMeaningStatus: 'failed', videoMeaningConfidence: 0,
+      videoMeaningError: error?.name === 'AbortError' ? `Video meaning timed out after ${timeoutMs}ms.` : clean(error?.message || error, 300) }];
     const midpoint=Math.ceil(rows.length/2);
-    const left=await analyzeTextBatchResilient(rows.slice(0,midpoint),provider,timeoutMs);
-    const right=await analyzeTextBatchResilient(rows.slice(midpoint),provider,timeoutMs);
+    const left=await analyzeTextBatchResilient(rows.slice(0,midpoint),provider,timeoutMs,analyze);
+    const right=await analyzeTextBatchResilient(rows.slice(midpoint),provider,timeoutMs,analyze);
     return [...left,...right];
   }
 }
@@ -230,13 +271,18 @@ export class VideoMeaningEngineV27 {
       for(const row of pending){const input=meaningInput(row);const value={videoAbout:clean(input.spoken||input.caption||input.visual,300),videoSubject:'',videoEvent:'',videoMeaningConfidence:.25,videoMeaningMethod:'deterministic-fallback',videoMeaningStatus:'failed',videoMeaningAt:Date.now(),videoMeaningError:'Semantic video meaning model is not configured.'};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);stats.failed++;stats.errors.push(`${row.id}: model unavailable`);if(onRow)await onRow(enriched,{...stats});}
     } else {
       const textual=pending.filter((row)=>!needsVisualFallback(row));
-      for(let offset=0;offset<textual.length;offset+=this.batchSize){
-        const batch=textual.slice(offset,offset+this.batchSize);
+      for(const batch of planMeaningBatches(textual,this.batchSize,this.provider.provider)){
         try{
           const analyzed=await analyzeTextBatchResilient(batch,this.provider,this.timeoutMs);
           for(let index=0;index<batch.length;index++){
             const row=batch[index],value=analyzed[index];
             if(!value)throw new Error(`Missing semantic meaning for ${row.id}`);
+            if (value.videoMeaningStatus === 'failed') {
+              stats.failed++; stats.errors.push(`${row.id}: ${value.videoMeaningError}`);
+              const enriched = enrichVideoMeaning(row, value); output.set(row.id, enriched);
+              if (onRow) await onRow(enriched, { ...stats });
+              continue;
+            }
             stats.modeled++;stats.completed++;
             if(reusableVideoMeaning(value))this.cache[this.key(row)]={at:Date.now(),value};
             const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);if(onRow)await onRow(enriched,{...stats});

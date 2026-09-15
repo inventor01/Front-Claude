@@ -39,6 +39,28 @@ test('video meaning treats transcript + caption as first-class evidence', () => 
   assert.equal(needsVisualFallback(row), false);
 });
 
+test('X HLS fragments cannot crowd the complete playlist out of acquisition', () => {
+  const playlist = { url: 'https://video.twimg.com/example/master.m3u8', type: 'application/x-mpegURL' };
+  const fragments = Array.from({ length: 20 }, (_, i) => ({
+    url: `https://video.twimg.com/example/${i}.m4s?tag=1`, type: 'video/mp4',
+  }));
+  const selected = selectMediaCandidates([...fragments, playlist]);
+  assert.deepEqual(selected.map(item => item.url), [playlist.url]);
+  const initialization = { url: 'https://video.twimg.com/amplify_video/123/aud/mp4a/0/0/32000/init.mp4', type: 'video/mp4' };
+  assert.deepEqual(selectMediaCandidates([initialization, playlist]).map(item => item.url), [playlist.url]);
+});
+
+test('TikTok CDN application assets cannot crowd out extensionless video', () => {
+  const assets = Array.from({ length: 20 }, (_, i) => ({
+    url: `https://lf16-tiktok-web.tiktokcdn-us.com/static/chunk-${i}.js`, type: '',
+  }));
+  const media = { url: 'https://v16.tiktokcdn.com/video/tos/useast/clip', type: 'video/mp4' };
+  const selected = selectMediaCandidates([...assets,
+    { url: 'https://lf16.tiktokcdn.com/asset', type: 'application/javascript' },
+    { url: 'https://lf16.tiktokcdn.com/cover', type: 'image/avif' }, media]);
+  assert.deepEqual(selected.map(item => item.url), [media.url]);
+});
+
 test('low-information silent videos require visual fallback', () => {
   assert.equal(needsVisualFallback({ platform:'TikTok', content:'wow', transcript:'', transcriptStatus:'no-speech' }), true);
 });

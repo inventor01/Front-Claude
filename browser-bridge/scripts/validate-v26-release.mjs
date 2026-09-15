@@ -179,7 +179,7 @@ async function monitor(scanIdRef) {
 }
 
 async function main() {
-  console.log('FRONT v26 RELEASE GATE');
+  console.log('FRONT v27 RELEASE GATE');
   console.log(`Bridge ${BRIDGE} · CDP ${CDP}`);
 
   const health = (await json(`${BRIDGE}/health`, {}, 7000)).body;
@@ -328,7 +328,7 @@ async function main() {
   fs.writeFileSync(REPORT, JSON.stringify(report, null, 2));
 
   console.log('\n════════════════════════════════════════════════════════');
-  console.log(failures.length ? `❌ FRONT v26 RELEASE GATE FAILED (${failures.length})` : '✅ FRONT v26 RELEASE GATE PASSED');
+  console.log(failures.length ? `❌ FRONT v27 RELEASE GATE FAILED (${failures.length})` : '✅ FRONT v27 RELEASE GATE PASSED');
   console.log(`Evidence ${recovery.counts.evidence ?? "unknown"} · X ${recovery.counts.x ?? "unknown"} · TikTok ${recovery.counts.tiktok ?? "unknown"} · narratives ${topics.length} · ${recovery.outcome}`);
   console.log(`Report: ${REPORT}`);
   console.log('════════════════════════════════════════════════════════');
@@ -341,7 +341,7 @@ main().catch((error) => {
     fs.mkdirSync(path.dirname(REPORT), { recursive:true });
     fs.writeFileSync(REPORT, JSON.stringify({ at:new Date().toISOString(), ok:false, passes, warnings, failures, fatal:String(error?.stack || error) }, null, 2));
   } catch {}
-  console.error(`\n❌ FRONT v26 RELEASE GATE FAILED\n${error?.stack || error}`);
+  console.error(`\n❌ FRONT v27 RELEASE GATE FAILED\n${error?.stack || error}`);
   process.exitCode = 1;
 }).finally(() => {
   process.exit(process.exitCode || 0);

@@ -573,7 +573,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Front browser bridge v26 listening on http://${HOST}:${PORT}`);
+  console.log(`Front browser bridge v27 listening on http://${HOST}:${PORT}`);
   console.log(`Single-process scanner active. Chrome CDP remains on ${CDP_URL}.`);
   console.log('Pipeline: browser preflight → X/TikTok discovery → visual understanding → contextual post understanding → semantic narrative ranking → origin research.');
 });

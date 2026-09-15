@@ -34,6 +34,12 @@ export function normalizeTranscript(value) {
 export function mediaCandidateScore(item) {
   const url = String(item?.url || '');
   const type = String(item?.type || '').toLowerCase();
+  // HLS fragments are not standalone MP4s, even when served as video/mp4.
+  // They require the playlist's initialization segment and audio rendition.
+  if (/\.(?:m4s|ts)(?:\?|$)/i.test(url)) return -100;
+  if (/^https?:\/\/video\.twimg\.com\/.*\/(?:aud|vid)\/[^/]+\/0\/0\//i.test(url)) return -100;
+  if (/\.(?:js|css|json|html?|jpe?g|png|webp|avif|gif|svg|ico|woff2?|ttf)(?:\?|$)/i.test(url)) return -100;
+  if (/^(?:text\/|image\/|font\/)|(?:javascript|json|wasm)/i.test(type)) return -100;
   let score = 0;
   if (/audio\/(?:mp4|mpeg|aac|wav)/.test(type)) score += 90;
   if (/video\/mp4/.test(type)) score += 80;
@@ -73,8 +79,10 @@ function run(bin, args, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   });
 }
 
-function noAudioError(value) {
-  return /does not contain any stream|output file .*does not contain any stream|matches no streams|stream map.*matches no streams|audio.*not found|no audio|could not find codec parameters for stream.*audio/i.test(String(value || ''));
+export function noAudioError(value) {
+  const text = String(value || '');
+  return /stream map ['"]?0:a:0['"]? matches no streams/i.test(text)
+    || (/stream map '' matches no streams/i.test(text) && /set value '0:a:0' for option 'map'/i.test(text));
 }
 
 async function browserHeaders(context, pageUrl, mediaUrl, userAgent = '') {
@@ -91,7 +99,7 @@ async function browserHeaders(context, pageUrl, mediaUrl, userAgent = '') {
   return headers;
 }
 
-async function inspectPost(context, row, timeoutMs, settleMs = 500) {
+export async function inspectPost(context, row, timeoutMs, settleMs = 500) {
   const url = canonicalSocialPostUrl(row?.url, row?.platform);
   if (!url) throw new Error('Unsupported or malformed social post URL');
   const page = await context.newPage();
@@ -172,12 +180,16 @@ function mergeInspections(primary, retry) {
   };
 }
 
-async function materializeAudio(context, inspected, tempDir, ffmpegBin, timeoutMs) {
+export async function materializeAudio(context, inspected, tempDir, ffmpegBin, timeoutMs) {
   const wav = path.join(tempDir, 'audio.wav');
   const errors = [];
+  const diagnostics = [];
   let sawNoAudio = false;
+  let videoFrame = null;
   for (let index = 0; index < inspected.candidates.length; index++) {
     const candidate = inspected.candidates[index];
+    const diagnostic = { url: candidate.url.split('?')[0], type: candidate.type || '', source: candidate.source || '', status: null };
+    diagnostics.push(diagnostic);
     let input = candidate.url;
     let localMedia = '';
     const hls = /mpegurl/i.test(String(candidate.type || '')) || /\.m3u8(?:\?|$)/i.test(candidate.url);
@@ -185,16 +197,21 @@ async function materializeAudio(context, inspected, tempDir, ffmpegBin, timeoutM
     if (!hls) {
       try {
         const response = await context.request.get(candidate.url, { headers, timeout: Math.min(timeoutMs, 60000), failOnStatusCode: false });
-        if (response.ok()) {
-          const body = await response.body();
-          if (body.length > 0 && body.length <= 150 * 1024 * 1024) {
-            localMedia = path.join(tempDir, `media-${index}.bin`);
-            fs.writeFileSync(localMedia, body);
-            input = localMedia;
+        try {
+          diagnostic.status = response.status();
+          diagnostic.contentType = response.headers()['content-type'] || '';
+          if (response.ok()) {
+            const body = await response.body();
+            diagnostic.bytes = body.length;
+            if (body.length > 0 && body.length <= 150 * 1024 * 1024) {
+              localMedia = path.join(tempDir, `media-${index}.bin`);
+              fs.writeFileSync(localMedia, body);
+              input = localMedia;
+            }
+          } else {
+            errors.push(`media ${response.status()} ${candidate.source || 'source'}`);
           }
-        } else {
-          errors.push(`media ${response.status()} ${candidate.source || 'source'}`);
-        }
+        } finally { await response.dispose(); }
       } catch (error) {
         errors.push(clean(error?.message || error, 180));
       }
@@ -205,17 +222,26 @@ async function materializeAudio(context, inspected, tempDir, ffmpegBin, timeoutM
       if (headerText) args.push('-headers', headerText);
       if (headers['User-Agent']) args.push('-user_agent', headers['User-Agent']);
     }
-    args.push('-i', input, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-y', wav);
+    const inputArgs = [...args, '-i', input];
+    args.push('-i', input, '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-y', wav);
     const result = await run(ffmpegBin, args, { timeoutMs });
-    if (result.ok && fs.existsSync(wav) && fs.statSync(wav).size > 1000) return { wav, source: candidate.source || 'media', candidate: candidate.url };
+    if (!videoFrame && (result.ok || noAudioError(result.stderr))) {
+      const framePath = path.join(tempDir, 'frame.jpg');
+      const frame = await run(ffmpegBin, [...inputArgs, '-map', '0:v:0', '-frames:v', '1', '-vf', 'scale=336:336:force_original_aspect_ratio=decrease', '-y', framePath], { timeoutMs: Math.min(timeoutMs, 15000) });
+      if (frame.ok && fs.existsSync(framePath)) videoFrame = fs.readFileSync(framePath).toString('base64');
+    }
+    if (result.ok && fs.existsSync(wav) && fs.statSync(wav).size > 1000) return { wav, source: candidate.source || 'media', candidate: candidate.url, diagnostics, videoFrame };
     const message = clean(result.stderr || result.error?.message || `ffmpeg exit ${result.code}`, 500);
+    diagnostic.error = message.replace(/https?:\/\/[^\s]+/g, (url) => url.split('?')[0]);
     if (noAudioError(message)) sawNoAudio = true;
     if (message) errors.push(message);
     try { fs.rmSync(wav, { force: true }); } catch {}
   }
   return {
     wav: null,
-    noAudio: inspected.audioTrackCount === 0 || (sawNoAudio && errors.every((error) => noAudioError(error) || /^media \d+/.test(error))),
+    noAudio: sawNoAudio && errors.every(noAudioError),
+    diagnostics,
+    videoFrame,
     error: clean(errors.slice(-3).join(' | '), 900) || 'No usable media source could be converted to audio.',
   };
 }
@@ -266,6 +292,7 @@ export class VideoTranscriptEngineV27 {
   cached(row) {
     const entry = this.cache[this.key(row)];
     if (!entry || Date.now() - Number(entry.at || 0) > CACHE_TTL_MS) return null;
+    if (entry.value?.transcriptSource === 'browser-media-track') return null;
     return transcriptTerminal(entry?.value?.transcriptStatus) ? entry.value : null;
   }
   persist() {
@@ -274,10 +301,13 @@ export class VideoTranscriptEngineV27 {
   }
   async transcribeOne(context, row) {
     const existing = normalizeTranscript(row.transcript);
-    if (existing && transcriptTerminal(row.transcriptStatus || 'captioned')) return { transcript: existing, transcriptSource: row.transcriptSource || 'existing', transcriptStatus: row.transcriptStatus || 'captioned', transcriptDuration: Number(row.transcriptDuration || 0), transcriptAt: Number(row.transcriptAt || Date.now()), cached: true };
+    if (existing && transcriptTerminal(row.transcriptStatus)) return { transcript: existing, transcriptSource: row.transcriptSource || 'existing', transcriptStatus: row.transcriptStatus, transcriptDuration: Number(row.transcriptDuration || 0), transcriptAt: Number(row.transcriptAt || Date.now()), cached: true };
     const cached = this.cached(row);
     if (cached) return { ...cached, cached: true };
-    let inspected = await inspectPost(context, row, this.timeoutMs, 550);
+    let inspected = row.mediaCandidates?.length ? {
+      url: row.mediaReferer || canonicalSocialPostUrl(row.url, row.platform), transcript: '', duration: row.mediaDuration || 0,
+      candidates: selectMediaCandidates(row.mediaCandidates), userAgent: row.mediaUserAgent || '',
+    } : await inspectPost(context, row, this.timeoutMs, 550);
     if (!inspected.transcript && !inspected.candidates.length) {
       const retry = await inspectPost(context, row, this.timeoutMs, 1600).catch(() => null);
       inspected = mergeInspections(inspected, retry);
@@ -287,8 +317,6 @@ export class VideoTranscriptEngineV27 {
       value = { transcript: inspected.transcript, transcriptSource: 'native-caption-track', transcriptStatus: 'captioned', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() };
     } else if (!this.status().fullSpeechToText) {
       value = { transcript: '', transcriptSource: null, transcriptStatus: 'unavailable', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: 'Local ASR is not configured. Run browser-bridge/setup-transcription.command.' };
-    } else if (inspected.audioTrackCount === 0) {
-      value = { transcript: '', transcriptSource: 'browser-media-track', transcriptStatus: 'no-speech', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() };
     } else if (!inspected.candidates.length) {
       value = { transcript: '', transcriptSource: null, transcriptStatus: 'failed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: 'Video media source was not discoverable from the authenticated post after retry.' };
     } else {
@@ -305,6 +333,8 @@ export class VideoTranscriptEngineV27 {
             ? { transcript: text, transcriptSource: 'whisper-local', transcriptStatus: 'transcribed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() }
             : { transcript: '', transcriptSource: 'whisper-local', transcriptStatus: 'no-speech', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() };
         }
+        value.transcriptDiagnostics = audio.diagnostics;
+        if (audio.videoFrame) value.videoFrame = audio.videoFrame;
       } catch (error) {
         value = { transcript: '', transcriptSource: null, transcriptStatus: 'failed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: clean(error?.message || error, 500) };
       } finally {
