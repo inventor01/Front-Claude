@@ -4,6 +4,7 @@ import {
   groundedTikTokEvidence,
   mergeScanEvidence,
   mergeTikTokObservations,
+  mergeTranscriptFragments,
   normalizeTikTokObservation,
   parseTikTokVideoUrl,
 } from '../src/tiktok-observation-v21.mjs';
@@ -31,17 +32,33 @@ test('caption-light video is observed without being falsely promoted as grounded
   assert.equal(groundedTikTokEvidence([row]).length, 0);
 });
 
+test('platform spoken captions can ground an otherwise caption-light video',()=>{
+  const row=normalizeTikTokObservation({href:'https://www.tiktok.com/@speaker/video/1000000000000000011',transcript:'OpenAI reconstructed a fruit fly connectome',transcriptSource:'platform-visible-captions'},123);
+  assert(row);
+  assert.equal(row.observedOnly,false);
+  assert.equal(row.transcript,'OpenAI reconstructed a fruit fly connectome');
+  assert.equal(groundedTikTokEvidence([row]).length,1);
+});
+
+test('transcript fragments accumulate across repeated observer polls',()=>{
+  assert.equal(mergeTranscriptFragments('OpenAI reconstructed a fruit fly','fruit fly connectome could model a brain'),'OpenAI reconstructed a fruit fly · fruit fly connectome could model a brain');
+  assert.equal(mergeTranscriptFragments('same complete sentence','same complete sentence'),'same complete sentence');
+});
+
 test('later richer DOM observation upgrades the same TikTok URL and preserves first seen', () => {
-  const first = normalizeTikTokObservation({ href: 'https://www.tiktok.com/@creator/video/1000000000000000002' }, 100);
+  const first = normalizeTikTokObservation({ href: 'https://www.tiktok.com/@creator/video/1000000000000000002', transcript:'first spoken line' }, 100);
   const richer = normalizeTikTokObservation({
     href: 'https://www.tiktok.com/@creator/video/1000000000000000002?lang=en',
     containerText: 'Mascot falls during halftime dance #halftime',
+    transcript:'second spoken line',
     coverUrl: 'https://example.test/cover.jpg',
   }, 200);
   const [row] = mergeTikTokObservations([first], [richer]);
   assert.equal(row.firstObserved, 100);
   assert.equal(row.observedOnly, false);
   assert.match(row.content, /Mascot falls/i);
+  assert.match(row.transcript,/first spoken line/);
+  assert.match(row.transcript,/second spoken line/);
   assert.equal(groundedTikTokEvidence([row]).length, 1);
 });
 
@@ -53,11 +70,13 @@ test('TikTok video URLs canonicalize away query strings and reject non-video lin
 });
 
 test('broad grounded TikTok rows augment final scan evidence without duplicating enriched rows', () => {
-  const base = [{ id: 'tiktok:browser:1000000000000000004', platform: 'TikTok', author: 'a', url: 'https://www.tiktok.com/@a/video/1000000000000000004', content: 'caption', contentSummary: 'Visual summary', firstObserved: 200 }];
-  const broad = [{ id: 'tiktok:browser:1000000000000000004', platform: 'TikTok', author: 'a', url: 'https://www.tiktok.com/@a/video/1000000000000000004', content: 'longer browser text but no visual summary', firstObserved: 100 }];
+  const base = [{ id: 'tiktok:browser:1000000000000000004', platform: 'TikTok', author: 'a', url: 'https://www.tiktok.com/@a/video/1000000000000000004', content: 'caption', contentSummary: 'Visual summary', transcript:'spoken detail', firstObserved: 200 }];
+  const broad = [{ id: 'tiktok:browser:1000000000000000004', platform: 'TikTok', author: 'a', url: 'https://www.tiktok.com/@a/video/1000000000000000004', content: 'longer browser text but no visual summary', transcript:'second detail', firstObserved: 100 }];
   const merged = mergeScanEvidence(base, broad);
   assert.equal(merged.length, 1);
   assert.equal(merged[0].contentSummary, 'Visual summary');
+  assert.match(merged[0].transcript,/spoken detail/);
+  assert.match(merged[0].transcript,/second detail/);
   assert.equal(merged[0].firstObserved, 100);
 });
 
