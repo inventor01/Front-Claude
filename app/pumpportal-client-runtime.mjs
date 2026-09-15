@@ -93,6 +93,8 @@ export function setPumpPortalRuntimeEnabled(enabled){
   try{socket?.close();}catch{}
   return snapshot(runtime);
  }
+ if(runtime.socket?.readyState===WebSocket.OPEN){publish(runtime,'Connected · launches + migrations');return snapshot(runtime);}
+ if(runtime.socket?.readyState===WebSocket.CONNECTING){publish(runtime,'Connecting');return snapshot(runtime);}
  publish(runtime,'Starting');
  connect(runtime);
  return snapshot(runtime);
