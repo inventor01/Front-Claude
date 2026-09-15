@@ -1,0 +1,77 @@
+name: v27 final transcript cleanup
+
+on:
+  push:
+    branches:
+      - feature/v27-full-video-transcripts
+    paths:
+      - .github/workflows/v27-final-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v27-full-video-transcripts
+          fetch-depth: 0
+      - name: Harden successful-result cache and setup
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p=Path(path); s=p.read_text()
+              if old not in s: raise SystemExit(f'anchor missing: {path}: {old[:80]}')
+              p.write_text(s.replace(old,new,1))
+
+          meaning='browser-bridge/src/video-meaning-v27.mjs'
+          replace_once(meaning,
+            "function normalizeResult(raw) {",
+            "export function reusableVideoMeaning(value) {\n  return value?.videoMeaningStatus === 'modeled' && Boolean(clean(value?.videoAbout, 360)) && clamp01(value?.videoMeaningConfidence, 0) >= 0.4;\n}\nfunction normalizeResult(raw) {")
+          replace_once(meaning,
+            "  cached(row) { const entry=this.cache[this.key(row)]; return entry && Date.now()-Number(entry.at||0)<=CACHE_TTL_MS ? entry.value : null; }",
+            "  cached(row) { const entry=this.cache[this.key(row)]; return entry && Date.now()-Number(entry.at||0)<=CACHE_TTL_MS && reusableVideoMeaning(entry.value) ? entry.value : null; }")
+          replace_once(meaning,
+            "          this.cache[this.key(row)]={at:Date.now(),value};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);if(onRow)await onRow(enriched,{...stats});",
+            "          if(reusableVideoMeaning(value)) this.cache[this.key(row)]={at:Date.now(),value};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);if(onRow)await onRow(enriched,{...stats});")
+          replace_once(meaning,
+            "        this.cache[this.key(row)]={at:Date.now(),value};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);this.persist();if(onRow)await onRow(enriched,{...stats});",
+            "        if(reusableVideoMeaning(value)) this.cache[this.key(row)]={at:Date.now(),value};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);this.persist();if(onRow)await onRow(enriched,{...stats});")
+
+          test='browser-bridge/test/video-transcript-v27.test.mjs'
+          replace_once(test,
+            "import { enrichVideoMeaning, meaningInput, needsVisualFallback } from '../src/video-meaning-v27.mjs';",
+            "import { enrichVideoMeaning, meaningInput, needsVisualFallback, reusableVideoMeaning } from '../src/video-meaning-v27.mjs';")
+          p=Path(test); s=p.read_text()
+          marker="test('meaning enrichment preserves raw caption and makes modeled meaning clusterable'"
+          insert="""test('failed or weak video meanings are never reusable cache hits', () => {\n  assert.equal(reusableVideoMeaning({ videoMeaningStatus:'failed', videoAbout:'fallback caption', videoMeaningConfidence:.9 }), false);\n  assert.equal(reusableVideoMeaning({ videoMeaningStatus:'modeled', videoAbout:'specific event', videoMeaningConfidence:.39 }), false);\n  assert.equal(reusableVideoMeaning({ videoMeaningStatus:'modeled', videoAbout:'specific event', videoMeaningConfidence:.8 }), true);\n});\n\n"""
+          if insert not in s: p.write_text(s.replace(marker, insert+marker,1))
+
+          start='browser-bridge/start.command'
+          replace_once(start,
+            'echo "Starting Front browser bridge v26 on http://127.0.0.1:43981"',
+            'echo "Starting Front browser bridge v27 on http://127.0.0.1:43981"')
+
+          setup='browser-bridge/setup-transcription.command'
+          replace_once(setup,
+            '''if ! command -v whisper-cli >/dev/null 2>&1; then\n  echo "Installing whisper.cpp..."\n  brew install whisper.cpp\nfi''',
+            '''if ! command -v whisper-cli >/dev/null 2>&1; then\n  echo "Installing whisper.cpp..."\n  if ! brew install whisper.cpp; then\n    echo "Primary Homebrew formula failed; trying whisper-cpp compatibility formula..."\n    brew install whisper-cpp\n  fi\nfi''')
+      - name: Syntax checks
+        run: |
+          node --check browser-bridge/src/video-transcript-v27.mjs
+          node --check browser-bridge/src/video-meaning-v27.mjs
+          node --check browser-bridge/src/server-v25.mjs
+      - name: Browser bridge tests
+        run: npm test --prefix browser-bridge
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/v27-final-cleanup.yml
+          git add browser-bridge/src/video-meaning-v27.mjs browser-bridge/test/video-transcript-v27.test.mjs browser-bridge/start.command browser-bridge/setup-transcription.command .github/workflows/v27-final-cleanup.yml
+          git commit -m "Harden v27 transcript retry and local setup"
+          git push origin HEAD:feature/v27-full-video-transcripts
