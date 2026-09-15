@@ -89,10 +89,11 @@ test('malformed semantic responses report failures and do not cache fallback as 
   const result=await engine.enrich(rows);assert.equal(result.stats.failed,1);assert.equal(result.stats.fallback,1);assert.equal(engine.cached(rows[0]),null);
   assert.match(result.stats.errors.join(' '),/unreadable JSON array/i);
   const key=engine.key(rows[0]);assert.notEqual(engine.key({...rows[0],contentSummary:'A new grounded visual summary'}),key);
+  assert.notEqual(engine.key({...rows[0],transcript:'spoken detail changes the story'}),key);
  }finally{globalThis.fetch=original;if(env===undefined)delete process.env.FRONT_CONTEXT_PROVIDER;else process.env.FRONT_CONTEXT_PROVIDER=env;fs.rmSync(dir,{recursive:true,force:true});}
 });
 
-test('semantic batching keeps Ollama warm and defaults to four posts per request',async()=>{
+test('semantic batching hard-caps local requests at two posts and uses compact transcript-aware payloads',async()=>{
  const {PostUnderstandingEngineV26}=await import('../src/post-understanding-v26.mjs');
  const fs=await import('node:fs');const os=await import('node:os');const path=await import('node:path');
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'front-context-batches-'));
@@ -104,16 +105,19 @@ test('semantic batching keeps Ollama warm and defaults to four posts per request
   globalThis.fetch=async(_url,{body})=>{
     const payload=JSON.parse(body);
     assert.equal(payload.keep_alive,'30m');
-    assert.equal(payload.options.num_predict,900);
+    assert.equal(payload.options.num_predict,400);
     const input=JSON.parse(payload.messages[0].content.split('\n').at(-1));
     sizes.push(input.length);
+    assert(input.every(row=>Object.hasOwn(row,'spoken')));
     const result=input.map((row,index)=>({i:index,s:`Specific subject ${row.index}`,e:`specific event ${row.index}`,k:`specific subject ${row.index}`,c:.9}));
     return Response.json({message:{content:JSON.stringify(result)}});
   };
-  const rows=Array.from({length:5},(_,i)=>({id:String(i+1),platform:'X',author:`a${i}`,url:`https://x.com/a${i}/status/${i+1}`,content:`Specific event caption ${i+1}`}));
-  const result=await engine.enrich(rows);
-  assert.deepEqual(sizes,[4,1]);
-  assert.equal(result.stats.requestCount,2);
+  const rows=Array.from({length:5},(_,i)=>({id:String(i+1),platform:'X',author:`a${i}`,url:`https://x.com/a${i}/status/${i+1}`,content:`Specific event caption ${i+1}`,transcript:i===0?'spoken context from the video':null}));
+  const result=await engine.enrich(rows,{batchSize:8});
+  assert.deepEqual(sizes,[2,2,1]);
+  assert.equal(result.stats.batchSize,2);
+  assert.equal(result.stats.transcriptRows,1);
+  assert.equal(result.stats.requestCount,3);
   assert.equal(result.rows[0].postSubject,'Specific subject 0');
   assert.equal(result.stats.modeled,5);
   assert.equal(result.stats.failed,0);
