@@ -48,8 +48,6 @@ export async function extractTikTokAnchors(page, provenance) {
       '[data-e2e*="search-card"]',
       'article',
     ].join(', ');
-    // Keep this intentionally local. Broad selectors such as [data-e2e*="inbox"]
-    // can match persistent TikTok navigation shells that wrap the For You feed.
     const localActivitySelector = [
       '[data-e2e="inbox-list-item"]',
       '[data-e2e*="notification-item"]',
@@ -58,6 +56,23 @@ export async function extractTikTokAnchors(page, provenance) {
       '[data-e2e*="user-post-item"]',
       '[role="dialog"]',
     ].join(', ');
+    const transcriptFor = (container) => {
+      const parts = [];
+      const add = (value) => {
+        const text = String(value || '').replace(/\s+/g, ' ').trim();
+        if (text.length < 3 || text.length > 1200) return;
+        if (/^(?:captions?|subtitles?|auto captions?)$/i.test(text)) return;
+        if (!parts.some((item) => item.toLowerCase() === text.toLowerCase())) parts.push(text);
+      };
+      for (const node of container.querySelectorAll('[data-e2e*="subtitle"], [data-e2e*="caption-line"], [class*="subtitle" i], [class*="captions" i], [aria-live="polite"]')) add(node.textContent);
+      const video = container.querySelector('video');
+      if (video?.textTracks) {
+        for (const track of [...video.textTracks]) {
+          for (const cue of [...(track.activeCues || [])]) add(cue?.text);
+        }
+      }
+      return parts.join(' · ').slice(0, 4000);
+    };
     const links = [...document.querySelectorAll('a[href*="/video/"]')].slice(0, 700);
     const rows = [];
     const seen = new Set();
@@ -86,19 +101,19 @@ export async function extractTikTokAnchors(page, provenance) {
       }
       seen.add(href);
       const image = link.querySelector('img') || container.querySelector?.('img');
+      const transcript = transcriptFor(container);
       rows.push({
         href,
         aria: link.getAttribute('aria-label') || '',
         title: link.getAttribute('title') || '',
         alt: image?.getAttribute('alt') || '',
         coverUrl: image?.getAttribute('src') || '',
+        transcript,
+        transcriptSource: transcript ? 'platform-visible-captions' : '',
         containerText: containerText.slice(0, 8000),
         containerE2E: e2e,
       });
     }
-    // Current one-column feed cards have no permalink anchor. Their own player
-    // wrapper carries the video ID and their avatar link carries the author.
-    // Never infer identity from global state or unrelated notification anchors.
     let playerCardsAccepted = 0;
     for (const container of document.querySelectorAll('[data-e2e="recommend-list-item-container"]')) {
       if (container.closest(localActivitySelector)) continue;
@@ -112,8 +127,9 @@ export async function extractTikTokAnchors(page, provenance) {
       const image = container.querySelector('[data-e2e="feed-video"] picture img');
       const content = container.querySelector('[data-e2e="video-desc"]')?.textContent?.trim() || image?.getAttribute('alt') || '';
       if (/\b(?:liked your video|commented on your video|followed you|sent you a message)\b/i.test(content)) continue;
+      const transcript = transcriptFor(container);
       seen.add(href);
-      rows.push({href, content, coverUrl:image?.getAttribute('src') || '', containerE2E:'recommend-list-item-container'});
+      rows.push({href, content, transcript, transcriptSource: transcript ? 'platform-visible-captions' : '', coverUrl:image?.getAttribute('src') || '', containerE2E:'recommend-list-item-container'});
       playerCardsAccepted++;
     }
     return {
@@ -123,6 +139,7 @@ export async function extractTikTokAnchors(page, provenance) {
         feedContainers: document.querySelectorAll(feedContainerSelector).length,
         acceptedAnchors: rows.length - playerCardsAccepted,
         playerCardsAccepted, acceptedCards: rows.length,
+        transcriptCards: rows.filter((row) => row.transcript).length,
         withoutContainer,
         localActivityRejected,
         containerRejected,
@@ -167,6 +184,7 @@ export class BroadTikTokObserver {
         rawVideoAnchors: 0,
         feedContainers: 0,
         acceptedAnchors: 0,
+        transcriptCards: 0,
         withoutContainer: 0,
         localActivityRejected: 0,
         containerRejected: 0,
@@ -287,7 +305,7 @@ export class BroadTikTokObserver {
       ...this.state,
       evidence: this.groundedEvidence().slice(-300),
       observations: this.rows.slice(-300).map((row) => ({
-        id: row.id, author: row.author, url: row.url, content: row.content,
+        id: row.id, author: row.author, url: row.url, content: row.content, transcript: row.transcript,
         firstObserved: row.firstObserved, observedOnly: row.observedOnly,
       })),
     };
