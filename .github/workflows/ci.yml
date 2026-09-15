@@ -28,6 +28,16 @@ jobs:
       - name: Install
         run: npm run install:ci
 
+      - name: Security audit diagnostics
+        shell: bash
+        run: |
+          set +e
+          echo '=== PRODUCTION DEPENDENCIES ==='
+          npm audit --omit=dev --json
+          echo '=== FULL DEPENDENCY TREE ==='
+          npm audit --json
+          exit 0
+
       - name: Install browser bridge dependencies
         run: npm install --prefix browser-bridge --no-audit --no-fund
 
