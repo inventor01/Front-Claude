@@ -25,9 +25,9 @@ test('local vision defaults match the proven 8 GB Mac profile and do not cap dis
   assert.match(env,/FRONT_CONTENT_BACKGROUND_VIDEOS=1/);
   assert.match(env,/FRONT_CONTEXT_OLLAMA_MODEL=qwen3-vl:4b-instruct/);
   assert.match(env,/FRONT_CONTEXT_MAX_POSTS=12/);
-  assert.match(env,/FRONT_CONTEXT_BATCH_SIZE=4/);
+  assert.match(env,/FRONT_CONTEXT_BATCH_SIZE=2/);
   assert.match(env,/FRONT_CONTEXT_TIMEOUT_MS=60000/);
-  assert.match(env,/FRONT_CONTEXT_NUM_PREDICT=900/);
+  assert.match(env,/FRONT_CONTEXT_NUM_PREDICT=400/);
   assert.match(example,/cap EXPENSIVE visual\/semantic analysis, not X\/TikTok discovery/);
   assert.match(example,/keep visual and contextual understanding on the same model/);
   assert.match(start,/DEFAULT_CONTENT_ENV=.*content\.env/);
