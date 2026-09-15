@@ -4,7 +4,7 @@ const clamp=(value,min=0,max=100)=>Math.max(min,Math.min(max,value));
 const STOP=new Set('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i you your we our they their he she his her not no yes just very really have has had do does did can could would should will may might about into over under after before more most some any all one two what when where who why how'.split(/\s+/));
 const NOISE=new Set('original sound audio caption captions video videos photo photos image images post posts repost reposts reply replies comment comments share shares view views like likes follow follows new latest today tonight yesterday tomorrow update updates breaking news meme memes viral trend trends trending funny reaction reactions clip clips edit edits account accounts user users profile profiles people person guy guys girl girls man men woman women bro dude someone somebody anyone everybody thing things stuff something anything everything topic topics story stories market markets coin coins token tokens crypto solana tiktok twitter x fyp foryou'.split(/\s+/));
 const terms=(value)=>normalize(value).split(' ').filter((word)=>word.length>=3&&!STOP.has(word)&&!NOISE.has(word)&&!/^\d+$/.test(word));
-const creatorKey=(row)=>`${row.platform||''}:${String(row.author||'').replace(/^@/,'').trim().toLowerCase()}`;
+const creatorKey=(row)=>String(row.author||'').replace(/^@/,'').trim().toLowerCase();
 const topicKey=(topic)=>normalize(topic?.key||topic?.topic||'');
 const sourceText=(row)=>clean([row?.content,row?.transcript].filter(Boolean).join(' '),2400);
 
