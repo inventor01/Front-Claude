@@ -126,20 +126,24 @@ if [ -z "$EXPLICIT_MODEL" ] && [ "$FRONT_OLLAMA_MODEL" = "qwen3-vl:8b" ]; then
   echo "Front v26: replacing stale qwen3-vl:8b local default with verified qwen3-vl:4b-instruct."
   export FRONT_OLLAMA_MODEL="qwen3-vl:4b-instruct"
 fi
-if [ -z "$EXPLICIT_DEEP" ] && [ "$FRONT_CONTENT_DEEP_VIDEOS" = "8" ]; then
-  echo "Front v26: replacing stale deep visual budget 8 with balanced budget 2."
+if [ -z "$EXPLICIT_CONTENT_TIMEOUT" ] && [ "$FRONT_CONTENT_TIMEOUT_MS" = "60000" ]; then
+  echo "Front v26: replacing stale deep visual timeout 60000ms with measured-safe 75000ms."
+  export FRONT_CONTENT_TIMEOUT_MS="75000"
+fi
+if [ -z "$EXPLICIT_DEEP" ] && { [ "$FRONT_CONTENT_DEEP_VIDEOS" = "8" ] || [ "$FRONT_CONTENT_DEEP_VIDEOS" = "4" ]; }; then
+  echo "Front v26: replacing stale deep visual budget $FRONT_CONTENT_DEEP_VIDEOS with reliable budget 2."
   export FRONT_CONTENT_DEEP_VIDEOS="2"
 fi
-if [ -z "$EXPLICIT_SCOUT" ] && [ "$FRONT_CONTENT_SCOUT_VIDEOS" = "4" ]; then
-  echo "Front v26: replacing stale scout visual budget 4 with balanced budget 1."
+if [ -z "$EXPLICIT_SCOUT" ] && { [ "$FRONT_CONTENT_SCOUT_VIDEOS" = "4" ] || [ "$FRONT_CONTENT_SCOUT_VIDEOS" = "2" ]; }; then
+  echo "Front v26: replacing stale scout visual budget $FRONT_CONTENT_SCOUT_VIDEOS with reliable budget 1."
   export FRONT_CONTENT_SCOUT_VIDEOS="1"
 fi
 if [ -z "$EXPLICIT_BACKGROUND" ] && [ "$FRONT_CONTENT_BACKGROUND_VIDEOS" = "2" ]; then
   echo "Front v26: replacing stale background visual budget 2 with balanced budget 1."
   export FRONT_CONTENT_BACKGROUND_VIDEOS="1"
 fi
-if [ -z "$EXPLICIT_CONTEXT_MAX" ] && [ "$FRONT_CONTEXT_MAX_POSTS" = "90" ]; then
-  echo "Front v26: replacing stale contextual post budget 90 with balanced budget 12."
+if [ -z "$EXPLICIT_CONTEXT_MAX" ] && { [ "$FRONT_CONTEXT_MAX_POSTS" = "90" ] || [ "$FRONT_CONTEXT_MAX_POSTS" = "36" ]; }; then
+  echo "Front v26: replacing stale contextual post budget $FRONT_CONTEXT_MAX_POSTS with balanced budget 12."
   export FRONT_CONTEXT_MAX_POSTS="12"
 fi
 if [ -z "$EXPLICIT_CONTEXT_BATCH" ] && [ "$FRONT_CONTEXT_BATCH_SIZE" = "8" ]; then
