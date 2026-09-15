@@ -105,14 +105,14 @@ export function subscribePumpPortalRuntime(listener){
  installRecoveryHooks(runtime);
  runtime.stateListeners.add(listener);
  listener(snapshot(runtime));
- return()=>runtime.stateListeners.delete(listener);
+ return()=>{runtime.stateListeners.delete(listener);};
 }
 
 export function subscribePumpPortalMessages(listener){
  const runtime=browserRuntime();
  installRecoveryHooks(runtime);
  runtime.messageListeners.add(listener);
- return()=>runtime.messageListeners.delete(listener);
+ return()=>{runtime.messageListeners.delete(listener);};
 }
 
 export function getPumpPortalRuntimeSnapshot(){return snapshot(browserRuntime());}
