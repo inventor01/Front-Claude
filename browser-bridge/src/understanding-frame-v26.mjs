@@ -1,7 +1,10 @@
 const clean=(value,max=500)=>String(value??'').replace(/\s+/g,' ').trim().slice(0,max);
 const normalizeHandle=(value)=>String(value||'').replace(/^@/,'').trim().toLowerCase();
+const normalizeText=(value)=>clean(value,1200).normalize('NFKC').toLowerCase().replace(/[’']/g,'').replace(/[^\p{L}\p{N}$#@]+/gu,' ').replace(/\s+/g,' ').trim();
 const clamp01=(value,fallback=0)=>{const n=Number(value);return Number.isFinite(n)?Math.max(0,Math.min(1,n)):fallback;};
 const uniq=(items=[],limit=20)=>[...new Set(items.filter(Boolean))].slice(0,limit);
+const STOP=new Set('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i me my you your we our they their he she his her not no yes just very really have has had do does did can could would should will may might about into over under after before more most some any all one two what when where who why how'.split(/\s+/));
+const NOISE=new Set('video videos post posts clip clips viral trend trends trending meme memes update news breaking original sound audio tiktok twitter x fyp foryou people thing things'.split(/\s+/));
 
 function channelEntries(row={}){
   return [
@@ -9,6 +12,30 @@ function channelEntries(row={}){
     {channel:'transcript',text:clean(row.transcript,2600),confidence:row.transcriptSource?.includes('text-track')?.92:.82},
     {channel:'visual',text:clean([row.contentSummary,row.contentEvent].filter(Boolean).join(' '),1800),confidence:clamp01(row.contentConfidence,.7)},
   ].filter((item)=>item.text);
+}
+
+function fingerprintTerms(values=[]){
+  const tokens=[];
+  for(const value of values){
+    for(const token of normalizeText(value).split(' ')){
+      if(token.length<3||STOP.has(token)||NOISE.has(token)||/^\d+$/.test(token))continue;
+      tokens.push(token);
+    }
+  }
+  return [...new Set(tokens)].sort().slice(0,14);
+}
+
+export function eventFingerprintForFrame({subject,event,entities=[]}={}){
+  const terms=fingerprintTerms([subject,event,...entities]);
+  return terms.length>=2?terms.join(' '):null;
+}
+
+export function eventFingerprintSimilarity(a,b){
+  const left=new Set(fingerprintTerms([a]));
+  const right=new Set(fingerprintTerms([b]));
+  if(!left.size||!right.size)return 0;
+  const shared=[...left].filter((term)=>right.has(term)).length;
+  return Number((shared/Math.max(left.size,right.size)).toFixed(3));
 }
 
 export function extractOriginClaims(row={}){
@@ -40,6 +67,8 @@ export function buildUnderstandingFrame(row={}){
   const event=clean(row.postEvent||row.contentEvent,220)||null;
   const semanticNarrativeKey=clean(row.semanticNarrativeKey,220)||null;
   const entities=uniq([...(Array.isArray(row.postEntities)?row.postEntities:[]),...(Array.isArray(row.contentEntities)?row.contentEntities:[])].map((value)=>clean(value,120)),16);
+  const originClaims=extractOriginClaims(row);
+  const eventFingerprint=eventFingerprintForFrame({subject,event,entities});
   const provenance={
     subject:subject?[row.postUnderstandingMethod==='semantic-model'?'semantic-model':'deterministic-context']:[],
     event:event?[row.postEvent?'semantic-model':'visual']:[],
@@ -52,8 +81,19 @@ export function buildUnderstandingFrame(row={}){
   if(postConfidence&&postConfidence<.65)uncertainty.push('LOW_SEMANTIC_CONFIDENCE');
   if(!subject||!semanticNarrativeKey)uncertainty.push('INCOMPLETE_SEMANTIC_FRAME');
   if(transcriptPresent&&/caption|text-track|visible/i.test(String(row.transcriptSource||'')))uncertainty.push('PARTIAL_TRANSCRIPT_POSSIBLE');
+  if(row.mediaType==='video'&&!transcriptPresent)uncertainty.push('SPEECH_TRANSCRIPT_UNAVAILABLE');
   if(!row.published)uncertainty.push('PUBLISHED_TIME_UNKNOWN');
   const observations=channels.map((item)=>({channel:item.channel,confidence:item.confidence,text:clean(item.text,320)}));
+  const evidenceBuckets={
+    observed:observations,
+    inferred:[
+      ...(subject?[{field:'subject',value:subject,confidence:postConfidence,source:provenance.subject}]:[]),
+      ...(event?[{field:'event',value:event,confidence:postConfidence||visualConfidence,source:provenance.event}]:[]),
+      ...(semanticNarrativeKey?[{field:'semanticNarrativeKey',value:semanticNarrativeKey,confidence:postConfidence,source:['semantic-model']}]:[]),
+    ],
+    claimed:originClaims,
+    verified:[],
+  };
   return {
     version:26,
     subject,
@@ -63,12 +103,15 @@ export function buildUnderstandingFrame(row={}){
     object:clean(row.postObject,180)||null,
     context:clean(row.postContext,220)||null,
     semanticNarrativeKey,
+    eventFingerprint,
     confidence:{overall:postConfidence,semantic:postConfidence,visual:visualConfidence,transcript:transcriptPresent?(row.transcriptSource?.includes('text-track')?.92:.82):0},
     provenance,
     observations,
-    originClaims:extractOriginClaims(row),
+    evidenceBuckets,
+    originClaims,
+    transcriptStatus:{present:transcriptPresent,source:clean(row.transcriptSource,80)||null,partial:transcriptPresent&&/caption|text-track|visible/i.test(String(row.transcriptSource||'')),needsFallback:row.mediaType==='video'&&!transcriptPresent},
     uncertainty:uniq(uncertainty,12),
-    claimState:'OBSERVED+INFERRED',
+    claimState:originClaims.length?'CLAIMED+INFERRED':'OBSERVED+INFERRED',
   };
 }
 
