@@ -2,7 +2,7 @@ const clean=(value,max=180)=>String(value??'').replace(/\s+/g,' ').trim().slice(
 const normalize=(value)=>clean(value,300).normalize('NFKC').toLowerCase().replace(/[’']/g,'').replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();
 const creatorKey=(row)=>String(row?.author||'').replace(/^@/,'').trim().toLowerCase();
 const evidenceTime=(row,now)=>{for(const value of [row?.published,row?.firstObserved,row?.lastObserved]){const n=Number(value);if(Number.isFinite(n)&&n>0)return n;}return now;};
-const evidenceRole=(row)=>{const role=String(row?.evidenceRole||row?.relationType||'top-level').toLowerCase();if(/reply|comment/.test(role))return'comment';if(/quote|repost/.test(role))return'quote';return'top-level';};
+const evidenceRole=(row)=>{const role=String(row?.role||row?.evidenceRole||row?.relationType||'top-level').toLowerCase();if(/reply|comment/.test(role))return'comment';if(/quote|repost/.test(role))return'quote';return'top-level';};
 const roleWeight=(role)=>role==='comment'?.3:role==='quote'?.7:1;
 
 export function narrativeMemoryWeight(ageMs){
