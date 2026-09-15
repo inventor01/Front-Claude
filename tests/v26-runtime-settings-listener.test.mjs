@@ -81,17 +81,24 @@ test('settings does not own a PumpPortal websocket and legacy no-op trend toggle
   assert.match(source,/stays alive when you leave Settings/);
 });
 
-test('one root-mounted browser lifecycle watcher subscribes to launches and migrations',()=>{
+test('one root-mounted lifecycle watcher delegates socket ownership to a persistent browser runtime',()=>{
   const layout=read('app/layout.tsx');
   const watcher=read('app/narrative-creation-watcher.tsx');
+  const runtime=read('app/pumpportal-client-runtime.mjs');
   assert.match(layout,/import NarrativeCreationWatcher/);
   assert.match(layout,/<NarrativeCreationWatcher \/>/);
-  assert.match(watcher,/method:'subscribeNewToken'/);
-  assert.match(watcher,/method:'subscribeMigration'/);
+  assert.match(watcher,/subscribePumpPortalRuntime/);
+  assert.match(watcher,/subscribePumpPortalMessages/);
+  assert.match(watcher,/setPumpPortalRuntimeEnabled/);
   assert.match(watcher,/data\.txType==='migrate'/);
   assert.match(watcher,/isPumpPortalCreation\(data\)/);
-  assert.match(watcher,/front\.pumpPortalListenerEnabled\.v2/);
   assert.match(watcher,/priorMatch.*priorHit/s);
+  assert.doesNotMatch(watcher,/new WebSocket\(/);
+  assert.match(runtime,/front\.pumpPortalListenerEnabled\.v2/);
+  assert.match(runtime,/new WebSocket\(SOCKET_URL\)/);
+  assert.match(runtime,/method:'subscribeNewToken'/);
+  assert.match(runtime,/method:'subscribeMigration'/);
+  assert.match(runtime,/__frontPumpPortalRuntimeV3/);
   assert.doesNotMatch(watcher,/browser\.close\(/);
 });
 
