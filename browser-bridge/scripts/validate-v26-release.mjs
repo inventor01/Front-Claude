@@ -185,7 +185,9 @@ async function main() {
   const health = (await json(`${BRIDGE}/health`, {}, 7000)).body;
   check('Bridge healthy', health?.ok === true && health?.version === 26, `version=${health?.version}`);
   check('No scan already running', !health?.running, health?.scanId || 'idle');
+  check('Full local video transcription configured', health?.transcription?.fullSpeechToText === true, `whisper=${health?.transcription?.whisperReady ? 'ready' : 'missing'} · ffmpeg=${health?.transcription?.ffmpegReady ? 'ready' : 'missing'} · model=${health?.transcription?.modelReady ? 'ready' : 'missing'}`);
   check('Visual understanding configured', health?.contentUnderstanding?.enabled === true, `${health?.contentUnderstanding?.provider || 'off'} · ${health?.contentUnderstanding?.model || ''}`);
+  check('All-video meaning configured', health?.videoMeaning?.enabled === true, `${health?.videoMeaning?.provider || 'off'} · ${health?.videoMeaning?.model || ''}`);
   check('Post understanding configured', health?.postUnderstanding?.enabled === true, `${health?.postUnderstanding?.provider || 'off'} · ${health?.postUnderstanding?.model || ''}`);
   if (failures.length) throw new Error('Preflight failed');
 
@@ -242,7 +244,9 @@ async function main() {
   const xs = stages.xDiscovery || {};
   const ts = stages.tiktokDiscovery || {};
   const tLive = live?.tiktokDiscovery || {};
+  const transcript = stages.transcription || {};
   const vision = stages.visualUnderstanding || {};
+  const meaning = stages.videoMeaning || {};
   const post = stages.postUnderstanding || {};
   const narrative = stages.narrativeEngine || {};
   const origin = stages.originResearch || {};
@@ -261,9 +265,14 @@ async function main() {
   check('TikTok produced grounded evidence', tGrounded >= 3, `grounded=${tGrounded}`);
   check('TikTok source pages remain discovery-only', [...new Set([...(ts.sourcePages || []), ...(tLive.sourcePages || [])])].every(isTikTokDiscoveryPage), [...new Set([...(ts.sourcePages || []), ...(tLive.sourcePages || [])])].join(', '));
 
+  check('Every-video transcription stage complete', transcript.status === 'complete', `${transcript.status || 'missing'} requested=${n(transcript.requested)} completed=${n(transcript.completed)} failed=${n(transcript.failed)} unavailable=${n(transcript.unavailable)}`);
+  check('Every collected video reached a transcript terminal state', n(transcript.requested) > 0 && n(transcript.completed) === n(transcript.requested), `completed=${n(transcript.completed)}/${n(transcript.requested)}`);
+  check('Transcription has zero failures/unavailable videos', n(transcript.failed) === 0 && n(transcript.unavailable) === 0, `failed=${n(transcript.failed)}, unavailable=${n(transcript.unavailable)}`);
   check('Visual understanding complete', vision.status === 'complete', `${vision.status || 'missing'} requested=${n(vision.requested)} enriched=${n(vision.enriched)} cached=${n(vision.cached)} failed=${n(vision.failed)}`);
   check('Qwen/video understanding actually exercised', n(vision.requested) > 0 && (n(vision.enriched) + n(vision.cached)) > 0, `requested=${n(vision.requested)}, enriched=${n(vision.enriched)}, cached=${n(vision.cached)}`);
   check('Visual understanding has zero failures', n(vision.failed) === 0, `failed=${n(vision.failed)}`);
+  check('Every-video meaning stage complete', meaning.status === 'complete', `${meaning.status || 'missing'} requested=${n(meaning.requested)} completed=${n(meaning.completed)} failed=${n(meaning.failed)}`);
+  check('Every collected video received semantic meaning', n(meaning.requested) > 0 && n(meaning.completed) === n(meaning.requested) && n(meaning.failed) === 0, `completed=${n(meaning.completed)}/${n(meaning.requested)}, failed=${n(meaning.failed)}`);
   const postErrors = Array.isArray(post.errors) ? post.errors.join(' | ') : '';
   check('Post understanding complete', post.status === 'complete', `${post.status || 'missing'} modeled=${n(post.modeled)} cached=${n(post.cached)} failed=${n(post.failed)}${postErrors ? ` · ${postErrors}` : ''}`);
   check('Semantic post understanding used', n(post.modeled) + n(post.cached) > 0, `modeled=${n(post.modeled)}, cached=${n(post.cached)}`);
@@ -280,6 +289,9 @@ async function main() {
   check('No X notification leakage', xRows.every((r) => !xActivity(r.content) && !xActivity(r.contentSummary)), `${xRows.filter((r) => xActivity(r.content) || xActivity(r.contentSummary)).length} violations`);
   check('All TikTok rows use canonical video URLs', tRows.every((r) => Boolean(parseTikTokVideoUrl(r.url))), `${tRows.filter((r) => !parseTikTokVideoUrl(r.url)).length} invalid`);
   check('No TikTok activity/notification leakage', tRows.every((r) => !isTikTokActivityText(r.content) && !isTikTokActivityText(r.contentSummary)), `${tRows.filter((r) => isTikTokActivityText(r.content) || isTikTokActivityText(r.contentSummary)).length} violations`);
+  const videoRows = evidence.filter((row) => row?.platform === 'TikTok' || /video/i.test(String(row?.mediaType || '')));
+  check('Every final video exposes transcript status', videoRows.length > 0 && videoRows.every((row) => ['captioned','transcribed','no-speech'].includes(String(row.transcriptStatus || ''))), `${videoRows.filter((row) => !['captioned','transcribed','no-speech'].includes(String(row.transcriptStatus || ''))).length} incomplete / ${videoRows.length}`);
+  check('Every final video has a concrete meaning', videoRows.length > 0 && videoRows.every((row) => Boolean(String(row.videoAbout || '').trim()) && n(row.videoMeaningConfidence) >= .4), `${videoRows.filter((row) => !String(row.videoAbout || '').trim() || n(row.videoMeaningConfidence) < .4).length} missing/weak / ${videoRows.length}`);
   check('No duplicate platform+URL rows', duplicates(evidence) === 0, `${duplicates(evidence)} duplicate(s)`);
   check('X has creator diversity', creators(xRows).size >= 2, `${creators(xRows).size} creators`);
   check('TikTok has creator diversity', creators(tRows).size >= 2, `${creators(tRows).size} creators`);
@@ -301,7 +313,9 @@ async function main() {
   }
 
   check('Discovery phase observed', phases.has('discovery'), [...phases].join(' → '));
+  check('Transcription phase observed', phases.has('transcription'), [...phases].join(' → '));
   check('Visual-understanding phase observed', phases.has('visual-understanding'), [...phases].join(' → '));
+  check('Video-meaning phase observed', phases.has('video-meaning'), [...phases].join(' → '));
   check('Narrative-ranking phase observed', phases.has('narrative-ranking'), [...phases].join(' → '));
 
   const report = {

@@ -236,3 +236,10 @@ Visible-both scan vop3wg:96posts (36X/60TikTok), context succeeds, visual second
 Restarted f925ccf gate retained100posts (39X/61TikTok), but visual item ArchiveExplorer/2099526750656933987 exceeded75s and context returned10valid frames for12inputs while all6requests reported complete with no errors. Root causes: unconstrained context output can omit/mistype indexed rows and request success is counted before row validation; portrait contact sheets retain substantial image-token overhead despite concise prompts. Enforce compact Ollama response schemas, report missing/invalid indexed rows as request errors, and reduce contact-sheet panel size from224to168pixels while preserving8chronological frames andconfidence gates. Cache versions must change; fresh live validation must exercise new outputs.
 
 Final semantic review of passing8dei6o scan found generated frame labels (`1: 0.0s`, `2: 13.1s`) in onScreenText. They are collector annotations, not source content. Filter annotation-shaped entries only for contact sheets, instruct the model to ignore panel labels, and invalidate visual cache. Preserve genuine caption text and non-contact-sheet time text. Regression covers both paths.
+
+
+## V27-TRANSCRIPT-EVERY-VIDEO — 2026-09-15
+
+**Root cause:** Front v26 had transcript-aware semantic fields, but the only populated transcript source was an optional HTML video text track inside the small prioritized visual-analysis budget (deep=2/scout=1). Most collected X/TikTok videos therefore never received speech-to-text, and semantic clustering could not reliably use spoken content.
+
+**Permanent fix:** v27 adds a first-class all-video transcription stage with native caption fast-path + local whisper.cpp fallback, an all-video meaning stage that fuses caption/transcript/visual evidence, strict failure accounting, live transcript/meaning display, persisted rich transcript fields, and release-gate coverage requirements. Expensive multi-frame vision remains prioritized, while low-information silent clips receive a lightweight visual fallback.

@@ -19,6 +19,15 @@ type LiveEvidence = {
   views:number|null;
   likes:number|null;
   provenance:string;
+  mediaType?:string|null;
+  transcript?:string|null;
+  transcriptSource?:string|null;
+  transcriptStatus?:string|null;
+  videoAbout?:string|null;
+  videoSubject?:string|null;
+  videoEvent?:string|null;
+  videoMeaningConfidence?:number|null;
+  videoMeaningStatus?:string|null;
   semanticNarrativeKey?:string|null;
   postSubject?:string|null;
   postEvent?:string|null;
@@ -183,7 +192,8 @@ export default function FrontLiveShell(){
         }
 
         const fingerprint=topicFingerprint(next.inferredTopics||[]);
-        const fresh=(next.evidence||[]).filter((row)=>row?.id&&!syncedIds.current.has(row.id)).slice(0,120);
+        const ready=(next.evidence||[]).filter((row)=>{const video=row.platform==='TikTok'||/video/i.test(String(row.mediaType||''));return !video||(['captioned','transcribed','no-speech'].includes(String(row.transcriptStatus||''))&&row.videoMeaningStatus==='modeled');});
+        const fresh=ready.filter((row)=>row?.id&&!syncedIds.current.has(row.id)).slice(0,120);
         const topicsChanged=Boolean(fingerprint&&fingerprint!==lastTopics.current);
         if(scanAt&&(fresh.length||topicsChanged)&&!syncing.current){
           syncing.current=true;
@@ -297,8 +307,10 @@ export default function FrontLiveShell(){
         {filter==='qualified'&&!selected&&qualifiedTopics.length===0&&observed>0&&<div className={styles.qualificationNote}><b>No narrative qualified yet</b><span>This is different from finding nothing. Front has discovered {observed} post{observed===1?'':'s'}, but none currently clear the promotion gates.</span></div>}
         {evidence.length?<div className={styles.evidenceGrid}>{evidence.map((row)=><a key={row.id} href={row.url} target='_blank' rel='noreferrer' className={styles.evidenceCard}>
           <div className={styles.evidenceMeta}><b>{row.platform} · @{row.author}</b><ExternalLink size={12}/></div>
+          {row.videoAbout&&<div className={styles.videoAbout}><b>Video</b><span>{row.videoAbout}</span></div>}
           <p>{row.content}</p>
-          <small>{[ago(row.published),row.views!=null?`${compact(row.views)} views`:null,row.likes!=null?`${compact(row.likes)} likes`:null].filter(Boolean).join(' · ')}</small>
+          {row.transcript&&<div className={styles.transcript}><b>Transcript · {row.transcriptSource||'speech'}</b><span>{row.transcript.slice(0,520)}{row.transcript.length>520?'…':''}</span></div>}
+          <small>{[ago(row.published),row.views!=null?`${compact(row.views)} views`:null,row.likes!=null?`${compact(row.likes)} likes`:null,row.transcriptStatus?`speech ${row.transcriptStatus}`:null].filter(Boolean).join(' · ')}</small>
         </a>)}</div>:<div className={styles.noEvidence}>{live.active&&observed>0?`Discovery is active (${observed} observed). Grounded evidence cards will appear as the scanner publishes them.`:'No scan evidence matches this filter yet.'}</div>}
       </div>}
       {syncError&&<div className={styles.liveError}>{syncError}</div>}

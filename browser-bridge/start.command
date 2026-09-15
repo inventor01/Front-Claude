@@ -119,6 +119,10 @@ export FRONT_CONTEXT_MAX_POSTS="${FRONT_CONTEXT_MAX_POSTS:-12}"
 export FRONT_CONTEXT_BATCH_SIZE="${FRONT_CONTEXT_BATCH_SIZE:-4}"
 export FRONT_CONTEXT_TIMEOUT_MS="${FRONT_CONTEXT_TIMEOUT_MS:-60000}"
 export FRONT_CONTEXT_NUM_PREDICT="${FRONT_CONTEXT_NUM_PREDICT:-900}"
+export FRONT_TRANSCRIPT_CONCURRENCY="${FRONT_TRANSCRIPT_CONCURRENCY:-2}"
+export FRONT_TRANSCRIPT_TIMEOUT_MS="${FRONT_TRANSCRIPT_TIMEOUT_MS:-180000}"
+export FRONT_VIDEO_MEANING_BATCH_SIZE="${FRONT_VIDEO_MEANING_BATCH_SIZE:-4}"
+export FRONT_VIDEO_MEANING_TIMEOUT_MS="${FRONT_VIDEO_MEANING_TIMEOUT_MS:-60000}"
 export FRONT_TIKTOK_OBSERVER_MS="${FRONT_TIKTOK_OBSERVER_MS:-850}"
 export FRONT_BRIDGE_HEADLESS="${FRONT_BRIDGE_HEADLESS:-1}"
 
@@ -165,9 +169,14 @@ fi
 
 echo "Starting Front browser bridge v26 on http://127.0.0.1:43981"
 echo "Keep this Terminal window open while you want browser intelligence running."
-echo "v26 preserves the v25 single-process collectors and adds contextual post understanding plus semantic narrative clustering."
+echo "v27 preserves the v26 single-process collectors and adds exhaustive video transcription + per-video meaning before narrative clustering."
 echo "Chrome CDP stays on http://127.0.0.1:43982 and must remain running."
-echo "Balanced profile: vision=${FRONT_OLLAMA_MODEL:-none}, context=${FRONT_CONTEXT_OLLAMA_MODEL:-none}, deep=$FRONT_CONTENT_DEEP_VIDEOS, scout=$FRONT_CONTENT_SCOUT_VIDEOS, background=$FRONT_CONTENT_BACKGROUND_VIDEOS, model-frames=$FRONT_CONTENT_MODEL_FRAMES, vision-timeout=${FRONT_CONTENT_TIMEOUT_MS}ms, contextual=$FRONT_CONTEXT_MAX_POSTS, context-batch=$FRONT_CONTEXT_BATCH_SIZE, context-timeout=${FRONT_CONTEXT_TIMEOUT_MS}ms, keep-alive=${FRONT_OLLAMA_KEEP_ALIVE}, TikTok poll=${FRONT_TIKTOK_OBSERVER_MS}ms."
+echo "Balanced profile: transcript-concurrency=${FRONT_TRANSCRIPT_CONCURRENCY}, transcript-timeout=${FRONT_TRANSCRIPT_TIMEOUT_MS}ms, video-meaning-batch=${FRONT_VIDEO_MEANING_BATCH_SIZE}, vision=${FRONT_OLLAMA_MODEL:-none}, context=${FRONT_CONTEXT_OLLAMA_MODEL:-none}, deep=$FRONT_CONTENT_DEEP_VIDEOS, scout=$FRONT_CONTENT_SCOUT_VIDEOS, background=$FRONT_CONTENT_BACKGROUND_VIDEOS, model-frames=$FRONT_CONTENT_MODEL_FRAMES, vision-timeout=${FRONT_CONTENT_TIMEOUT_MS}ms, contextual=$FRONT_CONTEXT_MAX_POSTS, context-batch=$FRONT_CONTEXT_BATCH_SIZE, context-timeout=${FRONT_CONTEXT_TIMEOUT_MS}ms, keep-alive=${FRONT_OLLAMA_KEEP_ALIVE}, TikTok poll=${FRONT_TIKTOK_OBSERVER_MS}ms."
+if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v whisper-cli >/dev/null 2>&1 || [ ! -s "${FRONT_WHISPER_MODEL:-$FRONT_DATA_DIR/models/ggml-base.bin}" ]; then
+  echo "WARNING: full video speech-to-text is not ready. Run: bash ./setup-transcription.command"
+else
+  echo "Video transcription: local whisper.cpp ready for every collected X/TikTok video."
+fi
 if [ -n "${FRONT_CONTENT_API_KEY:-${OPENAI_API_KEY:-}}" ]; then
   echo "Content/context understanding: OpenAI provider configured."
 elif [ -n "${FRONT_OLLAMA_MODEL:-}" ]; then
