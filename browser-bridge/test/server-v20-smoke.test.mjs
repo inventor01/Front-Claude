@@ -7,14 +7,19 @@ import { spawn } from 'node:child_process';
 
 const sleep=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
 
-async function waitJson(url,{timeoutMs=15000}={}){
+async function waitJson(url,{timeoutMs=30000,diagnostics=()=>''}={}){
   const started=Date.now();
   let last;
   while(Date.now()-started<timeoutMs){
-    try{const response=await fetch(url,{cache:'no-store'});if(response.ok)return await response.json();last=new Error(`HTTP ${response.status}`);}catch(error){last=error;}
+    try{
+      const response=await fetch(url,{cache:'no-store'});
+      if(response.ok)return await response.json();
+      last=new Error(`HTTP ${response.status}`);
+    }catch(error){last=error;}
     await sleep(100);
   }
-  throw last||new Error(`Timed out waiting for ${url}`);
+  const detail=String(diagnostics()||'').trim();
+  throw new Error(`${last?.message||`Timed out waiting for ${url}`} after ${Date.now()-started}ms${detail?`\nChild logs:\n${detail}`:''}`);
 }
 
 test('v20 exposes live dashboard state and preserves the v19 ledger',async(t)=>{
@@ -41,21 +46,22 @@ test('v20 exposes live dashboard state and preserves the v19 ledger',async(t)=>{
     if(proc.exitCode===null){proc.kill('SIGTERM');await Promise.race([new Promise((resolve)=>proc.once('exit',resolve)),sleep(4000)]);}
     fs.rmSync(root,{recursive:true,force:true});
   });
+  const readyOptions={timeoutMs:30000,diagnostics:()=>logs};
 
-  const health=await waitJson(`http://127.0.0.1:${port}/health`);
+  const health=await waitJson(`http://127.0.0.1:${port}/health`,readyOptions);
   assert.equal(health.version,20,logs);
   assert.equal(health.scanner,'viral-narrative-content-scout-v20',logs);
   assert(health.capabilities.includes('live-dashboard-stream'),logs);
   assert(health.capabilities.includes('fast-duplicate-preflight'),logs);
   assert.equal(health.liveScan.endpoint,'/live',logs);
 
-  const live=await waitJson(`http://127.0.0.1:${port}/live`);
+  const live=await waitJson(`http://127.0.0.1:${port}/live`,readyOptions);
   assert.equal(live.ok,true,logs);
   assert.equal(live.version,20,logs);
   assert.equal(live.active,false,logs);
   assert.deepEqual(live.evidence,[],logs);
 
-  const ledger=await waitJson(`http://127.0.0.1:${port}/ledger`);
+  const ledger=await waitJson(`http://127.0.0.1:${port}/ledger`,readyOptions);
   assert.equal(ledger.ok,true,logs);
   assert.equal(ledger.version,20,logs);
   assert.deepEqual(ledger.scans,[],logs);

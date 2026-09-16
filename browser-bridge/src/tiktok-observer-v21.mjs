@@ -1,4 +1,5 @@
 import { ensureOwnedPageVisible } from './feed-scroll.mjs';
+import { tikTokFeedMedia, attachTikTokFeedMedia } from './tiktok-feed-media-v27.mjs';
 import { chromium } from 'playwright';
 import {
   groundedTikTokEvidence,
@@ -164,6 +165,7 @@ export class BroadTikTokObserver {
     this.timer = null;
     this.polling = false;
     this.rows = [];
+    this.feedMedia = new Map();
     this.state = this.emptyState();
   }
 
@@ -210,6 +212,15 @@ export class BroadTikTokObserver {
     const context = await this.ensureContext();
     if (this.discoveryPage && !this.discoveryPage.isClosed()) return this.discoveryPage;
     const page = await context.newPage();
+    const mediaUserAgent = await page.evaluate(() => navigator.userAgent);
+    page.on('response', async (response) => {
+      if (!/\/api\/recommend\/item_list\//.test(response.url())) return;
+      try {
+        for (const [id, media] of tikTokFeedMedia(await response.json())) this.feedMedia.set(id, {
+          ...media, mediaUserAgent, mediaReferer: 'https://www.tiktok.com/foryou',
+        });
+      } catch { /* DOM collection remains available if feed metadata is absent. */ }
+    });
     this.discoveryPage = page;
     try {
       await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'commit', timeout: 20000 });
@@ -226,6 +237,7 @@ export class BroadTikTokObserver {
   start(request = {}) {
     this.stopTimer();
     this.rows = [];
+    this.feedMedia.clear();
     this.state = {
       ...this.emptyState(),
       active: true,
@@ -274,7 +286,7 @@ export class BroadTikTokObserver {
       this.state.focusRecoveries = (this.state.focusRecoveries || 0) + Number(visibility.recovered);
       const sourceUrl = page.url();
       const extracted = await extractTikTokAnchors(page, 'TikTok dedicated discovery observation');
-      this.add(extracted.observations);
+      this.add(extracted.observations.map(row => attachTikTokFeedMedia(row, this.feedMedia)));
       if (this.state.observed < this.state.target && shouldDriveTikTokFeed(sourceUrl, extracted.observations.length > 0)) {
         await page.evaluate(() => {
           const card = document.querySelector('[data-e2e="recommend-list-item-container"]');

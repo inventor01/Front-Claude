@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   groundedTikTokEvidence,
+  isTikTokActivityText,
   mergeScanEvidence,
   mergeTikTokObservations,
   mergeTranscriptFragments,
@@ -113,4 +114,37 @@ test('current TikTok For You feed containers are allowed even when persistent in
 
 test('TikTok observation rejects non-HTTP video protocols',()=>{
  assert.equal(parseTikTokVideoUrl('ftp://www.tiktok.com/@a/video/1234567890123'),null);
+});
+
+
+test('ordinary lyric prose is not TikTok activity UI', () => {
+  const lyric = [
+    'Watching me, you think the game was on.',
+    'He sent the money for the feature.',
+    'That is a pay response.',
+    'In my city I am the chosen one.',
+    'You think I came LeBron.'
+  ].join(' ');
+
+  assert.equal(isTikTokActivityText(lyric), false);
+
+  assert.equal(
+    isTikTokActivityText('Alex liked your video'),
+    true
+  );
+
+  assert.equal(
+    isTikTokActivityText('Alex started following you'),
+    true
+  );
+
+  assert.equal(
+    isTikTokActivityText('Alex sent you a message'),
+    true
+  );
+
+  assert.equal(
+    isTikTokActivityText('Alex tagged you in a post'),
+    true
+  );
 });
