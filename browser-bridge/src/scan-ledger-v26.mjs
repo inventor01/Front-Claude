@@ -36,10 +36,11 @@ function attachClaimAssessment(signals,evidence){
 
 export function buildScanLedgerEntry({id, finalStatus, startedAt, completedAt=Date.now(), request, latestLive, connected, contentStatus, postStatus}) {
   const framedEvidence=(latestLive.evidence||[]).map(attachUnderstandingFrame);
-  const currentSignals=buildScanSignals(framedEvidence,latestLive.inferredTopics||[],24);
+  const liveInferredTopics=Array.isArray(latestLive.inferredTopics)?latestLive.inferredTopics:[];
+  const currentSignals=buildScanSignals(framedEvidence,liveInferredTopics,24);
   const priorMemory=readMemory();
   const memoryEligible=finalStatus==='complete';
-  const updatedMemory=memoryEligible?updateNarrativeMemory(priorMemory,framedEvidence,latestLive.inferredTopics||[],{now:completedAt,scanId:id}):priorMemory;
+  const updatedMemory=memoryEligible?updateNarrativeMemory(priorMemory,framedEvidence,liveInferredTopics,{now:completedAt,scanId:id}):priorMemory;
   const memoryPersisted=memoryEligible?writeMemory(updatedMemory):false;
   const memorySignals=memoryScanSignals(updatedMemory,{now:completedAt,currentEvidenceIds:framedEvidence.map((row)=>row.id)});
   const scanSignals=attachClaimAssessment(mergeSignals(currentSignals,memorySignals),framedEvidence);
@@ -47,7 +48,7 @@ export function buildScanLedgerEntry({id, finalStatus, startedAt, completedAt=Da
   return {
       id, status: finalStatus, startedAt, completedAt: completedAt, durationMs: completedAt - startedAt, request,
       schemaVersion: 26, phase: latestLive.phase, phaseHistory: latestLive.phaseHistory || [], scanConnection: connected ? 'attached' : 'disconnected',
-      usableEvidence: framedEvidence.length, inferredTopics: latestLive.candidateTopics,
+      usableEvidence: framedEvidence.length, inferredTopics: liveInferredTopics, inferredTopicCount: liveInferredTopics.length,
       uniqueCreators: new Set(framedEvidence.map(row => String(row.author || '').replace(/^@/,'').toLowerCase()).filter(Boolean)).size,
       sourceCounts: framedEvidence.reduce((counts, row) => { const key = row.provenance || 'unknown'; counts[key] = (counts[key] || 0) + 1; return counts; }, {}),
       contentUnderstanding: contentStatus, postUnderstanding: postStatus,
