@@ -36,13 +36,26 @@ test('failed scans never teach or persist long-term narrative memory',()=>withTe
 
 test('scan signal status counts retain EARLY RISING and QUALIFIED separately',()=>{
  const evidence=[
-  {id:'1',platform:'X',author:'a',content:'Daejon Love interview meme'},
-  {id:'2',platform:'TikTok',author:'b',content:'Daejon Love interview meme'},
-  {id:'3',platform:'TikTok',author:'c',content:'Daejon Love interview meme'},
+  {id:'1',platform:'X',author:'a',content:'same event caption',postSubject:'Daejon Love interview meme',semanticNarrativeKey:'daejon love interview meme',postUnderstandingConfidence:.9},
+  {id:'2',platform:'TikTok',author:'b',content:'same event caption',postSubject:'Daejon Love interview meme',semanticNarrativeKey:'daejon love interview meme',postUnderstandingConfidence:.9},
+  {id:'3',platform:'TikTok',author:'c',content:'same event caption',postSubject:'Daejon Love interview meme',semanticNarrativeKey:'daejon love interview meme',postUnderstandingConfidence:.9},
  ];
  const signals=buildScanSignals(evidence,[{topic:'Qualified Story Event',key:'qualified story event',tier:'candidate',corroborated:true,evidenceCount:2,authorCount:2,score:80,platforms:['X','TikTok'],evidenceIds:['q1','q2']}]);
  const counts=countScanSignals(signals);
  assert.equal(counts.QUALIFIED,1);
  assert(signals.some(signal=>signal.scanStatus==='RISING'));
- assert.equal(signals.find(signal=>signal.scanStatus==='RISING')?.corroborated,false);
+ assert.equal(signals.find(signal=>signal.scanStatus==='RISING')?.signalSource,'semantic');
+});
+
+test('model-backed semantic signals suppress arbitrary raw word-pair fallback noise',()=>{
+ const evidence=[
+  {id:'1',platform:'TikTok',author:'a',content:'beat music full watch',transcript:'beat music full watch',postSubject:'Young B performs Chicken Noodle Soup',semanticNarrativeKey:'young b chicken noodle soup performance',postUnderstandingConfidence:.91},
+  {id:'2',platform:'TikTok',author:'b',content:'beat music full watch',transcript:'beat music full watch',postSubject:'Rep. AOC criticizes Ed Sheeran',semanticNarrativeKey:'aoc criticizes ed sheeran',postUnderstandingConfidence:.92},
+ ];
+ const signals=buildScanSignals(evidence,[]);
+ assert(signals.some(signal=>signal.signalSource==='semantic'));
+ assert.equal(signals.some(signal=>signal.signalSource==='raw-repeat'),false);
+ const labels=signals.map(signal=>String(signal.topic||'').toLowerCase());
+ assert.equal(labels.includes('beat music'),false);
+ assert.equal(labels.includes('full watch'),false);
 });

@@ -86,10 +86,17 @@ export function buildScanSignals(evidence=[],inferredTopics=[],limit=24){
     const signal={...prior,topic:label,key,tier:prior?.tier||'pre-breakout',corroborated:prior?.corroborated===true,evidenceCount:Math.max(Number(prior?.evidenceCount||0),rows.length),authorCount:Math.max(Number(prior?.authorCount||0),creators.size),platforms:[...new Set([...(prior?.platforms||[]),...platforms])],evidenceIds:[...new Set([...(prior?.evidenceIds||[]),...rows.map((row)=>row.id).filter(Boolean)])],score:Math.max(Number(prior?.score||0),signalScore),signalScore:Math.max(Number(prior?.signalScore||0),signalScore),signalSource:'semantic',semanticLabelFallback:false};
     signal.scanStatus=statusFor(signal);merged.set(key,signal);
   }
-  for(const raw of rawSignals(evidence)){
-    const fp=(raw.evidenceIds||[]).slice().sort().join('|');
-    const matched=[...merged.values()].some((topic)=>(topic.evidenceIds||[]).slice().sort().join('|')===fp);
-    if(!matched)merged.set(raw.key,raw);
+
+  // Raw lexical pairs are a last-resort fallback only. Once model-backed semantic
+  // or engine signals exist, arbitrary repeated word pairs add noise (for example
+  // "beat music" or "full watch") and can crowd real subjects out of the limit.
+  const hasModelBackedSignals=[...merged.values()].some((signal)=>signal.signalSource==='engine'||signal.signalSource==='semantic');
+  if(!hasModelBackedSignals){
+    for(const raw of rawSignals(evidence)){
+      const fp=(raw.evidenceIds||[]).slice().sort().join('|');
+      const matched=[...merged.values()].some((topic)=>(topic.evidenceIds||[]).slice().sort().join('|')===fp);
+      if(!matched)merged.set(raw.key,raw);
+    }
   }
   const rank={QUALIFIED:4,RISING:3,EARLY:2,WATCH:1};
   const seen=new Set();

@@ -1,4 +1,5 @@
 import { buildNarrativeTitleIntelligenceV28 } from './narrative-title-v28.mjs';
+import { eventFingerprintForFrame, eventFingerprintSimilarity } from './understanding-frame-v26.mjs';
 
 const clean = (value, max = 240) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const normalize = (value) => clean(value, 400).normalize('NFKC').toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -7,6 +8,7 @@ const creatorKey = (row) => String(row?.author || '').replace(/^@/, '').trim().t
 const clamp = (value, min = 0, max = 100) => Math.min(max, Math.max(min, Number(value) || 0));
 const STOP = new Set('the a an and or but if then than this that these those to of in on at for from with without is are was were be been being it its i you your we our they their he she his her not no yes just very really have has had do does did can could would should will may might about into over under after before more most some any all one two what when where who why how'.split(/\s+/));
 const GENERIC = new Set('face faces take takes took taking grow grows growing grown love loves loved loving look looks looking looked make makes making made get gets getting got use uses using used good bad big small new old today tonight now thing things stuff something anything everything people person guy guys girl girls man men woman women bro dude video videos post posts clip clips live stream streams viral trend trends trending meme memes funny reaction reactions update updates news breaking official original sound audio photo photos image images tiktok twitter x fyp foryou crypto solana coin coins token tokens market markets pump pumpfun'.split(/\s+/));
+const SEMANTIC_NOISE = new Set('react reacts reacted reacting says said saying comments commented commenting watches watched watching viewer viewers host hosts player players user users scene scenes content transcript spoken full watch'.split(/\s+/));
 
 export function isGenericNarrativeLabel(value) {
   const parts = words(value);
@@ -14,6 +16,50 @@ export function isGenericNarrativeLabel(value) {
   const meaningful = parts.filter((word) => word.length >= 3 && !STOP.has(word) && !GENERIC.has(word) && !/^\d+$/.test(word));
   if (parts.length === 1) return meaningful.length === 0;
   return meaningful.length < Math.min(2, Math.ceil(parts.length / 3));
+}
+
+function semanticTerms(value) {
+  return words(value).filter((word) => word.length >= 3 && !STOP.has(word) && !GENERIC.has(word) && !SEMANTIC_NOISE.has(word) && !/^\d+$/.test(word));
+}
+
+function termOverlap(a, b) {
+  const left = [...new Set(semanticTerms(a))];
+  const right = [...new Set(semanticTerms(b))];
+  if (!left.length || !right.length) return { shared: 0, ratio: 0 };
+  const rightSet = new Set(right);
+  const shared = left.filter((word) => rightSet.has(word)).length;
+  return { shared, ratio: shared / Math.max(1, Math.min(left.length, right.length)) };
+}
+
+function semanticRowEntry(row) {
+  const key = normalize(row?.semanticNarrativeKey || '');
+  const subject = clean(row?.postSubject, 140);
+  const event = clean(row?.postEvent || row?.contentEvent, 180);
+  const entities = [...new Set([...(Array.isArray(row?.postEntities) ? row.postEntities : []), ...(Array.isArray(row?.contentEntities) ? row.contentEntities : [])].map((value) => clean(value, 100)).filter(Boolean))];
+  const confidence = Number(row?.postUnderstandingConfidence || 0);
+  if (!creatorKey(row) || !key || confidence < 0.5 || !subject || isGenericNarrativeLabel(subject)) return null;
+  const fingerprint = eventFingerprintForFrame({ subject, event, entities }) || key;
+  return { row, key, subject, event, entities, confidence, fingerprint };
+}
+
+function sameSemanticEvent(left, right) {
+  if (!left || !right) return false;
+  if (left.key === right.key) return true;
+
+  // Near-match clustering is intentionally conservative: independent model
+  // outputs must agree strongly on the subject plus either the semantic key or
+  // event fingerprint. One shared generic action can never merge two stories.
+  const subject = termOverlap(left.subject, right.subject);
+  if (subject.shared < 2 || subject.ratio < 0.78) return false;
+
+  const key = termOverlap(left.key, right.key);
+  const fingerprint = eventFingerprintSimilarity(left.fingerprint, right.fingerprint);
+  const leftEntities = new Set(left.entities.flatMap(semanticTerms));
+  const sharedEntities = right.entities.flatMap(semanticTerms).filter((word) => leftEntities.has(word)).length;
+
+  return (key.shared >= 2 && key.ratio >= 0.6)
+    || fingerprint >= 0.6
+    || (sharedEntities >= 1 && key.shared >= 1 && key.ratio >= 0.5 && fingerprint >= 0.45);
 }
 
 function supportRows(topic, evidence) {
@@ -120,28 +166,37 @@ export function classifyCoinOpportunity(topic) {
 }
 
 export function deriveSemanticNarrativesV26(evidence = [], now = Date.now()) {
-  const buckets = new Map();
+  const buckets = [];
   for (const row of evidence) {
-    const key = normalize(row?.semanticNarrativeKey || '');
-    const subject = clean(row?.postSubject, 140);
-    const confidence = Number(row?.postUnderstandingConfidence || 0);
-    if (!creatorKey(row) || !key || confidence < 0.5 || !subject || isGenericNarrativeLabel(subject)) continue;
-    const bucket = buckets.get(key) || { key, rows: [], subjects: new Map(), creators: new Set(), platforms: new Set() };
-    bucket.rows.push(row); bucket.creators.add(creatorKey(row)); bucket.platforms.add(row.platform);
-    bucket.subjects.set(subject, (bucket.subjects.get(subject) || 0) + 1);
-    buckets.set(key, bucket);
+    const entry = semanticRowEntry(row);
+    if (!entry) continue;
+    let bucket = buckets.find((candidate) => candidate.entries.some((existing) => sameSemanticEvent(existing, entry)));
+    if (!bucket) {
+      bucket = { entries: [], rows: [], subjects: new Map(), keys: new Map(), creators: new Set(), platforms: new Set() };
+      buckets.push(bucket);
+    }
+    bucket.entries.push(entry);
+    bucket.rows.push(row);
+    bucket.creators.add(creatorKey(row));
+    if (row.platform) bucket.platforms.add(row.platform);
+    bucket.subjects.set(entry.subject, (bucket.subjects.get(entry.subject) || 0) + 1);
+    bucket.keys.set(entry.key, (bucket.keys.get(entry.key) || 0) + 1);
   }
+
   const topics = [];
-  for (const bucket of buckets.values()) {
+  for (const bucket of buckets) {
     if (bucket.creators.size < 2 || bucket.rows.length < 2) continue;
-    const title = [...bucket.subjects.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)[0]?.[0];
+    const title = [...bucket.subjects.entries()].sort((a, b) => b[1] - a[1] || semanticTerms(b[0]).length - semanticTerms(a[0]).length || b[0].length - a[0].length)[0]?.[0];
     if (!title || isGenericNarrativeLabel(title)) continue;
+    const representativeKey = [...bucket.keys.entries()].sort((a, b) => b[1] - a[1] || semanticTerms(b[0]).length - semanticTerms(a[0]).length || b[0].length - a[0].length)[0]?.[0] || normalize(title);
+    const distinctKeys = bucket.keys.size;
     const velocity = measureNarrativeVelocity({}, bucket.rows, now);
     const topic = {
-      topic: titleCase(title), key: bucket.key, semanticNarrativeKey: bucket.key, aliases: [...bucket.subjects.keys()].slice(0, 12),
+      topic: titleCase(title), key: representativeKey, semanticNarrativeKey: representativeKey, aliases: [...bucket.subjects.keys()].slice(0, 12),
+      semanticClusterKeys: [...bucket.keys.keys()].slice(0, 12),
       tier: bucket.creators.size >= 3 ? 'candidate' : 'pre-breakout', corroborated: bucket.creators.size >= 3,
       evidenceCount: bucket.rows.length, authorCount: bucket.creators.size, platforms: [...bucket.platforms], evidenceIds: bucket.rows.map((row) => row.id),
-      score: Number((velocity.score + bucket.creators.size * 3 + bucket.platforms.size * 4).toFixed(2)), detector: 'semantic-subject-v26', labelPolicy: 'context-first-subject-event',
+      score: Number((velocity.score + bucket.creators.size * 3 + bucket.platforms.size * 4).toFixed(2)), detector: distinctKeys > 1 ? 'semantic-near-match-v30' : 'semantic-subject-v26', labelPolicy: distinctKeys > 1 ? 'context-first-subject-event-near-match' : 'context-first-subject-event',
     };
     topics.push(topic);
   }
@@ -153,7 +208,8 @@ export function enhanceNarrativesV26(topics = [], evidence = [], now = Date.now(
   // Legacy lexical candidates may contribute metadata only after semantic
   // corroboration; they must never bypass the subject/key/confidence gate.
   const merged = deriveSemanticNarrativesV26(evidence, now).map(semantic => {
-    const prior = topics.find(topic => normalize(topic.semanticNarrativeKey || topic.key) === semantic.key);
+    const semanticKeys = new Set([semantic.key, ...(semantic.semanticClusterKeys || [])]);
+    const prior = topics.find(topic => semanticKeys.has(normalize(topic.semanticNarrativeKey || topic.key)));
     return {...prior, ...semantic};
   });
   const deduped = new Map();
