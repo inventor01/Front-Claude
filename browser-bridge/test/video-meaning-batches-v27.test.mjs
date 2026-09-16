@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planMeaningBatches, analyzeTextBatchResilient, recoverFailedTextMeanings } from '../src/video-meaning-v27.mjs';
+import {
+  planMeaningBatches,
+  analyzeTextBatchResilient,
+  recoverFailedTextMeanings,
+  representativeMeaningTranscript,
+} from '../src/video-meaning-v27.mjs';
 
 test('local semantic batches preserve every full input within a bounded prompt', () => {
   const rows = Array.from({ length: 9 }, (_, id) => ({ id, content: 'caption', transcript: 'spoken evidence '.repeat(150) }));
@@ -9,6 +14,21 @@ test('local semantic batches preserve every full input within a bounded prompt',
   assert.ok(batches.every(batch => batch.length <= 4));
   assert.ok(batches.length > 3, 'long transcripts split before row-count limit');
   assert.equal(planMeaningBatches(rows, 8, 'openai')[0].length, 8);
+});
+
+test('representative long transcript keeps evidence from beginning middle and end', () => {
+  const transcript = [
+    'BEGINNING alpha signal '.repeat(80),
+    'QUARTER beta signal '.repeat(80),
+    'MIDDLE gamma narrative '.repeat(80),
+    'THREEQUARTER delta signal '.repeat(80),
+    'ENDING omega signal '.repeat(80),
+  ].join(' ');
+  const sampled = representativeMeaningTranscript(transcript, 1800, 5);
+  assert.ok(sampled.length <= 1800);
+  assert.match(sampled, /BEGINNING/i);
+  assert.match(sampled, /MIDDLE/i);
+  assert.match(sampled, /ENDING/i);
 });
 
 test('one failed semantic row does not discard or prevent successful sibling retries', async () => {
@@ -30,7 +50,40 @@ test('weak meaning remains failed after retry rather than incrementing completed
   assert.equal(result[0].videoMeaningStatus, 'failed');
 });
 
-test('isolated text-meaning failure gets a grounded visual recovery attempt', async () => {
+test('isolated text-meaning failure uses compact text recovery before visual page recovery', async () => {
+  const failures = [{
+    row: { id: 'recover-compact', platform: 'X', content: 'caption evidence', transcript: 'spoken evidence' },
+    value: { videoMeaningStatus: 'failed', videoMeaningConfidence: 0, videoMeaningError: 'text model timed out' },
+  }];
+  let compactCalls = 0;
+  let visualCalls = 0;
+  const result = await recoverFailedTextMeanings({}, failures, { provider: 'ollama' }, {
+    timeoutMs: 1000,
+    analyzeCompact: async () => {
+      compactCalls++;
+      return {
+        videoAbout: 'A creator explains a telescope launch using the spoken evidence.',
+        videoSubject: 'telescope launch',
+        videoEvent: 'explains launch',
+        videoMeaningConfidence: .88,
+        videoMeaningMethod: 'semantic-compact-recovery',
+        videoMeaningStatus: 'modeled',
+        videoMeaningAt: Date.now(),
+      };
+    },
+    analyzeVisual: async () => {
+      visualCalls++;
+      throw new Error('visual should not run');
+    },
+  });
+  assert.equal(compactCalls, 1);
+  assert.equal(visualCalls, 0);
+  assert.equal(result[0].recovered, true);
+  assert.equal(result[0].recoveryMethod, 'semantic-compact-recovery');
+  assert.equal(result[0].value.videoMeaningStatus, 'modeled');
+});
+
+test('failed compact recovery falls through to grounded visual recovery', async () => {
   const failures = [{
     row: { id: 'recover-me', platform: 'X', content: 'caption evidence', transcript: 'spoken evidence' },
     value: { videoMeaningStatus: 'failed', videoMeaningConfidence: 0, videoMeaningError: 'text model timed out' },
@@ -39,6 +92,7 @@ test('isolated text-meaning failure gets a grounded visual recovery attempt', as
   const result = await recoverFailedTextMeanings({}, failures, { provider: 'ollama' }, {
     timeoutMs: 1000,
     concurrency: 2,
+    analyzeCompact: async () => { throw new Error('compact invalid JSON'); },
     analyzeVisual: async (_context, row, provider, signal) => {
       calls.push({ id: row.id, provider: provider.provider, aborted: signal.aborted });
       return {
@@ -55,17 +109,19 @@ test('isolated text-meaning failure gets a grounded visual recovery attempt', as
   assert.equal(calls.length, 1);
   assert.equal(calls[0].id, 'recover-me');
   assert.equal(result[0].recovered, true);
+  assert.equal(result[0].recoveryMethod, 'visual-fallback-model');
   assert.equal(result[0].value.videoMeaningStatus, 'modeled');
   assert.ok(result[0].value.videoMeaningConfidence >= .4);
 });
 
-test('grounded recovery does not turn weak visual output into success', async () => {
+test('both recovery paths failing keeps row failed and preserves diagnostics', async () => {
   const failures = [{
     row: { id: 'still-bad', platform: 'TikTok', content: 'caption' },
     value: { videoMeaningStatus: 'failed', videoMeaningConfidence: 0, videoMeaningError: 'invalid text response' },
   }];
   const result = await recoverFailedTextMeanings({}, failures, { provider: 'ollama' }, {
     timeoutMs: 1000,
+    analyzeCompact: async () => { throw new Error('compact invalid'); },
     analyzeVisual: async () => ({
       videoAbout: 'generic clip',
       videoMeaningConfidence: .2,
@@ -76,5 +132,6 @@ test('grounded recovery does not turn weak visual output into success', async ()
   assert.equal(result[0].recovered, false);
   assert.equal(result[0].value.videoMeaningStatus, 'failed');
   assert.match(result[0].value.videoMeaningError, /invalid text response/i);
-  assert.match(result[0].value.videoMeaningError, /recovery/i);
+  assert.match(result[0].value.videoMeaningError, /compact recovery/i);
+  assert.match(result[0].value.videoMeaningError, /visual recovery/i);
 });
