@@ -26,10 +26,35 @@ export function isVideoRow(row) {
 export function transcriptTerminal(status) {
   return ['captioned', 'transcribed', 'no-speech'].includes(String(status || ''));
 }
+function decodeCaptionEntities(value) {
+  return String(value || '').replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (match, token) => {
+    const key = String(token || '').toLowerCase();
+    if (key === 'amp') return '&';
+    if (key === 'lt') return '<';
+    if (key === 'gt') return '>';
+    if (key === 'quot') return '"';
+    if (key === 'apos') return "'";
+    const numeric = key.startsWith('#x') ? Number.parseInt(key.slice(2), 16) : Number.parseInt(key.slice(1), 10);
+    if (!Number.isFinite(numeric) || numeric < 0 || numeric > 0x10ffff) return match;
+    try { return String.fromCodePoint(numeric); } catch { return match; }
+  });
+}
 export function normalizeTranscript(value) {
-  return clean(String(value || '')
-    .replace(/\[(?:music|applause|laughter|silence|inaudible)\]/gi, ' ')
-    .replace(/\s+/g, ' '), MAX_TRANSCRIPT_CHARS);
+  const text = decodeCaptionEntities(String(value || '')
+    // X exposes timed caption words as custom cue markup. Preserve the text
+    // between these tags, but never leak the timing/index metadata itself.
+    .replace(/<\/?X-word-ms\b[^>]*>/gi, ' ')
+    // Strip standard WebVTT cue timestamps and formatting tags defensively.
+    .replace(/<\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?>/g, ' ')
+    .replace(/<\/?(?:c(?:\.[^>\s]+)?|v|lang|ruby|rt)\b[^>]*>/gi, ' ')
+    .replace(/\[(?:music|applause|laughter|silence|inaudible)\]/gi, ' '));
+  return clean(text.replace(/\s+/g, ' '), MAX_TRANSCRIPT_CHARS);
+}
+export function preferLocalAsrForRow(row, inspected, fullSpeechToText) {
+  return row?.platform === 'X'
+    && Boolean(fullSpeechToText)
+    && Array.isArray(inspected?.candidates)
+    && inspected.candidates.length > 0;
 }
 export function mediaCandidateScore(item) {
   const url = String(item?.url || '');
@@ -293,15 +318,19 @@ export class VideoTranscriptEngineV27 {
     const entry = this.cache[this.key(row)];
     if (!entry || Date.now() - Number(entry.at || 0) > CACHE_TTL_MS) return null;
     if (entry.value?.transcriptSource === 'browser-media-track') return null;
-    return transcriptTerminal(entry?.value?.transcriptStatus) ? entry.value : null;
+    if (row?.platform === 'X' && entry.value?.transcriptSource === 'native-caption-track' && this.status().fullSpeechToText) return null;
+    if (!transcriptTerminal(entry?.value?.transcriptStatus)) return null;
+    return { ...entry.value, transcript: normalizeTranscript(entry.value?.transcript) };
   }
   persist() {
     this.cache = Object.fromEntries(Object.entries(this.cache).filter(([, entry]) => transcriptTerminal(entry?.value?.transcriptStatus)).sort((a, b) => Number(b[1]?.at || 0) - Number(a[1]?.at || 0)).slice(0, 2500));
     writeJson(this.cachePath, this.cache);
   }
   async transcribeOne(context, row) {
+    const speechStatus = this.status();
     const existing = normalizeTranscript(row.transcript);
-    if (existing && transcriptTerminal(row.transcriptStatus)) return { transcript: existing, transcriptSource: row.transcriptSource || 'existing', transcriptStatus: row.transcriptStatus, transcriptDuration: Number(row.transcriptDuration || 0), transcriptAt: Number(row.transcriptAt || Date.now()), cached: true };
+    const staleNativeX = row?.platform === 'X' && row?.transcriptSource === 'native-caption-track' && speechStatus.fullSpeechToText;
+    if (existing && transcriptTerminal(row.transcriptStatus) && !staleNativeX) return { transcript: existing, transcriptSource: row.transcriptSource || 'existing', transcriptStatus: row.transcriptStatus, transcriptDuration: Number(row.transcriptDuration || 0), transcriptAt: Number(row.transcriptAt || Date.now()), cached: true };
     const cached = this.cached(row);
     if (cached) return { ...cached, cached: true };
     let inspected = row.mediaCandidates?.length ? {
@@ -312,36 +341,49 @@ export class VideoTranscriptEngineV27 {
       const retry = await inspectPost(context, row, this.timeoutMs, 1600).catch(() => null);
       inspected = mergeInspections(inspected, retry);
     }
+    const nativeCaption = normalizeTranscript(inspected.transcript);
+    const preferLocalAsr = preferLocalAsrForRow(row, inspected, speechStatus.fullSpeechToText);
     let value;
-    if (inspected.transcript) {
-      value = { transcript: inspected.transcript, transcriptSource: 'native-caption-track', transcriptStatus: 'captioned', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() };
-    } else if (!this.status().fullSpeechToText) {
-      value = { transcript: '', transcriptSource: null, transcriptStatus: 'unavailable', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: 'Local ASR is not configured. Run browser-bridge/setup-transcription.command.' };
+    if (nativeCaption && !preferLocalAsr) {
+      value = { transcript: nativeCaption, transcriptSource: 'native-caption-track', transcriptStatus: 'captioned', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() };
+    } else if (!speechStatus.fullSpeechToText) {
+      value = nativeCaption
+        ? { transcript: nativeCaption, transcriptSource: 'native-caption-track', transcriptStatus: 'captioned', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() }
+        : { transcript: '', transcriptSource: null, transcriptStatus: 'unavailable', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: 'Local ASR is not configured. Run browser-bridge/setup-transcription.command.' };
     } else if (!inspected.candidates.length) {
-      value = { transcript: '', transcriptSource: null, transcriptStatus: 'failed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: 'Video media source was not discoverable from the authenticated post after retry.' };
+      value = nativeCaption
+        ? { transcript: nativeCaption, transcriptSource: 'native-caption-track', transcriptStatus: 'captioned', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() }
+        : { transcript: '', transcriptSource: null, transcriptStatus: 'failed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: 'Video media source was not discoverable from the authenticated post after retry.' };
     } else {
       const tempDir = fs.mkdtempSync(path.join(this.dataDir, 'transcript-tmp-'));
       try {
         const audio = await materializeAudio(context, inspected, tempDir, this.ffmpegBin, this.timeoutMs);
         if (!audio.wav) {
-          value = audio.noAudio
-            ? { transcript: '', transcriptSource: 'media-audio', transcriptStatus: 'no-speech', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() }
-            : { transcript: '', transcriptSource: null, transcriptStatus: 'failed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: audio.error };
+          value = nativeCaption
+            ? { transcript: nativeCaption, transcriptSource: 'native-caption-track-fallback', transcriptStatus: 'captioned', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptFallbackReason: audio.error }
+            : audio.noAudio
+              ? { transcript: '', transcriptSource: 'media-audio', transcriptStatus: 'no-speech', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() }
+              : { transcript: '', transcriptSource: null, transcriptStatus: 'failed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: audio.error };
         } else {
           const text = await whisper(audio.wav, { whisperBin: this.whisperBin, modelPath: this.modelPath, tempDir, timeoutMs: this.timeoutMs });
           value = text
             ? { transcript: text, transcriptSource: 'whisper-local', transcriptStatus: 'transcribed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() }
-            : { transcript: '', transcriptSource: 'whisper-local', transcriptStatus: 'no-speech', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() };
+            : nativeCaption
+              ? { transcript: nativeCaption, transcriptSource: 'native-caption-track-fallback', transcriptStatus: 'captioned', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptFallbackReason: 'Local Whisper returned no speech; preserved sanitized native caption.' }
+              : { transcript: '', transcriptSource: 'whisper-local', transcriptStatus: 'no-speech', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now() };
         }
         value.transcriptDiagnostics = audio.diagnostics;
         if (audio.videoFrame) value.videoFrame = audio.videoFrame;
       } catch (error) {
-        value = { transcript: '', transcriptSource: null, transcriptStatus: 'failed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: clean(error?.message || error, 500) };
+        value = nativeCaption
+          ? { transcript: nativeCaption, transcriptSource: 'native-caption-track-fallback', transcriptStatus: 'captioned', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptFallbackReason: clean(error?.message || error, 500) }
+          : { transcript: '', transcriptSource: null, transcriptStatus: 'failed', transcriptDuration: inspected.duration || 0, transcriptAt: Date.now(), transcriptError: clean(error?.message || error, 500) };
       } finally {
         try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
       }
     }
     if (transcriptTerminal(value.transcriptStatus)) {
+      value.transcript = normalizeTranscript(value.transcript);
       this.cache[this.key(row)] = { at: Date.now(), value };
       this.persist();
     } else {
