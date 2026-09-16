@@ -1,3 +1,5 @@
+import { buildNarrativeTitleIntelligenceV28 } from './narrative-title-v28.mjs';
+
 const clean = (value, max = 240) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const normalize = (value) => clean(value, 400).normalize('NFKC').toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
 const words = (value) => normalize(value).split(' ').filter(Boolean);
@@ -33,18 +35,19 @@ function titleCase(value) {
   }).join(' ');
 }
 
+function legacySpecificTopicTitle(topic = {}) {
+  const candidates = [topic?.topic, ...(Array.isArray(topic?.aliases) ? topic.aliases : [])]
+    .map((value) => clean(value, 100))
+    .filter((value) => value && !isGenericNarrativeLabel(value))
+    .sort((a, b) => words(b).length - words(a).length || b.length - a.length);
+  return candidates[0] ? titleCase(candidates[0]) : null;
+}
+
 export function chooseNarrativeTitle(topic, rows = []) {
-  const semantic = rows.map((row) => clean(row?.postSubject, 120)).filter((value) => value && !isGenericNarrativeLabel(value));
-  const candidates = [...semantic, topic?.narrativeTitle, topic?.topic, ...(Array.isArray(topic?.aliases) ? topic.aliases : []), topic?.key]
-    .map((value) => clean(value, 120)).filter((value) => value && !isGenericNarrativeLabel(value));
-  if (!candidates.length) return null;
-  const scored = [...new Set(candidates)].map((label) => {
-    const support = rows.filter((row) => normalize(row?.postSubject || row?.postEvent || '').includes(normalize(label)) || normalize(label).includes(normalize(row?.postSubject || row?.postEvent || ''))).length;
-    const specificity = words(label).filter((word) => !STOP.has(word) && !GENERIC.has(word)).length;
-    const shape = words(label).length >= 2 && words(label).length <= 8 ? 8 : 0;
-    return { label, score: support * 10 + specificity * 3 + shape };
-  }).sort((a, b) => b.score - a.score || b.label.length - a.label.length);
-  return titleCase(scored[0].label);
+  const verified = buildNarrativeTitleIntelligenceV28(topic, rows)?.title || null;
+  if (verified) return verified;
+  const hasStructuredEvidence = rows.some((row) => clean(row?.postSubject || row?.postEvent || row?.semanticNarrativeKey, 180));
+  return hasStructuredEvidence ? null : legacySpecificTopicTitle(topic);
 }
 
 function rowTime(row) {
@@ -156,14 +159,40 @@ export function enhanceNarrativesV26(topics = [], evidence = [], now = Date.now(
   const deduped = new Map();
   for (const topic of merged) {
     const rows = supportRows(topic, evidence);
-    const narrativeTitle = chooseNarrativeTitle(topic, rows);
+    const titleIntelligence = buildNarrativeTitleIntelligenceV28(topic, rows);
+    const narrativeTitle = titleIntelligence?.title || null;
     if (!narrativeTitle) continue;
     const key = normalize(topic?.semanticNarrativeKey || topic?.key || narrativeTitle);
     if (!key || isGenericNarrativeLabel(narrativeTitle)) continue;
     const velocity = measureNarrativeVelocity(topic, rows, now);
     const lifecycleStage = lifecycleForNarrative(topic, velocity);
     const opportunity = classifyCoinOpportunity(topic);
-    const enriched = { ...topic, narrativeTitle, topic: narrativeTitle, key, intelligenceVersion: 26, firstObservedAt: velocity.firstObservedAt, breakoutWindowStart: velocity.breakoutWindowStart, breakoutWindowEnd: velocity.breakoutWindowEnd, firstEvidenceAt: velocity.earliestAt, latestEvidenceAt: velocity.latestAt, ageMinutes: velocity.ageMinutes, originConfidence: originConfidence(rows, velocity), velocity, velocityScore: velocity.score, lifecycleStage, opportunityStatus: opportunity.status, coinOpportunity: opportunity };
+    const enriched = {
+      ...topic,
+      narrativeTitle,
+      topic: narrativeTitle,
+      key,
+      intelligenceVersion: 26,
+      titleIntelligenceVersion: 28,
+      titleConfidence: titleIntelligence.confidence,
+      titleStatus: titleIntelligence.status,
+      titleConsensus: titleIntelligence.consensus,
+      titleEvidence: titleIntelligence.evidence,
+      titleCandidates: titleIntelligence.candidates,
+      titlePolicy: titleIntelligence.policy,
+      firstObservedAt: velocity.firstObservedAt,
+      breakoutWindowStart: velocity.breakoutWindowStart,
+      breakoutWindowEnd: velocity.breakoutWindowEnd,
+      firstEvidenceAt: velocity.earliestAt,
+      latestEvidenceAt: velocity.latestAt,
+      ageMinutes: velocity.ageMinutes,
+      originConfidence: originConfidence(rows, velocity),
+      velocity,
+      velocityScore: velocity.score,
+      lifecycleStage,
+      opportunityStatus: opportunity.status,
+      coinOpportunity: opportunity,
+    };
     const prior = deduped.get(key);
     if (!prior || Number(enriched.score || 0) > Number(prior.score || 0) || Number(enriched.evidenceCount || 0) > Number(prior.evidenceCount || 0)) deduped.set(key, enriched);
   }
