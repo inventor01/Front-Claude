@@ -56,6 +56,18 @@ function rawSignals(evidence=[]){
   return out;
 }
 
+function semanticClusterOwners(merged){
+  const owners=new Map();
+  for(const [ownerKey,signal] of merged){
+    if(signal?.signalSource!=='engine')continue;
+    for(const value of [ownerKey,...(Array.isArray(signal.semanticClusterKeys)?signal.semanticClusterKeys:[])]){
+      const key=normalize(value);
+      if(key)owners.set(key,ownerKey);
+    }
+  }
+  return owners;
+}
+
 export function buildScanSignals(evidence=[],inferredTopics=[],limit=24){
   const merged=new Map();
   for(const topic of inferredTopics){
@@ -63,6 +75,7 @@ export function buildScanSignals(evidence=[],inferredTopics=[],limit=24){
     const signal={...topic,topic:label,key,semanticLabelFallback:isInternalSemanticLabel(topic?.topic),signalScore:clamp(Math.round(Number(topic.score||0))),signalSource:'engine'};
     signal.scanStatus=statusFor(signal);merged.set(key,signal);
   }
+  const clusterOwners=semanticClusterOwners(merged);
   const semantic=new Map();
   for(const row of evidence){
     const confidence=Number(row.postUnderstandingConfidence||0);
@@ -74,17 +87,18 @@ export function buildScanSignals(evidence=[],inferredTopics=[],limit=24){
     const list=semantic.get(key)||[];list.push(row);semantic.set(key,list);
   }
   for(const [key,rows] of semantic){
+    const ownerKey=clusterOwners.get(key)||key;
     const creators=new Set(rows.map(creatorKey).filter(Boolean));
     const platforms=[...new Set(rows.map((row)=>row.platform).filter(Boolean))];
     const title=preferSpecificSemanticLabel(rows.map((row)=>preferSpecificSemanticLabel(row.postSubject,row.postEvent)).find(Boolean),key);
     if(!title)continue;
     const confidence=rows.reduce((sum,row)=>sum+Number(row.postUnderstandingConfidence||0),0)/Math.max(1,rows.length);
     const signalScore=clamp(Math.round(confidence*35+Math.min(25,creators.size*10)+Math.min(20,rows.length*5)+(platforms.length>=2?10:0)));
-    const prior=merged.get(key);
+    const prior=merged.get(ownerKey);
     const label=prior?.semanticLabelFallback?title:preferSpecificSemanticLabel(prior?.topic,title);
     if(!label)continue;
-    const signal={...prior,topic:label,key,tier:prior?.tier||'pre-breakout',corroborated:prior?.corroborated===true,evidenceCount:Math.max(Number(prior?.evidenceCount||0),rows.length),authorCount:Math.max(Number(prior?.authorCount||0),creators.size),platforms:[...new Set([...(prior?.platforms||[]),...platforms])],evidenceIds:[...new Set([...(prior?.evidenceIds||[]),...rows.map((row)=>row.id).filter(Boolean)])],score:Math.max(Number(prior?.score||0),signalScore),signalScore:Math.max(Number(prior?.signalScore||0),signalScore),signalSource:'semantic',semanticLabelFallback:false};
-    signal.scanStatus=statusFor(signal);merged.set(key,signal);
+    const signal={...prior,topic:label,key:ownerKey,tier:prior?.tier||'pre-breakout',corroborated:prior?.corroborated===true,evidenceCount:Math.max(Number(prior?.evidenceCount||0),rows.length),authorCount:Math.max(Number(prior?.authorCount||0),creators.size),platforms:[...new Set([...(prior?.platforms||[]),...platforms])],evidenceIds:[...new Set([...(prior?.evidenceIds||[]),...rows.map((row)=>row.id).filter(Boolean)])],score:Math.max(Number(prior?.score||0),signalScore),signalScore:Math.max(Number(prior?.signalScore||0),signalScore),signalSource:'semantic',semanticLabelFallback:false};
+    signal.scanStatus=statusFor(signal);merged.set(ownerKey,signal);
   }
 
   // Raw lexical pairs are a last-resort fallback only. Once model-backed semantic
