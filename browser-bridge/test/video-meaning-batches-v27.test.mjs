@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planMeaningBatches, analyzeTextBatchResilient } from '../src/video-meaning-v27.mjs';
+import { planMeaningBatches, analyzeTextBatchResilient, recoverFailedTextMeanings } from '../src/video-meaning-v27.mjs';
 
 test('local semantic batches preserve every full input within a bounded prompt', () => {
   const rows = Array.from({ length: 9 }, (_, id) => ({ id, content: 'caption', transcript: 'spoken evidence '.repeat(150) }));
@@ -28,4 +28,53 @@ test('one failed semantic row does not discard or prevent successful sibling ret
 test('weak meaning remains failed after retry rather than incrementing completed', async () => {
   const result = await analyzeTextBatchResilient([{ id: 1 }], {}, 1000, async () => [{ i: 0, a: 'uncertain activity', c: .1 }]);
   assert.equal(result[0].videoMeaningStatus, 'failed');
+});
+
+test('isolated text-meaning failure gets a grounded visual recovery attempt', async () => {
+  const failures = [{
+    row: { id: 'recover-me', platform: 'X', content: 'caption evidence', transcript: 'spoken evidence' },
+    value: { videoMeaningStatus: 'failed', videoMeaningConfidence: 0, videoMeaningError: 'text model timed out' },
+  }];
+  const calls = [];
+  const result = await recoverFailedTextMeanings({}, failures, { provider: 'ollama' }, {
+    timeoutMs: 1000,
+    concurrency: 2,
+    analyzeVisual: async (_context, row, provider, signal) => {
+      calls.push({ id: row.id, provider: provider.provider, aborted: signal.aborted });
+      return {
+        videoAbout: 'A person explains a telescope launch using the spoken evidence and visible scene.',
+        videoSubject: 'telescope launch',
+        videoEvent: 'explains launch',
+        videoMeaningConfidence: .86,
+        videoMeaningMethod: 'visual-fallback-model',
+        videoMeaningStatus: 'modeled',
+        videoMeaningAt: Date.now(),
+      };
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].id, 'recover-me');
+  assert.equal(result[0].recovered, true);
+  assert.equal(result[0].value.videoMeaningStatus, 'modeled');
+  assert.ok(result[0].value.videoMeaningConfidence >= .4);
+});
+
+test('grounded recovery does not turn weak visual output into success', async () => {
+  const failures = [{
+    row: { id: 'still-bad', platform: 'TikTok', content: 'caption' },
+    value: { videoMeaningStatus: 'failed', videoMeaningConfidence: 0, videoMeaningError: 'invalid text response' },
+  }];
+  const result = await recoverFailedTextMeanings({}, failures, { provider: 'ollama' }, {
+    timeoutMs: 1000,
+    analyzeVisual: async () => ({
+      videoAbout: 'generic clip',
+      videoMeaningConfidence: .2,
+      videoMeaningMethod: 'visual-fallback-model',
+      videoMeaningStatus: 'modeled',
+    }),
+  });
+  assert.equal(result[0].recovered, false);
+  assert.equal(result[0].value.videoMeaningStatus, 'failed');
+  assert.match(result[0].value.videoMeaningError, /invalid text response/i);
+  assert.match(result[0].value.videoMeaningError, /recovery/i);
 });
