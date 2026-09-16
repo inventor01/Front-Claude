@@ -61,7 +61,7 @@ function providerConfig() {
     endpoint: process.env.FRONT_CONTEXT_ENDPOINT || process.env.FRONT_CONTENT_ENDPOINT || 'https://api.openai.com/v1/responses',
     model: process.env.FRONT_CONTEXT_MODEL || process.env.FRONT_CONTENT_MODEL || 'gpt-5.6-luna',
   };
-  const model = process.env.FRONT_CONTEXT_OLLAMA_MODEL || '';
+  const model = process.env.FRONT_CONTEXT_OLLAMA_MODEL || process.env.FRONT_OLLAMA_MODEL || '';
   if ((requested === 'auto' || requested === 'ollama') && model) return {
     available: true, provider: 'ollama', endpoint: process.env.FRONT_CONTEXT_OLLAMA_ENDPOINT || process.env.FRONT_OLLAMA_ENDPOINT || 'http://127.0.0.1:11434/api/chat', model,
   };
