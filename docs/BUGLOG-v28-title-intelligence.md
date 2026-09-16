@@ -35,3 +35,18 @@ The existing authenticated v27 release gate verifies browser auth, X/TikTok disc
 
 ### Regression / release gate
 The v28 release checker has dedicated tests for valid corroborated titles, unsupported cross-platform wording, one-creator event claims, conservative subject-only fallback, no-trend scans, and failure propagation from replayed or emitted invalid titles. The exact PR head must also pass the full repository CI before the authenticated Mac release gate is accepted.
+
+## 2026-09-16 — First authenticated v28 run aborted before semantic completion
+
+### Root cause
+The first real v28 authenticated run used the v27 wrapper default of 720 seconds even though the previously validated full local release run used a 20-minute window. The validator aborted while the live scan was still in `video-meaning`, producing a 499 validator abort even though discovery and 68/68 transcription had completed. The same run also sampled one supplemental visual-understanding post whose page yielded no capturable frame. That random visual probe marked the visual stage degraded even though it is not the final per-video semantic acceptance layer.
+
+### Permanent fix
+- Add `release-gate-v28.mjs` and enforce a 1,200,000 ms minimum authenticated release deadline for v28.
+- Never waive timeout, transport, incomplete video-meaning, incomplete post-understanding, narrative/origin, ledger, canonical-URL, leakage, or other v27 failures.
+- Permit v28 to continue past a v27 nonzero exit only when **every** v27 failure is limited to the supplemental sampled visual-probe checks.
+- Keep the stronger end-to-end requirements intact: every collected video must reach semantic meaning, post understanding must complete without failures, narrative/origin stages must complete, and the v28 title evidence gate must pass.
+- Record any waived supplemental visual-probe checks in the v28 release report rather than hiding them.
+
+### Regression / release gate
+Pre-push tests verify the 20-minute minimum, normal green-base acceptance, visual-probe-only supersession, and—critically—that timeout or incomplete semantic-pipeline failures can never be waived. The updated v28 script also passes Node syntax checking before push.
