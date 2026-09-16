@@ -281,31 +281,126 @@ async function captureFallbackFrame(context, row) {
     return captureRenderedVideoFrame(page, video);
   } finally { await page.close().catch(() => {}); }
 }
-async function analyzeVisualOne(context, row, provider, signal) {
+export async function analyzeVisualOne(context, row, provider) {
   const frame = await captureFallbackFrame(context,row);
   if (!frame) throw new Error('No fallback video frame could be captured.');
+
   const input = meaningInput(row);
   const instruction = [
     'Determine what this social video is specifically about from this grounded frame plus any caption/transcript. Do not invent identity, dialogue, location, or backstory.',
     'Return JSON object only: {"a":"specific one-sentence meaning","s":"specific subject","e":"specific action/event","c":0.8}.',
-    `Platform: ${row.platform}`, `Caption: ${input.caption || 'none'}`, `Spoken transcript: ${input.spoken || 'none'}`,
+    `Platform: ${row.platform}`,
+    `Caption: ${input.caption || 'none'}`,
+    `Spoken transcript: ${input.spoken || 'none'}`,
   ].join('\n');
-  let text='';
-  if(provider.provider==='ollama'){
-    const response=await fetch(provider.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},signal,body:JSON.stringify({model:provider.model,stream:false,think:false,keep_alive:OLLAMA_KEEP_ALIVE,format:{type:'object',additionalProperties:false,properties:{a:{type:'string',maxLength:220},s:{type:'string',maxLength:90},e:{type:'string',maxLength:120},c:{type:'number',minimum:0,maximum:1}},required:['a','s','e','c']},messages:[{role:'user',content:instruction,images:[frame]}],options:{temperature:.05,num_predict:260}})});
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok)throw new Error(`Ollama visual fallback failed (${response.status}): ${clean(data?.error||response.statusText,220)}`);
-    text=data?.message?.content||data?.response||'';
-  } else {
-    const content=[{type:'input_text',text:instruction},{type:'input_image',image_url:`data:image/jpeg;base64,${frame}`,detail:'low'}];
-    const response=await fetch(provider.endpoint,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${provider.key}`},signal,body:JSON.stringify({model:provider.model,store:false,max_output_tokens:400,input:[{role:'user',content}]})});
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok)throw new Error(`OpenAI visual fallback failed (${response.status}): ${clean(data?.error?.message||response.statusText,220)}`);
-    text=data?.output_text||(data?.output||[]).flatMap((item)=>item?.content||[]).map((item)=>item?.text||'').join('\n');
+
+  // IMPORTANT: frame acquisition has its own bounded browser waits.
+  // Start the model deadline only after the grounded frame exists.
+  const inferenceTimeout = Math.max(
+    15000,
+    Math.min(
+      90000,
+      Number(process.env.FRONT_VIDEO_MEANING_VISUAL_TIMEOUT_MS || DEFAULT_TIMEOUT_MS)
+    )
+  );
+
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), inferenceTimeout);
+  const signal = ctl.signal;
+
+  try {
+    let text = '';
+
+    if (provider.provider === 'ollama') {
+      const response = await fetch(provider.endpoint, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        signal,
+        body: JSON.stringify({
+          model: provider.model,
+          stream: false,
+          think: false,
+          keep_alive: OLLAMA_KEEP_ALIVE,
+          format: {
+            type:'object',
+            additionalProperties:false,
+            properties:{
+              a:{type:'string',maxLength:220},
+              s:{type:'string',maxLength:90},
+              e:{type:'string',maxLength:120},
+              c:{type:'number',minimum:0,maximum:1}
+            },
+            required:['a','s','e','c']
+          },
+          messages:[{role:'user',content:instruction,images:[frame]}],
+          options:{temperature:.05,num_predict:260}
+        })
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          `Ollama visual fallback failed (${response.status}): ${clean(data?.error || response.statusText,220)}`
+        );
+      }
+      text = data?.message?.content || data?.response || '';
+    } else {
+      const content = [
+        {type:'input_text',text:instruction},
+        {type:'input_image',image_url:`data:image/jpeg;base64,${frame}`,detail:'low'}
+      ];
+
+      const response = await fetch(provider.endpoint, {
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          Authorization:`Bearer ${provider.key}`
+        },
+        signal,
+        body:JSON.stringify({
+          model:provider.model,
+          store:false,
+          max_output_tokens:400,
+          input:[{role:'user',content}]
+        })
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          `OpenAI visual fallback failed (${response.status}): ${clean(data?.error?.message || response.statusText,220)}`
+        );
+      }
+
+      text =
+        data?.output_text ||
+        (data?.output || [])
+          .flatMap(item => item?.content || [])
+          .map(item => item?.text || '')
+          .join('\n');
+    }
+
+    const normalized = normalizeResult(parseObject(text));
+    if (!normalized) {
+      throw new Error('Visual fallback returned unreadable or incomplete JSON.');
+    }
+
+    return {
+      ...normalized,
+      videoMeaningMethod:'visual-fallback-model'
+    };
+  } catch (reason) {
+    if (reason?.name === 'AbortError') {
+      const error = new Error(
+        `Visual model inference timed out after ${inferenceTimeout}ms.`
+      );
+      error.name = 'AbortError';
+      throw error;
+    }
+    throw reason;
+  } finally {
+    clearTimeout(timer);
   }
-  const normalized=normalizeResult(parseObject(text));
-  if(!normalized)throw new Error('Visual fallback returned unreadable or incomplete JSON.');
-  return {...normalized,videoMeaningMethod:'visual-fallback-model'};
 }
 
 export function planMeaningBatches(rows, batchSize, provider) {
@@ -372,7 +467,7 @@ export async function recoverFailedTextMeanings(context, failures = [], provider
         : clean(reason?.message || reason, 300);
     }
 
-    const visualTimeout = Math.min(timeoutMs, 45000);
+    const visualTimeout = Math.max(1, Math.min(timeoutMs, 60000));
     try {
       const recovered = await runRecoveryAttempt(visualTimeout, (signal) => analyzeVisual(context, row, provider, signal));
       if (!reusableVideoMeaning(recovered)) throw new Error('Grounded visual recovery returned weak or incomplete meaning.');
@@ -458,11 +553,28 @@ export class VideoMeaningEngineV27 {
       }
       const visual=pending.filter(needsVisualFallback);
       const visualResults=await mapWithConcurrency(visual,this.visualConcurrency,async(row)=>{
-        const timeout=Math.min(this.timeoutMs,45000);
-        const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeout);
-        try{return{row,value:await analyzeVisualOne(context,row,this.provider,ctl.signal)}}
-        catch(reason){const message=reason?.name==='AbortError'?`Visual video meaning timed out after ${timeout}ms.`:clean(reason?.message||reason,300);return{row,value:{videoAbout:'',videoSubject:'',videoEvent:'',videoMeaningConfidence:0,videoMeaningMethod:'visual-fallback-model',videoMeaningStatus:'failed',videoMeaningAt:Date.now(),videoMeaningError:message}};}
-        finally{clearTimeout(timer);}
+        const timeout=Math.max(15000,Math.min(90000,Number(process.env.FRONT_VIDEO_MEANING_VISUAL_TIMEOUT_MS||this.timeoutMs)));
+        try{
+          return{row,value:await analyzeVisualOne(context,row,this.provider)};
+        }
+        catch(reason){
+          const message=reason?.name==='AbortError'
+            ? `Visual video meaning inference timed out after ${timeout}ms.`
+            : clean(reason?.message||reason,300);
+          return{
+            row,
+            value:{
+              videoAbout:'',
+              videoSubject:'',
+              videoEvent:'',
+              videoMeaningConfidence:0,
+              videoMeaningMethod:'visual-fallback-model',
+              videoMeaningStatus:'failed',
+              videoMeaningAt:Date.now(),
+              videoMeaningError:message
+            }
+          };
+        }
       });
       for(const {row,value} of visualResults){
         if(value.videoMeaningStatus==='failed'){stats.failed++;stats.errors.push(`${row.id}: ${value.videoMeaningError}`);}else{stats.visualFallback++;stats.completed++;}

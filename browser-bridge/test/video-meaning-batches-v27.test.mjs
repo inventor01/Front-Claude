@@ -5,6 +5,7 @@ import {
   analyzeTextBatchResilient,
   recoverFailedTextMeanings,
   representativeMeaningTranscript,
+  analyzeVisualOne,
 } from '../src/video-meaning-v27.mjs';
 
 test('local semantic batches preserve every full input within a bounded prompt', () => {
@@ -134,4 +135,55 @@ test('both recovery paths failing keeps row failed and preserves diagnostics', a
   assert.match(result[0].value.videoMeaningError, /invalid text response/i);
   assert.match(result[0].value.videoMeaningError, /compact recovery/i);
   assert.match(result[0].value.videoMeaningError, /visual recovery/i);
+});
+
+
+test('visual inference owns a fresh timeout budget after frame acquisition', async () => {
+  const originalFetch = globalThis.fetch;
+  const stale = new AbortController();
+  stale.abort();
+
+  let inferenceSignalWasAborted = true;
+
+  globalThis.fetch = async (_url, options = {}) => {
+    inferenceSignalWasAborted = Boolean(options.signal?.aborted);
+    return {
+      ok: true,
+      json: async () => ({
+        message: {
+          content: JSON.stringify({
+            a: 'A person performs a dance in the visible video frame.',
+            s: 'person dancing',
+            e: 'performs dance',
+            c: 0.88
+          })
+        }
+      })
+    };
+  };
+
+  try {
+    const result = await analyzeVisualOne(
+      {},
+      {
+        id: 'fresh-visual-budget',
+        platform: 'TikTok',
+        content: '',
+        transcript: '',
+        videoFrame: 'ZmFrZQ=='
+      },
+      {
+        provider: 'ollama',
+        endpoint: 'http://unit.test',
+        model: 'qwen-test'
+      },
+      stale.signal
+    );
+
+    assert.equal(inferenceSignalWasAborted, false);
+    assert.equal(result.videoMeaningStatus, 'modeled');
+    assert.ok(result.videoMeaningConfidence >= .4);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
