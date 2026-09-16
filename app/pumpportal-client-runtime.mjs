@@ -44,9 +44,8 @@ function connect(runtime){
   socket.onopen=()=>{
     if(runtime.socket!==socket||!runtime.enabled){try{socket.close();}catch{}return;}
     runtime.attempt=0;
-    publish(runtime,'Connected · creations + migrations');
+    publish(runtime,'Connected · creations only');
     socket.send(JSON.stringify({method:'subscribeNewToken'}));
-    socket.send(JSON.stringify({method:'subscribeMigration'}));
   };
   socket.onmessage=(event)=>{
     if(runtime.socket!==socket||!runtime.enabled)return;
@@ -93,7 +92,7 @@ export function setPumpPortalRuntimeEnabled(enabled){
     try{socket?.close();}catch{}
     return snapshot(runtime);
   }
-  if(runtime.socket?.readyState===WebSocket.OPEN){publish(runtime,'Connected · creations + migrations');return snapshot(runtime);}
+  if(runtime.socket?.readyState===WebSocket.OPEN){publish(runtime,'Connected · creations only');return snapshot(runtime);}
   if(runtime.socket?.readyState===WebSocket.CONNECTING){publish(runtime,'Connecting');return snapshot(runtime);}
   publish(runtime,'Starting');
   connect(runtime);
