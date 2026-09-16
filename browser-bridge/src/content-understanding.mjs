@@ -362,6 +362,7 @@ function analysisPrompt(row, capture) {
     `Sound: ${clean(row.soundTitle || row.soundId, 240) || 'unknown'}`,
     `Page title: ${capture.pageTitle || 'unknown'}`,
     `Video duration: ${Number(capture.duration || 0).toFixed(2)} seconds`,
+    row.transcript ? `Generated spoken transcript (${clean(row.transcriptSource, 80) || 'unknown source'}): ${clean(row.transcript, 3200)}` : 'Generated spoken transcript: none',
     capture.transcript ? `Available caption track text: ${capture.transcript}` : 'Available caption track text: none',
     capture.contactSheet ? 'The image is a chronological contact sheet. Read panels left to right, then top to bottom; each panel has a frame number and timestamp. These are successive frames from ONE video, not separate events. Panel numbers and timestamps are capture annotations, never source on-screen text.' : 'Frames are ordered from early to late and labeled with timestamps.',
   ].join('\n');

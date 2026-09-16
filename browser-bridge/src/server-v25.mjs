@@ -15,6 +15,8 @@ import { attachVisualSignals, semanticConsolidateTopics } from './advanced-intel
 import { rankInvestigationCandidates } from './scout-skill.mjs';
 import { ContentUnderstandingEngine } from './content-understanding.mjs';
 import { PostUnderstandingEngineV26 } from './post-understanding-v26.mjs';
+import { VideoTranscriptEngineV27, isVideoRow, transcriptTerminal } from './video-transcript-v27.mjs';
+import { VideoMeaningEngineV27 } from './video-meaning-v27.mjs';
 import { enhanceNarrativesV26 } from './narrative-intelligence-v26.mjs';
 import { canonicalSocialPostUrl } from './social-post-url.mjs';
 import { BroadTikTokObserver, extractTikTokAnchors } from './tiktok-observer-v21.mjs';
@@ -101,6 +103,8 @@ let latestLive = {
 };
 const understanding = new ContentUnderstandingEngine({ dataDir: DATA_DIR });
 const postUnderstanding = new PostUnderstandingEngineV26({ dataDir: DATA_DIR });
+const transcription = new VideoTranscriptEngineV27({ dataDir: DATA_DIR });
+const videoMeaning = new VideoMeaningEngineV27({ dataDir: DATA_DIR });
 const tiktok = new BroadTikTokObserver({ cdpUrl: CDP_URL, intervalMs: Number(process.env.FRONT_TIKTOK_OBSERVER_MS || 850) });
 
 function saveLedger() { writeJson(LEDGER_PATH, scans.slice(-100)); }
@@ -300,6 +304,57 @@ async function addOriginResearch(rows, topics, mode) {
   return mergeRichEvidence(merged);
 }
 
+function publishAnalyzedRow(row) {
+  const currentRows = Array.isArray(latestLive.evidence) ? latestLive.evidence : [];
+  const index = currentRows.findIndex((item) => item?.id === row?.id);
+  const evidence = index >= 0
+    ? currentRows.map((item, i) => i === index ? row : item)
+    : [...currentRows, row].slice(-300);
+  latestLive = { ...latestLive, evidence, updatedAt: Date.now() };
+}
+async function transcribeAllVideos(rows, phaseName = 'transcription') {
+  if (!rows.length || shouldStop()) return rows;
+  setPhase(phaseName);
+  const priorRuns = latestLive.stages.transcription?.runs || [];
+  const requested = rows.filter(isVideoRow).length;
+  stage('transcription', { status: 'running', requested, runs: priorRuns, engine: transcription.status() });
+  const context = await ensureContext();
+  const enriched = await transcription.enrich(context, rows, {
+    onRow: async (row, progress) => {
+      publishAnalyzedRow(row);
+      stage('transcription', { status: 'running', requested, progress, engine: transcription.status() });
+    },
+  });
+  const runs = [...priorRuns, { phase: phaseName, ...enriched.stats }];
+  const sum = (key) => runs.reduce((total, run) => total + Number(run[key] || 0), 0);
+  const totals = Object.fromEntries(['requested','completed','captioned','transcribed','noSpeech','cached','failed','unavailable'].map((key) => [key, sum(key)]));
+  const errors = [...new Set(runs.flatMap((run) => run.errors || []))].slice(0, 20);
+  stage('transcription', { ...totals, runs, errors, status: totals.failed || totals.unavailable ? 'degraded' : 'complete', engine: transcription.status() });
+  latestLive = { ...latestLive, evidence: enriched.rows.slice(-300), updatedAt: Date.now() };
+  return enriched.rows;
+}
+async function understandAllVideos(rows, phaseName = 'video-meaning') {
+  if (!rows.length || shouldStop()) return rows;
+  setPhase(phaseName);
+  const priorRuns = latestLive.stages.videoMeaning?.runs || [];
+  const requested = rows.filter(isVideoRow).length;
+  stage('videoMeaning', { status: 'running', requested, runs: priorRuns, engine: videoMeaning.status() });
+  const context = await ensureContext();
+  const enriched = await videoMeaning.enrich(context, rows, {
+    onRow: async (row, progress) => {
+      publishAnalyzedRow(row);
+      stage('videoMeaning', { status: 'running', requested, progress, engine: videoMeaning.status() });
+    },
+  });
+  const runs = [...priorRuns, { phase: phaseName, ...enriched.stats }];
+  const sum = (key) => runs.reduce((total, run) => total + Number(run[key] || 0), 0);
+  const totals = Object.fromEntries(['requested','completed','modeled','visualFallback','cached','failed'].map((key) => [key, sum(key)]));
+  const errors = [...new Set(runs.flatMap((run) => run.errors || []))].slice(0, 20);
+  stage('videoMeaning', { ...totals, runs, errors, status: totals.failed ? 'degraded' : 'complete', engine: videoMeaning.status() });
+  latestLive = { ...latestLive, evidence: enriched.rows.slice(-300), updatedAt: Date.now() };
+  return enriched.rows;
+}
+
 async function contextualizePosts(rows, phaseName = 'post-understanding') {
   if (!rows.length || shouldStop()) return rows;
   setPhase(phaseName);
@@ -331,7 +386,9 @@ async function runScan(body = {}) {
       chrome: { status: 'starting', updatedAt: Date.now() },
       xDiscovery: { status: request.scanXForYou ? 'pending' : 'disabled', observed: 0, target: request.targetUniqueFeedItems, updatedAt: Date.now() },
       tiktokDiscovery: { status: request.scanTikTokForYou ? 'pending' : 'disabled', active: request.scanTikTokForYou, observed: 0, grounded: 0, target: request.targetUniqueFeedItems, sourcePages: [], errors: [], updatedAt: Date.now() },
+      transcription: { status: 'pending', updatedAt: Date.now() },
       visualUnderstanding: { status: 'pending', updatedAt: Date.now() },
+      videoMeaning: { status: 'pending', updatedAt: Date.now() },
       postUnderstanding: { status: 'pending', updatedAt: Date.now() },
       narrativeEngine: { status: 'pending', updatedAt: Date.now() },
       originResearch: { status: request.mode === 'deep' ? 'pending' : 'disabled', updatedAt: Date.now() },
@@ -369,6 +426,8 @@ async function runScan(body = {}) {
       resultRows = mergeRichEvidence(resultRows);
     }
 
+    resultRows = await transcribeAllVideos(resultRows);
+
     setPhase('visual-understanding');
     const context = await ensureContext();
     if (!shouldStop() && understanding.status().enabled && resultRows.length) {
@@ -381,6 +440,7 @@ async function runScan(body = {}) {
       stage('visualUnderstanding', { status: understanding.status().enabled ? (shouldStop() ? 'stopped' : 'skipped-no-video') : 'inactive', engine: understanding.status() });
     }
 
+    resultRows = await understandAllVideos(resultRows);
     resultRows = await contextualizePosts(resultRows);
 
     setPhase('narrative-ranking');
@@ -390,7 +450,9 @@ async function runScan(body = {}) {
     resultRows = await addOriginResearch(resultRows, topics, request.mode);
     const newOrigin = newEvidenceRows(beforeOrigin, resultRows);
     if (!shouldStop() && newOrigin.length) {
-      const enrichedOrigin = await contextualizePosts(newOrigin, 'post-understanding-origin');
+      let analyzedOrigin = await transcribeAllVideos(newOrigin, 'transcription-origin');
+      analyzedOrigin = await understandAllVideos(analyzedOrigin, 'video-meaning-origin');
+      const enrichedOrigin = await contextualizePosts(analyzedOrigin, 'post-understanding-origin');
       const byId = new Map(enrichedOrigin.map(row => [row.id, row]));
       resultRows = resultRows.map(row => byId.get(row.id) || row);
       topics = deriveTopics(resultRows, 24);
@@ -410,7 +472,9 @@ async function runScan(body = {}) {
     return {
       ok: finalStatus === 'complete', version: V25_VERSION, scanId: id, evidence: resultRows, inferredTopics: topics, errors: latestLive.errors,
       audit: { singleProcess: true, intelligenceVersion: 26, stages: latestLive.stages, sourcePages: latestLive.sourcePages, ...summary },
+      transcription: { ...transcription.status(), terminalVideos: resultRows.filter((row) => isVideoRow(row) && transcriptTerminal(row.transcriptStatus)).length },
       contentUnderstanding: { ...understanding.status(), visuallyUnderstood: resultRows.filter((row) => row.contentSummary).length },
+      videoMeaning: { ...videoMeaning.status(), understoodVideos: resultRows.filter((row) => isVideoRow(row) && row.videoAbout).length },
       postUnderstanding: postUnderstanding.status(), at: Date.now(),
     };
   } catch (error) {
@@ -433,9 +497,9 @@ function health() {
     ok: true, service: 'front-browser-bridge', version: V25_VERSION, scanner: 'front-single-process-v26', architecture: 'single-process', intelligenceVersion: 26,
     running: Boolean(current), scanId: current?.id || null, scanPhase: current?.phase || 'idle', scanLedger: { current, retained: scans.length },
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
-    contentUnderstanding: understanding.status(), postUnderstanding: postUnderstanding.status(),
-    contentTargets: { deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
-    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','broad-tiktok-observation','caption-light-tiktok-discovery','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
+    transcription: transcription.status(), contentUnderstanding: understanding.status(), videoMeaning: videoMeaning.status(), postUnderstanding: postUnderstanding.status(),
+    contentTargets: { transcriptConcurrency: Number(process.env.FRONT_TRANSCRIPT_CONCURRENCY || 2), deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
+    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
     activePorts: { bridge: PORT, chromeCdp: CDP_PORT },
   };
 }
@@ -509,7 +573,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Front browser bridge v26 listening on http://${HOST}:${PORT}`);
+  console.log(`Front browser bridge v27 listening on http://${HOST}:${PORT}`);
   console.log(`Single-process scanner active. Chrome CDP remains on ${CDP_URL}.`);
   console.log('Pipeline: browser preflight → X/TikTok discovery → visual understanding → contextual post understanding → semantic narrative ranking → origin research.');
 });

@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "node scripts/migrate-local.mjs",
     "validate:v26-scan": "node browser-bridge/scripts/validate-v26-release.mjs",
-    "validate:v26-release": "node browser-bridge/scripts/validate-v26-release.mjs"
+    "validate:v26-release": "node browser-bridge/scripts/validate-v26-release.mjs",
+    "validate:v27-release": "node browser-bridge/scripts/validate-v27-release.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

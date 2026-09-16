@@ -1,0 +1,10 @@
+ALTER TABLE evidence_rich ADD COLUMN transcript text;
+ALTER TABLE evidence_rich ADD COLUMN transcript_source text;
+ALTER TABLE evidence_rich ADD COLUMN transcript_status text;
+ALTER TABLE evidence_rich ADD COLUMN transcript_duration real;
+ALTER TABLE evidence_rich ADD COLUMN video_about text;
+ALTER TABLE evidence_rich ADD COLUMN video_subject text;
+ALTER TABLE evidence_rich ADD COLUMN video_event text;
+ALTER TABLE evidence_rich ADD COLUMN video_meaning_confidence real;
+ALTER TABLE evidence_rich ADD COLUMN video_meaning_method text;
+ALTER TABLE evidence_rich ADD COLUMN video_meaning_status text;

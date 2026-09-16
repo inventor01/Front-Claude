@@ -119,39 +119,43 @@ export FRONT_CONTEXT_MAX_POSTS="${FRONT_CONTEXT_MAX_POSTS:-12}"
 export FRONT_CONTEXT_BATCH_SIZE="${FRONT_CONTEXT_BATCH_SIZE:-4}"
 export FRONT_CONTEXT_TIMEOUT_MS="${FRONT_CONTEXT_TIMEOUT_MS:-60000}"
 export FRONT_CONTEXT_NUM_PREDICT="${FRONT_CONTEXT_NUM_PREDICT:-900}"
+export FRONT_TRANSCRIPT_CONCURRENCY="${FRONT_TRANSCRIPT_CONCURRENCY:-2}"
+export FRONT_TRANSCRIPT_TIMEOUT_MS="${FRONT_TRANSCRIPT_TIMEOUT_MS:-180000}"
+export FRONT_VIDEO_MEANING_BATCH_SIZE="${FRONT_VIDEO_MEANING_BATCH_SIZE:-4}"
+export FRONT_VIDEO_MEANING_TIMEOUT_MS="${FRONT_VIDEO_MEANING_TIMEOUT_MS:-60000}"
 export FRONT_TIKTOK_OBSERVER_MS="${FRONT_TIKTOK_OBSERVER_MS:-850}"
 export FRONT_BRIDGE_HEADLESS="${FRONT_BRIDGE_HEADLESS:-1}"
 
 if [ -z "$EXPLICIT_MODEL" ] && [ "$FRONT_OLLAMA_MODEL" = "qwen3-vl:8b" ]; then
-  echo "Front v26: replacing stale qwen3-vl:8b local default with verified qwen3-vl:4b-instruct."
+  echo "Front v27: replacing stale qwen3-vl:8b local default with verified qwen3-vl:4b-instruct."
   export FRONT_OLLAMA_MODEL="qwen3-vl:4b-instruct"
 fi
 if [ -z "$EXPLICIT_CONTENT_TIMEOUT" ] && [ "$FRONT_CONTENT_TIMEOUT_MS" = "60000" ]; then
-  echo "Front v26: replacing stale deep visual timeout 60000ms with measured-safe 75000ms."
+  echo "Front v27: replacing stale deep visual timeout 60000ms with measured-safe 75000ms."
   export FRONT_CONTENT_TIMEOUT_MS="75000"
 fi
 if [ -z "$EXPLICIT_DEEP" ] && { [ "$FRONT_CONTENT_DEEP_VIDEOS" = "8" ] || [ "$FRONT_CONTENT_DEEP_VIDEOS" = "4" ]; }; then
-  echo "Front v26: replacing stale deep visual budget $FRONT_CONTENT_DEEP_VIDEOS with reliable budget 2."
+  echo "Front v27: replacing stale deep visual budget $FRONT_CONTENT_DEEP_VIDEOS with reliable budget 2."
   export FRONT_CONTENT_DEEP_VIDEOS="2"
 fi
 if [ -z "$EXPLICIT_SCOUT" ] && { [ "$FRONT_CONTENT_SCOUT_VIDEOS" = "4" ] || [ "$FRONT_CONTENT_SCOUT_VIDEOS" = "2" ]; }; then
-  echo "Front v26: replacing stale scout visual budget $FRONT_CONTENT_SCOUT_VIDEOS with reliable budget 1."
+  echo "Front v27: replacing stale scout visual budget $FRONT_CONTENT_SCOUT_VIDEOS with reliable budget 1."
   export FRONT_CONTENT_SCOUT_VIDEOS="1"
 fi
 if [ -z "$EXPLICIT_BACKGROUND" ] && [ "$FRONT_CONTENT_BACKGROUND_VIDEOS" = "2" ]; then
-  echo "Front v26: replacing stale background visual budget 2 with balanced budget 1."
+  echo "Front v27: replacing stale background visual budget 2 with balanced budget 1."
   export FRONT_CONTENT_BACKGROUND_VIDEOS="1"
 fi
 if [ -z "$EXPLICIT_CONTEXT_MAX" ] && { [ "$FRONT_CONTEXT_MAX_POSTS" = "90" ] || [ "$FRONT_CONTEXT_MAX_POSTS" = "36" ]; }; then
-  echo "Front v26: replacing stale contextual post budget $FRONT_CONTEXT_MAX_POSTS with balanced budget 12."
+  echo "Front v27: replacing stale contextual post budget $FRONT_CONTEXT_MAX_POSTS with balanced budget 12."
   export FRONT_CONTEXT_MAX_POSTS="12"
 fi
 if [ -z "$EXPLICIT_CONTEXT_BATCH" ] && [ "$FRONT_CONTEXT_BATCH_SIZE" = "8" ]; then
-  echo "Front v26: replacing stale context batch size 8 with balanced batch size 4."
+  echo "Front v27: replacing stale context batch size 8 with balanced batch size 4."
   export FRONT_CONTEXT_BATCH_SIZE="4"
 fi
 if [ -z "$EXPLICIT_CONTEXT_TIMEOUT" ] && [ "$FRONT_CONTEXT_TIMEOUT_MS" = "45000" ]; then
-  echo "Front v26: replacing stale context timeout 45000ms with validated 60000ms."
+  echo "Front v27: replacing stale context timeout 45000ms with validated 60000ms."
   export FRONT_CONTEXT_TIMEOUT_MS="60000"
 fi
 
@@ -159,15 +163,20 @@ export FRONT_CONTEXT_PROVIDER="${FRONT_CONTEXT_PROVIDER:-$FRONT_CONTENT_PROVIDER
 export FRONT_CONTEXT_OLLAMA_MODEL="${FRONT_CONTEXT_OLLAMA_MODEL:-$FRONT_OLLAMA_MODEL}"
 export FRONT_CONTEXT_OLLAMA_ENDPOINT="${FRONT_CONTEXT_OLLAMA_ENDPOINT:-$FRONT_OLLAMA_ENDPOINT}"
 if [ -z "$EXPLICIT_CONTEXT_MODEL" ] && [ "$FRONT_CONTEXT_OLLAMA_MODEL" = "qwen3-vl:8b" ]; then
-  echo "Front v26: replacing stale 8B context model with current local model $FRONT_OLLAMA_MODEL."
+  echo "Front v27: replacing stale 8B context model with current local model $FRONT_OLLAMA_MODEL."
   export FRONT_CONTEXT_OLLAMA_MODEL="$FRONT_OLLAMA_MODEL"
 fi
 
-echo "Starting Front browser bridge v26 on http://127.0.0.1:43981"
+echo "Starting Front browser bridge v27 on http://127.0.0.1:43981"
 echo "Keep this Terminal window open while you want browser intelligence running."
-echo "v26 preserves the v25 single-process collectors and adds contextual post understanding plus semantic narrative clustering."
+echo "v27 preserves the v26 single-process collectors and adds exhaustive video transcription + per-video meaning before narrative clustering."
 echo "Chrome CDP stays on http://127.0.0.1:43982 and must remain running."
-echo "Balanced profile: vision=${FRONT_OLLAMA_MODEL:-none}, context=${FRONT_CONTEXT_OLLAMA_MODEL:-none}, deep=$FRONT_CONTENT_DEEP_VIDEOS, scout=$FRONT_CONTENT_SCOUT_VIDEOS, background=$FRONT_CONTENT_BACKGROUND_VIDEOS, model-frames=$FRONT_CONTENT_MODEL_FRAMES, vision-timeout=${FRONT_CONTENT_TIMEOUT_MS}ms, contextual=$FRONT_CONTEXT_MAX_POSTS, context-batch=$FRONT_CONTEXT_BATCH_SIZE, context-timeout=${FRONT_CONTEXT_TIMEOUT_MS}ms, keep-alive=${FRONT_OLLAMA_KEEP_ALIVE}, TikTok poll=${FRONT_TIKTOK_OBSERVER_MS}ms."
+echo "Balanced profile: transcript-concurrency=${FRONT_TRANSCRIPT_CONCURRENCY}, transcript-timeout=${FRONT_TRANSCRIPT_TIMEOUT_MS}ms, video-meaning-batch=${FRONT_VIDEO_MEANING_BATCH_SIZE}, vision=${FRONT_OLLAMA_MODEL:-none}, context=${FRONT_CONTEXT_OLLAMA_MODEL:-none}, deep=$FRONT_CONTENT_DEEP_VIDEOS, scout=$FRONT_CONTENT_SCOUT_VIDEOS, background=$FRONT_CONTENT_BACKGROUND_VIDEOS, model-frames=$FRONT_CONTENT_MODEL_FRAMES, vision-timeout=${FRONT_CONTENT_TIMEOUT_MS}ms, contextual=$FRONT_CONTEXT_MAX_POSTS, context-batch=$FRONT_CONTEXT_BATCH_SIZE, context-timeout=${FRONT_CONTEXT_TIMEOUT_MS}ms, keep-alive=${FRONT_OLLAMA_KEEP_ALIVE}, TikTok poll=${FRONT_TIKTOK_OBSERVER_MS}ms."
+if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v whisper-cli >/dev/null 2>&1 || [ ! -s "${FRONT_WHISPER_MODEL:-$FRONT_DATA_DIR/models/ggml-base.bin}" ]; then
+  echo "WARNING: full video speech-to-text is not ready. Run: bash ./setup-transcription.command"
+else
+  echo "Video transcription: local whisper.cpp ready for every collected X/TikTok video."
+fi
 if [ -n "${FRONT_CONTENT_API_KEY:-${OPENAI_API_KEY:-}}" ]; then
   echo "Content/context understanding: OpenAI provider configured."
 elif [ -n "${FRONT_OLLAMA_MODEL:-}" ]; then
