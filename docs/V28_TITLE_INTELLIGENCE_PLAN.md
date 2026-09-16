@@ -37,3 +37,11 @@ Before pushing:
 - generic label rejection.
 
 After pushing the branch, GitHub CI must still pass the repository-wide browser bridge, typecheck, lint, build, migrations, security, persistence, and deploy-bundle gates before any merge.
+
+## Authenticated release acceptance
+The final v28 gate runs the full authenticated X/TikTok scan and then replays the real evidence through the v28 title verifier.
+
+- The gate enforces the previously validated 20-minute minimum release window rather than the older 12-minute default.
+- Timeout, transport, incomplete video meaning, incomplete post understanding, narrative/origin, ledger, canonical URL, notification leakage, and title-claim failures remain blocking.
+- A sampled supplemental visual-understanding post may be uncapturable because a social page does not expose frames. That isolated visual-probe failure may be superseded only when **all other v27 checks pass**, including complete per-video semantic meaning and complete post/narrative stages. The waiver is recorded in the v28 report rather than hidden.
+- The release passes only if the final title evidence gate also passes.
