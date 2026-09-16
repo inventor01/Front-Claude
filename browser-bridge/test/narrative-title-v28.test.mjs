@@ -95,3 +95,14 @@ test('rejects generic narrative labels', () => {
   ];
   assert.equal(buildNarrativeTitleIntelligenceV28({}, rows), null);
 });
+
+test('rejects internal semantic field names as narrative titles', () => {
+  for (const label of ['meaning','subject','event','analysis','semantic meaning','content analysis']) {
+    const rows = [
+      row('1','a','TikTok',label,'summary'),
+      row('2','b','X',label,'summary'),
+      row('3','c','TikTok',label,'summary'),
+    ];
+    assert.equal(buildNarrativeTitleIntelligenceV28({}, rows), null, `${label} must never become a narrative title`);
+  }
+});

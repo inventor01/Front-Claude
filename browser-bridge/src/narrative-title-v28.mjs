@@ -1,3 +1,5 @@
+import { isInternalSemanticLabel } from './semantic-label-guard-v29.mjs';
+
 const clean = (value, max = 240) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const normalize = (value) => clean(value, 400).normalize('NFKC').toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}$#@]+/gu, ' ').replace(/\s+/g, ' ').trim();
 const tokens = (value) => normalize(value).split(' ').filter(Boolean);
@@ -9,10 +11,11 @@ const EVENT_WORDS = new Set('react reacts reacting reacted remix remixes remixed
 const PLATFORM_LABELS = new Map([['x', 'X'], ['twitter', 'X'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'], ['instagram', 'Instagram'], ['reddit', 'Reddit']]);
 
 function meaningfulTokens(value) {
-  return tokens(value).filter((word) => word.length >= 2 && !STOP.has(word) && !GENERIC.has(word) && !/^\d+$/.test(word));
+  return tokens(value).filter((word) => word.length >= 2 && !STOP.has(word) && !GENERIC.has(word) && !isInternalSemanticLabel(word) && !/^\d+$/.test(word));
 }
 
 function isSpecificSubject(value) {
+  if (isInternalSemanticLabel(value)) return false;
   const all = tokens(value);
   if (!all.length) return false;
   const meaningful = meaningfulTokens(value);
@@ -22,6 +25,7 @@ function isSpecificSubject(value) {
 }
 
 function isUsefulEvent(value) {
+  if (isInternalSemanticLabel(value)) return false;
   const all = tokens(value);
   if (!all.length) return false;
   const meaningful = meaningfulTokens(value);
@@ -216,6 +220,7 @@ export function buildNarrativeTitleIntelligenceV28(topic = {}, rows = []) {
   if (!verified.length) return null;
 
   const winner = verified[0];
+  if (isInternalSemanticLabel(winner.title)) return null;
   const confidence = clamp01(baseUnderstanding * 0.7 + Math.min(1, winner.score / 100) * 0.3);
   const status = confidence >= 0.86 && event ? 'specific' : confidence >= 0.68 ? 'conservative' : 'provisional';
 
