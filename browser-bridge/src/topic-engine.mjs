@@ -1,4 +1,5 @@
 import { dedupeEvidence } from './core.mjs';
+import { isInternalSemanticLabel, preferSpecificSemanticLabel } from './semantic-label-guard-v29.mjs';
 import {
   detectTopics as baseDetectTopics,
   enrichMomentum as baseEnrichMomentum,
@@ -27,26 +28,27 @@ const GENERIC_STEM=/^(?:creat(?:e|es|ed|ing|ion|ions|or|ors)|origin(?:al|als|all
 
 const normalize=(value)=>String(value??'').normalize('NFKC').replace(/([a-z\d])([A-Z])/g,'$1 $2').replace(/^#/,'').replace(/[_-]+/g,' ').toLowerCase().replace(/[’']/g,'').replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();
 const tokens=(value)=>normalize(value).split(' ').filter(Boolean);
-const specificWords=(value)=>tokens(value).filter((word)=>word.length>=3&&!STOP.has(word)&&!GENERIC_SINGLE.has(word)&&!GENERIC_STEM.test(word)&&!/^\d+$/.test(word));
+const specificWords=(value)=>tokens(value).filter((word)=>word.length>=3&&!STOP.has(word)&&!GENERIC_SINGLE.has(word)&&!GENERIC_STEM.test(word)&&!isInternalSemanticLabel(word)&&!/^\d+$/.test(word));
 const creatorKey=(row)=>`${row.platform}:${String(row.author||'').toLowerCase()}`;
 const cleanLabel=(value)=>String(value??'').replace(/^#/,'').replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim().slice(0,100);
 
 function genericLabel(value){
+ if(isInternalSemanticLabel(value))return true;
  const normalized=normalize(value),parts=tokens(value);if(!parts.length||BOILERPLATE.has(normalized))return true;
  if(parts.length===1){const word=parts[0];return word.length<4||GENERIC_SINGLE.has(word)||STOP.has(word)||GENERIC_STEM.test(word)||/^\d+$/.test(word);}
  const specific=specificWords(value);if(!specific.length)return true;
- const noise=parts.filter((word)=>STOP.has(word)||GENERIC_SINGLE.has(word)||GENERIC_STEM.test(word)||word.length<3).length;
+ const noise=parts.filter((word)=>STOP.has(word)||GENERIC_SINGLE.has(word)||GENERIC_STEM.test(word)||isInternalSemanticLabel(word)||word.length<3).length;
  return parts.length>=3&&specific.length===1&&noise>=parts.length-1;
 }
 function supportingRows(topic,evidence){const ids=new Set(topic?.evidenceIds||[]);if(ids.size){const linked=evidence.filter((row)=>ids.has(row.id));if(linked.length)return linked;}const labels=[topic?.topic,...(topic?.aliases||[])].map(normalize).filter(Boolean);return evidence.filter((row)=>{const text=` ${normalize(row.content)} `;return labels.some((label)=>label.length>=3&&text.includes(` ${label} `));});}
 function exactSupport(label,rows){const key=normalize(label);if(!key)return{creators:0,evidence:0,platforms:0};const matches=rows.filter((row)=>` ${normalize(row.content)} `.includes(` ${key} `));return{creators:new Set(matches.map(creatorKey)).size,evidence:matches.length,platforms:new Set(matches.map((row)=>row.platform)).size};}
 function repeatedContiguousPhrases(rows){
- const buckets=new Map();for(const row of rows){const words=normalize(row.content).split(' ').filter(Boolean).slice(0,90);const author=creatorKey(row);for(let size=2;size<=5;size++)for(let i=0;i<=words.length-size;i++){const slice=words.slice(i,i+size);if(slice.some((word)=>/^https?$|^www$|^com$/.test(word)))continue;const meaningful=slice.filter((word)=>word.length>=3&&!STOP.has(word)&&!GENERIC_SINGLE.has(word)&&!GENERIC_STEM.test(word));if(meaningful.length<Math.min(2,size))continue;const phrase=slice.join(' ');if(genericLabel(phrase))continue;const old=buckets.get(phrase)||{authors:new Set(),platforms:new Set(),count:0};old.authors.add(author);old.platforms.add(row.platform);old.count+=1;buckets.set(phrase,old);}}
+ const buckets=new Map();for(const row of rows){const words=normalize(row.content).split(' ').filter(Boolean).slice(0,90);const author=creatorKey(row);for(let size=2;size<=5;size++)for(let i=0;i<=words.length-size;i++){const slice=words.slice(i,i+size);if(slice.some((word)=>/^https?$|^www$|^com$/.test(word)))continue;const meaningful=slice.filter((word)=>word.length>=3&&!STOP.has(word)&&!GENERIC_SINGLE.has(word)&&!GENERIC_STEM.test(word)&&!isInternalSemanticLabel(word));if(meaningful.length<Math.min(2,size))continue;const phrase=slice.join(' ');if(genericLabel(phrase))continue;const old=buckets.get(phrase)||{authors:new Set(),platforms:new Set(),count:0};old.authors.add(author);old.platforms.add(row.platform);old.count+=1;buckets.set(phrase,old);}}
  return[...buckets.entries()].filter(([,stat])=>stat.authors.size>=2).map(([label,stat])=>({label,creators:stat.authors.size,platforms:stat.platforms.size,count:stat.count})).sort((a,b)=>b.creators-a.creators||b.platforms-a.platforms||b.count-a.count||tokens(b.label).length-tokens(a.label).length);
 }
 function bestDisplayLabel(topic,rows){
  const candidates=[...new Set([topic.topic,...(topic.aliases||[])].map(cleanLabel).filter(Boolean))].filter((label)=>!genericLabel(label)).map((label)=>({label,...exactSupport(label,rows)})).filter((item)=>item.creators>=2).sort((a,b)=>{const aw=tokens(a.label).length,bw=tokens(b.label).length;const as=a.creators*8+a.platforms*3+Math.min(4,aw)*1.5-(aw>6?6:0);const bs=b.creators*8+b.platforms*3+Math.min(4,bw)*1.5-(bw>6?6:0);return bs-as||bw-aw||a.label.length-b.label.length;});
- if(candidates[0])return candidates[0].label;const repeated=repeatedContiguousPhrases(rows);if(repeated[0])return repeated[0].label;const fallback=cleanLabel(topic.topic||topic.key);return fallback&&!genericLabel(fallback)?fallback:'';
+ if(candidates[0])return candidates[0].label;const repeated=repeatedContiguousPhrases(rows);if(repeated[0])return repeated[0].label;const fallback=preferSpecificSemanticLabel(topic.topic,topic.key);return fallback&&!genericLabel(fallback)?cleanLabel(fallback):'';
 }
 function stableIdentity(topic,display,evidence){
  const original=cleanLabel(topic?.key||''),originalWords=specificWords(original);
@@ -87,4 +89,4 @@ export function detectTopics(events=[],now=Date.now(),limit=15){
 }
 
 export function enrichMomentum(topics=[],history=[],now=Date.now()){const enriched=baseEnrichMomentum(topics,history,now).map((topic)=>{const hot=Array.isArray(topic.hotPosts)?topic.hotPosts:[];const maxViewsPerHour=Number(topic.maxViewsPerHour||0),crossPostedCreators=Number(topic.crossPostedCreators||0),creators=Number(topic.authorCount||0);const shouldFlag=creators>=2&&(maxViewsPerHour>=100000||hot.some((post)=>Number(post.views||0)>=100000&&Number(post.ageHours||99)<=6)||crossPostedCreators>=3&&maxViewsPerHour>=25000);if(!shouldFlag||topic.momentum?.label==='Accelerating')return topic;return{...topic,momentum:{...(topic.momentum||{}),label:'Accelerating',score:Number(((topic.momentum?.score||0)+Math.min(35,Math.log10(1+maxViewsPerHour)*6)).toFixed(2)),engagementAcceleration:true}};});return enriched.sort((a,b)=>(b.priorityScore||0)-(a.priorityScore||0)||(b.momentum?.score||0)-(a.momentum?.score||0)||(b.score||0)-(a.score||0));}
-export function topicSnapshot(topics=[],at=Date.now()){const snapshot=baseTopicSnapshot(topics,at),byKey=new Map(topics.map((topic)=>[normalize(topic.key||topic.topic),topic]));snapshot.topics=snapshot.topics.map((row)=>{const source=byKey.get(normalize(row.key||row.topic));return{...row,priorityScore:source?.priorityScore||0,maxViewsPerHour:source?.maxViewsPerHour||0,crossPostedCreators:source?.crossPostedCreators||0,hotPostCount:source?.hotPosts?.length||0,crossPlatform:source?.crossPlatform||null};});return snapshot;}
+export function topicSnapshot(topics=[],at=Date.now()){const safeTopics=topics.map((topic)=>{const label=preferSpecificSemanticLabel(topic?.topic,topic?.key);return label?{...topic,topic:label}:null;}).filter(Boolean);const snapshot=baseTopicSnapshot(safeTopics,at),byKey=new Map(safeTopics.map((topic)=>[normalize(topic.key||topic.topic),topic]));snapshot.topics=snapshot.topics.map((row)=>{const label=preferSpecificSemanticLabel(row.topic,row.key);if(!label)return null;const source=byKey.get(normalize(row.key||label));return{...row,topic:label,priorityScore:source?.priorityScore||0,maxViewsPerHour:source?.maxViewsPerHour||0,crossPostedCreators:source?.crossPostedCreators||0,hotPostCount:source?.hotPosts?.length||0,crossPlatform:source?.crossPlatform||null};}).filter(Boolean);return snapshot;}
