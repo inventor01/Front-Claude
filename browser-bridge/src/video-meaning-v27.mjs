@@ -61,7 +61,7 @@ function providerConfig() {
     endpoint: process.env.FRONT_CONTEXT_ENDPOINT || process.env.FRONT_CONTENT_ENDPOINT || 'https://api.openai.com/v1/responses',
     model: process.env.FRONT_CONTEXT_MODEL || process.env.FRONT_CONTENT_MODEL || 'gpt-5.6-luna',
   };
-  const model = process.env.FRONT_CONTEXT_OLLAMA_MODEL || process.env.FRONT_OLLAMA_MODEL || '';
+  const model = process.env.FRONT_CONTEXT_OLLAMA_MODEL || '';
   if ((requested === 'auto' || requested === 'ollama') && model) return {
     available: true, provider: 'ollama', endpoint: process.env.FRONT_CONTEXT_OLLAMA_ENDPOINT || process.env.FRONT_OLLAMA_ENDPOINT || 'http://127.0.0.1:11434/api/chat', model,
   };
@@ -279,6 +279,41 @@ export async function analyzeTextBatchResilient(rows, provider, timeoutMs, analy
   }
 }
 
+export async function recoverFailedTextMeanings(context, failures = [], provider, {
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  concurrency = 2,
+  analyzeVisual = analyzeVisualOne,
+} = {}) {
+  return mapWithConcurrency(failures, concurrency, async ({ row, value }) => {
+    const originalError = clean(value?.videoMeaningError || 'Text meaning failed.', 300);
+    const timeout = Math.min(timeoutMs, 45000);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeout);
+    try {
+      const recovered = await analyzeVisual(context, row, provider, ctl.signal);
+      if (!reusableVideoMeaning(recovered)) throw new Error('Grounded recovery returned weak or incomplete meaning.');
+      return { row, value: recovered, recovered: true, originalError };
+    } catch (reason) {
+      const recoveryError = reason?.name === 'AbortError'
+        ? `Grounded recovery timed out after ${timeout}ms.`
+        : clean(reason?.message || reason, 300);
+      return {
+        row,
+        value: {
+          ...value,
+          videoMeaningStatus: 'failed',
+          videoMeaningConfidence: 0,
+          videoMeaningError: clean(`${originalError} | Recovery: ${recoveryError}`, 500),
+        },
+        recovered: false,
+        originalError,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+}
+
 export class VideoMeaningEngineV27 {
   constructor({ dataDir }) {
     this.dataDir=dataDir;
@@ -305,16 +340,15 @@ export class VideoMeaningEngineV27 {
       for(const row of pending){const input=meaningInput(row);const value={videoAbout:clean(input.spoken||input.caption||input.visual,300),videoSubject:'',videoEvent:'',videoMeaningConfidence:.25,videoMeaningMethod:'deterministic-fallback',videoMeaningStatus:'failed',videoMeaningAt:Date.now(),videoMeaningError:'Semantic video meaning model is not configured.'};const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);stats.failed++;stats.errors.push(`${row.id}: model unavailable`);if(onRow)await onRow(enriched,{...stats});}
     } else {
       const textual=pending.filter((row)=>!needsVisualFallback(row));
+      const textFailures=[];
       for(const batch of planMeaningBatches(textual,this.batchSize,this.provider.provider)){
         try{
           const analyzed=await analyzeTextBatchResilient(batch,this.provider,this.timeoutMs);
           for(let index=0;index<batch.length;index++){
             const row=batch[index],value=analyzed[index];
             if(!value)throw new Error(`Missing semantic meaning for ${row.id}`);
-            if (value.videoMeaningStatus === 'failed') {
-              stats.failed++; stats.errors.push(`${row.id}: ${value.videoMeaningError}`);
-              const enriched = enrichVideoMeaning(row, value); output.set(row.id, enriched);
-              if (onRow) await onRow(enriched, { ...stats });
+            if(value.videoMeaningStatus==='failed'){
+              textFailures.push({row,value});
               continue;
             }
             stats.modeled++;stats.completed++;
@@ -324,7 +358,16 @@ export class VideoMeaningEngineV27 {
           this.persist();
         } catch(reason){
           const message=reason?.name==='AbortError'?`Video meaning timed out after ${this.timeoutMs}ms.`:clean(reason?.message||reason,300);
-          for(const row of batch){const input=meaningInput(row);const value={videoAbout:clean(input.spoken||input.caption||input.visual,300),videoSubject:'',videoEvent:'',videoMeaningConfidence:.25,videoMeaningMethod:'deterministic-fallback',videoMeaningStatus:'failed',videoMeaningAt:Date.now(),videoMeaningError:message};stats.failed++;stats.errors.push(`${row.id}: ${message}`);const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);if(onRow)await onRow(enriched,{...stats});}
+          for(const row of batch){const input=meaningInput(row);const value={videoAbout:clean(input.spoken||input.caption||input.visual,300),videoSubject:'',videoEvent:'',videoMeaningConfidence:.25,videoMeaningMethod:'deterministic-fallback',videoMeaningStatus:'failed',videoMeaningAt:Date.now(),videoMeaningError:message};textFailures.push({row,value});}
+        }
+      }
+      if(textFailures.length){
+        const recovered=await recoverFailedTextMeanings(context,textFailures,this.provider,{timeoutMs:this.timeoutMs,concurrency:this.visualConcurrency});
+        for(const {row,value,recovered:didRecover} of recovered){
+          if(didRecover){stats.visualFallback++;stats.completed++;}
+          else{stats.failed++;stats.errors.push(`${row.id}: ${value.videoMeaningError}`);}
+          if(reusableVideoMeaning(value))this.cache[this.key(row)]={at:Date.now(),value};
+          const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);this.persist();if(onRow)await onRow(enriched,{...stats});
         }
       }
       const visual=pending.filter(needsVisualFallback);
