@@ -3,9 +3,20 @@ const clean = (value, max = 8000) => String(value ?? '').replace(/\s+/g, ' ').tr
 export function isTikTokActivityText(value) {
   const text = clean(value, 8000).toLowerCase();
   if (!text) return false;
-  return /(?:^|\b)(?:liked|commented on|replied to|shared|reposted|saved|favorited|viewed|mentioned|tagged|followed|started following|sent)\b[\s\S]{0,120}\b(?:your|you)\b[\s\S]{0,120}\b(?:video|post|comment|profile|story|message)?\b/i.test(text)
-    || /\b(?:activity|notifications?|inbox)\b[\s\S]{0,80}\b(?:your video|your post|your comment|followed you|mentioned you|tagged you)\b/i.test(text)
-    || /\b(?:liked your video|liked your post|liked your comment|commented on your video|commented on your post|replied to your comment|shared your video|reposted your video|viewed your profile|mentioned you|tagged you|followed you|started following you|sent you a message)\b/i.test(text);
+
+  const explicitActivity = [
+    /\b(?:liked|commented on|replied to|shared|reposted|saved|favorited)\s+your\s+(?:video|post|comment|story)\b/i,
+    /\bviewed\s+your\s+profile\b/i,
+    /\b(?:followed|started following)\s+you\b/i,
+    /\b(?:mentioned|tagged)\s+you(?:\s+in\s+(?:a|your)\s+(?:video|post|comment|story))?\b/i,
+    /\bsent\s+you\s+(?:a\s+)?message\b/i,
+  ];
+
+  if (explicitActivity.some(pattern => pattern.test(text))) {
+    return true;
+  }
+
+  return /\b(?:activity|notifications?|inbox)\b[\s\S]{0,80}\b(?:liked your|commented on your|replied to your|shared your|reposted your|viewed your profile|followed you|mentioned you|tagged you|sent you)\b/i.test(text);
 }
 
 export function meaningfulTikTokText(value) {

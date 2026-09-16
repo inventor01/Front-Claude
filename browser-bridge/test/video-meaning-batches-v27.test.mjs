@@ -6,6 +6,8 @@ import {
   recoverFailedTextMeanings,
   representativeMeaningTranscript,
   analyzeVisualOne,
+  hasCompactMeaningEvidence,
+  analyzeLowTextVideoMeaning,
 } from '../src/video-meaning-v27.mjs';
 
 test('local semantic batches preserve every full input within a bounded prompt', () => {
@@ -186,4 +188,118 @@ test('visual inference owns a fresh timeout budget after frame acquisition', asy
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test('compact evidence classifier distinguishes useful low-text clues from social boilerplate', () => {
+  assert.equal(
+    hasCompactMeaningEvidence({
+      platform: 'TikTok',
+      content: '#🐍 #bite',
+      transcript: ''
+    }),
+    true
+  );
+
+  assert.equal(
+    hasCompactMeaningEvidence({
+      platform: 'TikTok',
+      content: '😂😂😂 #viral #fyp @Pat',
+      transcript: ''
+    }),
+    false
+  );
+
+  assert.equal(
+    hasCompactMeaningEvidence({
+      platform: 'TikTok',
+      content: '10:54 PM',
+      transcript: ''
+    }),
+    false
+  );
+});
+
+test('compact low-text evidence avoids unnecessary visual inference', async () => {
+  let compactCalls = 0;
+  let visualCalls = 0;
+
+  const result = await analyzeLowTextVideoMeaning(
+    {},
+    {
+      id: 'snake-bite',
+      platform: 'TikTok',
+      content: '#🐍 #bite',
+      transcript: ''
+    },
+    {provider:'ollama'},
+    {
+      timeoutMs: 1000,
+      compactTimeoutMs: 100,
+      analyzeCompact: async () => {
+        compactCalls++;
+        return {
+          videoAbout:
+            'The caption specifically references a snake bite.',
+          videoSubject: 'snake bite',
+          videoEvent: 'references snake bite',
+          videoMeaningConfidence: .82,
+          videoMeaningMethod: 'semantic-compact-recovery',
+          videoMeaningStatus: 'modeled',
+          videoMeaningAt: Date.now()
+        };
+      },
+      analyzeVisual: async () => {
+        visualCalls++;
+        throw new Error('visual model should not run');
+      }
+    }
+  );
+
+  assert.equal(compactCalls, 1);
+  assert.equal(visualCalls, 0);
+  assert.equal(result.value.videoMeaningStatus, 'modeled');
+  assert.equal(
+    result.recoveryMethod,
+    'semantic-compact-recovery'
+  );
+});
+
+test('generic low-text evidence still requires grounded visual inference', async () => {
+  let compactCalls = 0;
+  let visualCalls = 0;
+
+  const result = await analyzeLowTextVideoMeaning(
+    {},
+    {
+      id: 'generic',
+      platform: 'TikTok',
+      content: '😂😂😂 #viral #fyp @Pat',
+      transcript: ''
+    },
+    {provider:'ollama'},
+    {
+      timeoutMs: 1000,
+      analyzeCompact: async () => {
+        compactCalls++;
+        throw new Error('compact should not run');
+      },
+      analyzeVisual: async () => {
+        visualCalls++;
+        return {
+          videoAbout: 'A person is visibly dancing.',
+          videoSubject: 'person dancing',
+          videoEvent: 'performs dance',
+          videoMeaningConfidence: .84,
+          videoMeaningMethod: 'visual-fallback-model',
+          videoMeaningStatus: 'modeled',
+          videoMeaningAt: Date.now()
+        };
+      }
+    }
+  );
+
+  assert.equal(compactCalls, 0);
+  assert.equal(visualCalls, 1);
+  assert.equal(result.value.videoMeaningStatus, 'modeled');
 });

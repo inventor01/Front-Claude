@@ -100,6 +100,40 @@ export function needsVisualFallback(row) {
   const words = input.combined.match(/[\p{L}\p{N}]{3,}/gu) || [];
   return words.length < 5 && !input.visual;
 }
+
+const COMPACT_MEANING_GENERIC_TOKENS = new Set([
+  'viral','fyp','fy','foryou','foryoupage',
+  'trend','trending','meme','memes',
+  'video','videos','tiktok','original','funny',
+  'follow','following','like','likes',
+  'share','shares','comment','comments',
+  'post','posts'
+]);
+
+export function hasCompactMeaningEvidence(row) {
+  const input = meaningInput(row);
+
+  const raw = clean(
+    [input.caption, input.spoken, input.visual]
+      .filter(Boolean)
+      .join(' '),
+    2400
+  )
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/@[\p{L}\p{N}_.-]+/gu, ' ');
+
+  const semanticTokens = [...new Set(
+    [...raw.matchAll(/#?([\p{L}][\p{L}'’-]{2,})/gu)]
+      .map(match => match[1].toLowerCase())
+      .filter(token => !COMPACT_MEANING_GENERIC_TOKENS.has(token))
+  )];
+
+  const hasEmoji = /\p{Extended_Pictographic}/u.test(raw);
+
+  return semanticTokens.length >= 2 ||
+    (semanticTokens.length >= 1 && hasEmoji);
+}
+
 export function enrichVideoMeaning(row, result) {
   const original = clean(row.sourceContent ?? row.content, 6200);
   const about = clean(result?.videoAbout, 360);
@@ -403,6 +437,97 @@ export async function analyzeVisualOne(context, row, provider) {
   }
 }
 
+
+export async function analyzeLowTextVideoMeaning(
+  context,
+  row,
+  provider,
+  {
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    compactTimeoutMs = 12000,
+    analyzeCompact = analyzeCompactTextOne,
+    analyzeVisual = analyzeVisualOne,
+  } = {}
+) {
+  let compactError = '';
+
+  if (hasCompactMeaningEvidence(row)) {
+    const compactTimeout = Math.max(
+      1000,
+      Math.min(
+        Number(timeoutMs) || DEFAULT_TIMEOUT_MS,
+        Number(compactTimeoutMs) || 12000
+      )
+    );
+
+    try {
+      const recovered = await runRecoveryAttempt(
+        compactTimeout,
+        signal => analyzeCompact(row, provider, signal)
+      );
+
+      if (!reusableVideoMeaning(recovered)) {
+        throw new Error(
+          'Compact low-text recovery returned weak or incomplete meaning.'
+        );
+      }
+
+      return {
+        value: recovered,
+        recoveryMethod:
+          recovered.videoMeaningMethod || 'semantic-compact-recovery'
+      };
+    } catch (reason) {
+      compactError = reason?.name === 'AbortError'
+        ? `Compact low-text recovery timed out after ${compactTimeout}ms.`
+        : clean(reason?.message || reason, 300);
+    }
+  }
+
+  try {
+    const recovered = await analyzeVisual(context, row, provider);
+
+    if (!reusableVideoMeaning(recovered)) {
+      throw new Error(
+        'Grounded visual fallback returned weak or incomplete meaning.'
+      );
+    }
+
+    return {
+      value: recovered,
+      recoveryMethod:
+        recovered.videoMeaningMethod || 'visual-fallback-model'
+    };
+  } catch (reason) {
+    const visualError = clean(
+      reason?.message || reason || 'Visual fallback failed.',
+      300
+    );
+
+    return {
+      value: {
+        videoAbout: '',
+        videoSubject: '',
+        videoEvent: '',
+        videoMeaningConfidence: 0,
+        videoMeaningMethod: 'visual-fallback-model',
+        videoMeaningStatus: 'failed',
+        videoMeaningAt: Date.now(),
+        videoMeaningError: clean(
+          [
+            compactError
+              ? `Compact low-text recovery: ${compactError}`
+              : '',
+            `Visual recovery: ${visualError}`
+          ].filter(Boolean).join(' | '),
+          700
+        )
+      },
+      recoveryMethod: null
+    };
+  }
+}
+
 export function planMeaningBatches(rows, batchSize, provider) {
   const limit = provider === 'ollama' ? Math.min(4, batchSize) : batchSize;
   const batches = [];
@@ -552,34 +677,43 @@ export class VideoMeaningEngineV27 {
         }
       }
       const visual=pending.filter(needsVisualFallback);
-      const visualResults=await mapWithConcurrency(visual,this.visualConcurrency,async(row)=>{
-        const timeout=Math.max(15000,Math.min(90000,Number(process.env.FRONT_VIDEO_MEANING_VISUAL_TIMEOUT_MS||this.timeoutMs)));
-        try{
-          return{row,value:await analyzeVisualOne(context,row,this.provider)};
-        }
-        catch(reason){
-          const message=reason?.name==='AbortError'
-            ? `Visual video meaning inference timed out after ${timeout}ms.`
-            : clean(reason?.message||reason,300);
-          return{
+
+      const visualResults=await mapWithConcurrency(
+        visual,
+        this.visualConcurrency,
+        async(row)=>{
+          const result=await analyzeLowTextVideoMeaning(
+            context,
             row,
-            value:{
-              videoAbout:'',
-              videoSubject:'',
-              videoEvent:'',
-              videoMeaningConfidence:0,
-              videoMeaningMethod:'visual-fallback-model',
-              videoMeaningStatus:'failed',
-              videoMeaningAt:Date.now(),
-              videoMeaningError:message
-            }
-          };
+            this.provider,
+            {timeoutMs:this.timeoutMs}
+          );
+          return {row,...result};
         }
-      });
-      for(const {row,value} of visualResults){
-        if(value.videoMeaningStatus==='failed'){stats.failed++;stats.errors.push(`${row.id}: ${value.videoMeaningError}`);}else{stats.visualFallback++;stats.completed++;}
-        if(reusableVideoMeaning(value))this.cache[this.key(row)]={at:Date.now(),value};
-        const enriched=enrichVideoMeaning(row,value);output.set(row.id,enriched);this.persist();if(onRow)await onRow(enriched,{...stats});
+      );
+
+      for(const {row,value,recoveryMethod} of visualResults){
+        if(value.videoMeaningStatus==='failed'){
+          stats.failed++;
+          stats.errors.push(`${row.id}: ${value.videoMeaningError}`);
+        }else{
+          if(recoveryMethod==='semantic-compact-recovery'){
+            stats.compactRecovery++;
+          }else{
+            stats.visualFallback++;
+          }
+          stats.completed++;
+        }
+
+        if(reusableVideoMeaning(value)){
+          this.cache[this.key(row)]={at:Date.now(),value};
+        }
+
+        const enriched=enrichVideoMeaning(row,value);
+        output.set(row.id,enriched);
+        this.persist();
+
+        if(onRow)await onRow(enriched,{...stats});
       }
     }
     stats.elapsedMs=Date.now()-startedAt;stats.status=stats.failed?'degraded':'complete';stats.errors=[...new Set(stats.errors)].slice(0,20);this.lastStats=stats;
