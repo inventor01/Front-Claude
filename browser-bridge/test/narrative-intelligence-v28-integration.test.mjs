@@ -35,3 +35,12 @@ test('chooseNarrativeTitle uses the v28 evidence gate', () => {
   ];
   assert.equal(chooseNarrativeTitle({}, evidence), null);
 });
+
+test('legacy helper keeps a specific topic fallback only when structured post evidence is absent', () => {
+  const rawRows = [
+    { id: '1', platform: 'X', author: 'a', content: 'NEO robot campaign promoted with X Ads' },
+    { id: '2', platform: 'X', author: 'b', content: 'NEO robot campaign uses X Ads for product launch' },
+  ];
+  assert.equal(chooseNarrativeTitle({ topic: 'grow', aliases: ['grow'] }, rawRows), null);
+  assert.equal(chooseNarrativeTitle({ topic: 'NEO robot X Ads campaign', aliases: ['grow'] }, rawRows), 'NEO Robot X Ads Campaign');
+});
