@@ -11,7 +11,7 @@ class MockWebSocket{
   close(){this.readyState=MockWebSocket.CLOSED;this.onclose?.();}
 }
 
-test('PumpPortal runtime survives Settings/watcher unmount and only explicit stop closes the socket',()=>{
+test('PumpPortal runtime survives Settings/watcher unmount and subscribes once to creations plus migrations',()=>{
   const store=new Map([['front.pumpPortalListenerEnabled.v2','true']]);
   const listeners=new Map();
   globalThis.WebSocket=MockWebSocket;
@@ -28,15 +28,18 @@ test('PumpPortal runtime survives Settings/watcher unmount and only explicit sto
   const first=MockWebSocket.instances[0];
   assert.equal(first.url,'wss://pumpportal.fun/api/data');
   first.open();
-  assert.deepEqual(first.sent,[{method:'subscribeNewToken'}]);
+  assert.deepEqual(first.sent,[{method:'subscribeNewToken'},{method:'subscribeMigration'}]);
   first.message({txType:'create',mint:'mint1',name:'Test Coin'});
-  assert.equal(messages.length,1);
+  first.message({txType:'migrate',mint:'mint1',name:'Test Coin',pool:'raydium'});
+  assert.equal(messages.length,2);
   assert.equal(states.at(-1)?.connected,true);
+  assert.equal(states.at(-1)?.status,'Connected · creations + migrations');
 
   const repeatedEnable=setPumpPortalRuntimeEnabled(true);
-  assert.equal(repeatedEnable.status,'Connected · creations only');
+  assert.equal(repeatedEnable.status,'Connected · creations + migrations');
   assert.equal(repeatedEnable.connected,true);
   assert.equal(MockWebSocket.instances.length,1,'repeated enable must not restart or duplicate an open socket');
+  assert.deepEqual(first.sent,[{method:'subscribeNewToken'},{method:'subscribeMigration'}],'repeated enable must not duplicate subscriptions on the same socket');
 
   unsubscribeMessages();unsubscribeState();
   assert.equal(first.readyState,MockWebSocket.OPEN,'UI unmount must not close the shared socket');
