@@ -35,8 +35,19 @@ function titleCase(value) {
   }).join(' ');
 }
 
+function legacySpecificTopicTitle(topic = {}) {
+  const candidates = [topic?.topic, ...(Array.isArray(topic?.aliases) ? topic.aliases : [])]
+    .map((value) => clean(value, 100))
+    .filter((value) => value && !isGenericNarrativeLabel(value))
+    .sort((a, b) => words(b).length - words(a).length || b.length - a.length);
+  return candidates[0] ? titleCase(candidates[0]) : null;
+}
+
 export function chooseNarrativeTitle(topic, rows = []) {
-  return buildNarrativeTitleIntelligenceV28(topic, rows)?.title || null;
+  const verified = buildNarrativeTitleIntelligenceV28(topic, rows)?.title || null;
+  if (verified) return verified;
+  const hasStructuredEvidence = rows.some((row) => clean(row?.postSubject || row?.postEvent || row?.semanticNarrativeKey, 180));
+  return hasStructuredEvidence ? null : legacySpecificTopicTitle(topic);
 }
 
 function rowTime(row) {
