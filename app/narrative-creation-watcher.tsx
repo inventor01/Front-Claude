@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { classifyAlias } from '@/lib/coin-matching';
 import { coinLinks } from '@/lib/coin-intelligence';
-import { ExternalLink, Radio } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, Radio } from 'lucide-react';
 import { isPumpPortalCreation, normalizeLaunchName } from '@/lib/live';
 import { ensurePumpPortalRuntime, setPumpPortalRuntimeEnabled, subscribePumpPortalMessages, subscribePumpPortalRuntime, type PumpPortalWireEvent } from './pumpportal-client-runtime.mjs';
 
@@ -15,6 +15,7 @@ type LifecycleHit = { mint:string; name:string; symbol?:string; seen:number; eve
 const MATCH_KEY='front.narrativeCreationMatches.v1';
 const WATCH_KEY='front.launchWatches.v1';
 const HIT_KEY='front.launchHits.v2';
+const PANEL_KEY='front.coinLifecycleCollapsed.v1';
 const CONTROL_EVENT='front-pumpportal-control';
 const STATE_EVENT='front-pumpportal-state';
 const WATCH_EVENT='front-pumpportal-watches-changed';
@@ -28,6 +29,7 @@ export default function NarrativeCreationWatcher(){
  const [matches,setMatches]=useState<Match[]>([]);
  const [hits,setHits]=useState<LifecycleHit[]>([]);
  const [status,setStatus]=useState('Starting');
+ const [collapsed,setCollapsed]=useState(false);
  const cardsRef=useRef<NarrativeCard[]>([]);
  const matchesRef=useRef<Match[]>([]);
  const hitsRef=useRef<LifecycleHit[]>([]);
@@ -50,6 +52,18 @@ export default function NarrativeCreationWatcher(){
  const addLifecycleHit=useCallback((hit:LifecycleHit)=>{
   storeHits((current)=>[hit,...current.filter((item)=>!(item.mint===hit.mint&&item.event===hit.event))]);
  },[storeHits]);
+ const toggleCollapsed=useCallback(()=>{
+  setCollapsed((current)=>{
+   const next=!current;
+   localStorage.setItem(PANEL_KEY,next?'1':'0');
+   return next;
+  });
+ },[]);
+
+ useEffect(()=>{
+  const hydratePanel=window.setTimeout(()=>setCollapsed(localStorage.getItem(PANEL_KEY)==='1'),0);
+  return()=>window.clearTimeout(hydratePanel);
+ },[]);
 
  useEffect(()=>{
   const savedMatches=readArray<Match>(MATCH_KEY).slice(0,20);
@@ -133,9 +147,17 @@ export default function NarrativeCreationWatcher(){
  const visibleHits=hits.slice(0,3);
  const visibleMatches=matches.filter((match)=>!visibleHits.some((hit)=>hit.mint===match.mint&&hit.event==='create')).slice(0,Math.max(0,3-visibleHits.length));
  if(!visibleHits.length&&!visibleMatches.length)return null;
- return <aside style={{position:'fixed',right:20,bottom:78,zIndex:68,width:'min(400px,calc(100vw - 28px))',background:'#101216',color:'#f5f5f5',border:'1px solid #d5ff4855',borderRadius:14,padding:12,boxShadow:'0 18px 50px #0008'}}>
-  <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}><strong><Radio size={13} style={{display:'inline',verticalAlign:'-2px'}}/> COIN LIFECYCLE</strong><span style={{opacity:.65}}>{status}</span></div>
-  {visibleHits.map((hit)=>{const links=coinLinks(hit.mint);return <div key={`${hit.event}:${hit.mint}`} style={{marginTop:9,paddingTop:9,borderTop:'1px solid #ffffff18',display:'grid',gap:4}}><strong>{hit.event==='migrate'?'GRADUATED':'NEW'} · {hit.name}{hit.symbol?` · $${hit.symbol}`:''}</strong><div style={{fontSize:11,opacity:.65}}>{hit.event==='migrate'?`Migration observed${hit.pool?` · ${hit.pool}`:''}`:'Pump.fun creation observed'} · {new Date(hit.seen).toLocaleTimeString()}</div><div style={{fontSize:12,marginTop:4,display:'flex',gap:10,flexWrap:'wrap'}}><a href={links.pumpUrl} target="_blank" rel="noreferrer">Pump.fun <ExternalLink size={11} style={{display:'inline'}}/></a><a href={links.axiomUrl} target="_blank" rel="noreferrer">Axiom <ExternalLink size={11} style={{display:'inline'}}/></a><a href={links.dexScreenerUrl} target="_blank" rel="noreferrer">DexScreener <ExternalLink size={11} style={{display:'inline'}}/></a><button type="button" onClick={()=>void navigator.clipboard?.writeText(hit.mint)} style={{fontSize:12}}>Copy CA</button></div></div>;})}
-  {visibleMatches.map((hit)=>{const links=coinLinks(hit.mint);return <div key={`match:${hit.mint}`} style={{marginTop:9,paddingTop:9,borderTop:'1px solid #ffffff18',display:'grid',gap:4}}><strong>{hit.name}{hit.symbol?` · $${hit.symbol}`:''}</strong><div style={{fontSize:12,opacity:.78}}>{hit.matchConfidence}% match · {hit.narrative}</div><div style={{fontSize:11,opacity:.62}}>{hit.matchReason}</div>{hit.marketCapSol!==undefined&&<div style={{fontSize:12}}>Creation event MC: {hit.marketCapSol.toLocaleString(undefined,{maximumFractionDigits:2})} SOL</div>}<div style={{fontSize:11,opacity:.6}}>Observed {new Date(hit.seen).toLocaleTimeString()} · {hit.mint.slice(0,7)}…{hit.mint.slice(-5)}</div><div style={{fontSize:12,marginTop:4,display:'flex',gap:10,flexWrap:'wrap'}}><a href={links.pumpUrl} target="_blank" rel="noreferrer">Pump.fun <ExternalLink size={11} style={{display:'inline'}}/></a><a href={links.axiomUrl} target="_blank" rel="noreferrer">Axiom <ExternalLink size={11} style={{display:'inline'}}/></a><a href={links.dexScreenerUrl} target="_blank" rel="noreferrer">DexScreener <ExternalLink size={11} style={{display:'inline'}}/></a><button type="button" onClick={()=>void navigator.clipboard?.writeText(hit.mint)} style={{fontSize:12}}>Copy CA</button></div></div>;})}
+ return <aside style={{position:'fixed',right:20,bottom:78,zIndex:68,width:'min(400px,calc(100vw - 28px))',background:'#101216',color:'#f5f5f5',border:'1px solid #d5ff4855',borderRadius:14,padding:collapsed?'9px 10px':12,boxShadow:'0 18px 50px #0008',transition:'padding 140ms ease'}}>
+  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,fontSize:12}}>
+   <strong><Radio size={13} style={{display:'inline',verticalAlign:'-2px'}}/> COIN LIFECYCLE</strong>
+   <div style={{display:'flex',alignItems:'center',gap:8}}>
+    <span style={{opacity:.65,whiteSpace:'nowrap'}}>{status}</span>
+    <button type="button" onClick={toggleCollapsed} aria-label={collapsed?'Expand Coin Lifecycle':'Collapse Coin Lifecycle'} aria-expanded={!collapsed} title={collapsed?'Expand Coin Lifecycle':'Collapse Coin Lifecycle'} style={{display:'grid',placeItems:'center',width:28,height:26,borderRadius:8,border:'1px solid #ffffff24',background:'#ffffff08',color:'inherit',cursor:'pointer',padding:0}}>{collapsed?<ChevronUp size={15}/>:<ChevronDown size={15}/>}</button>
+   </div>
+  </div>
+  {!collapsed&&<>
+   {visibleHits.map((hit)=>{const links=coinLinks(hit.mint);return <div key={`${hit.event}:${hit.mint}`} style={{marginTop:9,paddingTop:9,borderTop:'1px solid #ffffff18',display:'grid',gap:4}}><strong>{hit.event==='migrate'?'GRADUATED':'NEW'} · {hit.name}{hit.symbol?` · $${hit.symbol}`:''}</strong><div style={{fontSize:11,opacity:.65}}>{hit.event==='migrate'?`Migration observed${hit.pool?` · ${hit.pool}`:''}`:'Pump.fun creation observed'} · {new Date(hit.seen).toLocaleTimeString()}</div><div style={{fontSize:12,marginTop:4,display:'flex',gap:10,flexWrap:'wrap'}}><a href={links.pumpUrl} target="_blank" rel="noreferrer">Pump.fun <ExternalLink size={11} style={{display:'inline'}}/></a><a href={links.axiomUrl} target="_blank" rel="noreferrer">Axiom <ExternalLink size={11} style={{display:'inline'}}/></a><a href={links.dexScreenerUrl} target="_blank" rel="noreferrer">DexScreener <ExternalLink size={11} style={{display:'inline'}}/></a><button type="button" onClick={()=>void navigator.clipboard?.writeText(hit.mint)} style={{fontSize:12}}>Copy CA</button></div></div>;})}
+   {visibleMatches.map((hit)=>{const links=coinLinks(hit.mint);return <div key={`match:${hit.mint}`} style={{marginTop:9,paddingTop:9,borderTop:'1px solid #ffffff18',display:'grid',gap:4}}><strong>{hit.name}{hit.symbol?` · $${hit.symbol}`:''}</strong><div style={{fontSize:12,opacity:.78}}>{hit.matchConfidence}% match · {hit.narrative}</div><div style={{fontSize:11,opacity:.62}}>{hit.matchReason}</div>{hit.marketCapSol!==undefined&&<div style={{fontSize:12}}>Creation event MC: {hit.marketCapSol.toLocaleString(undefined,{maximumFractionDigits:2})} SOL</div>}<div style={{fontSize:11,opacity:.6}}>Observed {new Date(hit.seen).toLocaleTimeString()} · {hit.mint.slice(0,7)}…{hit.mint.slice(-5)}</div><div style={{fontSize:12,marginTop:4,display:'flex',gap:10,flexWrap:'wrap'}}><a href={links.pumpUrl} target="_blank" rel="noreferrer">Pump.fun <ExternalLink size={11} style={{display:'inline'}}/></a><a href={links.axiomUrl} target="_blank" rel="noreferrer">Axiom <ExternalLink size={11} style={{display:'inline'}}/></a><a href={links.dexScreenerUrl} target="_blank" rel="noreferrer">DexScreener <ExternalLink size={11} style={{display:'inline'}}/></a><button type="button" onClick={()=>void navigator.clipboard?.writeText(hit.mint)} style={{fontSize:12}}>Copy CA</button></div></div>;})}
+  </>}
  </aside>;
 }

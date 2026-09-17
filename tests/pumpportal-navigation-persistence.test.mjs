@@ -57,3 +57,19 @@ test('browser launch alert permission and creation notification wiring stay inta
   assert.match(runtime,/method:'subscribeNewToken'/,'browser alerts must receive PumpPortal creation events');
   assert.doesNotMatch(runtime,/method:'subscribeMigration'/,'browser runtime intentionally stays creation-only; migrations are handled separately');
 });
+
+test('Coin Lifecycle can collapse without unmounting live lifecycle monitoring',()=>{
+  const watcher=read('app/narrative-creation-watcher.tsx');
+
+  assert.match(watcher,/const PANEL_KEY='front\.coinLifecycleCollapsed\.v1'/,'collapse preference should have a dedicated persisted key');
+  assert.match(watcher,/const \[collapsed,setCollapsed\]=useState\(false\)/,'panel needs independent presentation state');
+  assert.match(watcher,/localStorage\.getItem\(PANEL_KEY\)==='1'/,'saved collapse preference should be restored');
+  assert.match(watcher,/localStorage\.setItem\(PANEL_KEY,next\?'1':'0'\)/,'collapse preference should persist');
+  assert.match(watcher,/aria-label=\{collapsed\?'Expand Coin Lifecycle':'Collapse Coin Lifecycle'\}/,'toggle must remain accessible');
+  assert.match(watcher,/aria-expanded=\{!collapsed\}/,'toggle must expose expanded state');
+  assert.match(watcher,/\{!collapsed&&<>/,'only panel detail rows should be visually collapsed');
+
+  const subscription=watcher.indexOf('subscribePumpPortalMessages');
+  const collapsedRender=watcher.indexOf('{!collapsed&&<>');
+  assert.ok(subscription>=0&&collapsedRender>subscription,'PumpPortal subscription must stay outside the collapsed render branch');
+});
