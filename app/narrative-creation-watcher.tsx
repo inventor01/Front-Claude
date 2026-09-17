@@ -61,7 +61,8 @@ export default function NarrativeCreationWatcher(){
  },[]);
 
  useEffect(()=>{
-  setCollapsed(localStorage.getItem(PANEL_KEY)==='1');
+  const hydratePanel=window.setTimeout(()=>setCollapsed(localStorage.getItem(PANEL_KEY)==='1'),0);
+  return()=>window.clearTimeout(hydratePanel);
  },[]);
 
  useEffect(()=>{
