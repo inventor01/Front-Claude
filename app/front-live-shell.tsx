@@ -8,6 +8,7 @@ import styles from './front-live-shell.module.css';
 
 const BRIDGE = 'http://127.0.0.1:43981';
 const LIVE_SYNC_KEY='front.liveSync.v2';
+const VIEW_SESSION_KEY='front.dashboardViewSession.v1';
 
 type LiveEvidence = {
   id:string;
@@ -152,6 +153,7 @@ async function saveLive(evidence:LiveEvidence[],inferredTopics:LiveTopic[],scanO
 export default function FrontLiveShell(){
   const [live,setLive]=useState<LiveState|null>(null);
   const [refreshKey,setRefreshKey]=useState(0);
+  const [viewCount,setViewCount]=useState<number|null>(null);
   const [synced,setSynced]=useState(0);
   const [syncedEvidenceIds,setSyncedEvidenceIds]=useState<Set<string>>(()=>new Set());
   const [syncError,setSyncError]=useState('');
@@ -163,6 +165,42 @@ export default function FrontLiveShell(){
   const syncing=useRef(false);
   const wasActive=useRef(false);
   const scanAtRef=useRef<number|null>(null);
+
+  useEffect(()=>{
+    let cancelled=false;
+    const register=async()=>{
+      let sessionId='';
+      try{
+        sessionId=sessionStorage.getItem(VIEW_SESSION_KEY)||'';
+        if(!sessionId){
+          sessionId=crypto.randomUUID();
+          sessionStorage.setItem(VIEW_SESSION_KEY,sessionId);
+        }
+      }catch{
+        sessionId=crypto.randomUUID();
+      }
+
+      try{
+        const response=await fetch('/api/views',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({sessionId}),
+        });
+        const data=await response.json() as {count?:number};
+        const count=Number(data.count);
+        if(response.ok&&!cancelled&&Number.isFinite(count)&&count>=0)setViewCount(count);
+      }catch{
+        try{
+          const response=await fetch('/api/views',{cache:'no-store'});
+          const data=await response.json() as {count?:number};
+          const count=Number(data.count);
+          if(response.ok&&!cancelled&&Number.isFinite(count)&&count>=0)setViewCount(count);
+        }catch{}
+      }
+    };
+    void register();
+    return()=>{cancelled=true;};
+  },[]);
 
   useEffect(()=>{
     let stopped=false;
@@ -315,6 +353,6 @@ export default function FrontLiveShell(){
       </div>}
       {syncError&&<div className={styles.liveError}>{syncError}</div>}
     </section>}
-    <FrontDesk key={refreshKey}/>
+    <FrontDesk key={refreshKey} viewCount={viewCount}/>
   </>;
 }
