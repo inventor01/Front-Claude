@@ -19,10 +19,11 @@ function prep(sql,args=[]){return{bind:(...a)=>prep(sql,a),first:async()=>databa
 globalThis.testEnv={DB:{prepare:prep,batch:async(stmts)=>{database.exec('BEGIN');try{const r=[];for(const s of stmts)r.push(await s.run());database.exec('COMMIT');return r;}catch(e){database.exec('ROLLBACK');throw e;}}},FRONT_SETTINGS_KEY:Buffer.alloc(32,7).toString('base64')};
 globalThis.testUser={userId:'alice'};
 const viewCounter=await import(pathToFileURL(join(folder,'view-counter.mjs')));
+const viewNow=Date.now();
 assert.equal(viewCounter.normalizeViewSessionId('short'),null);
-assert.equal(await viewCounter.registerDashboardView(globalThis.testEnv.DB,'session_alpha_0001',now),1);
-assert.equal(await viewCounter.registerDashboardView(globalThis.testEnv.DB,'session_alpha_0001',now+1000),1,'same session must not double-count');
-assert.equal(await viewCounter.registerDashboardView(globalThis.testEnv.DB,'session_beta_000002',now+2000),2,'new session must increment the dashboard view count');
+assert.equal(await viewCounter.registerDashboardView(globalThis.testEnv.DB,'session_alpha_0001',viewNow),1);
+assert.equal(await viewCounter.registerDashboardView(globalThis.testEnv.DB,'session_alpha_0001',viewNow+1000),1,'same session must not double-count');
+assert.equal(await viewCounter.registerDashboardView(globalThis.testEnv.DB,'session_beta_000002',viewNow+2000),2,'new session must increment the dashboard view count');
 assert.equal(await viewCounter.dashboardViewCount(globalThis.testEnv.DB),2);
 console.log('PASS: durable dashboard view counter is idempotent per session and increments for new sessions.');
 const originalFetch=globalThis.fetch;
