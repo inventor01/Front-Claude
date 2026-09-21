@@ -1,16 +1,5 @@
 export const DASHBOARD_VIEW_SCOPE = 'dashboard';
 
-type BoundStatement = {
-  run(): Promise<unknown>;
-  first<T = Record<string, unknown>>(): Promise<T | null>;
-};
-
-type ViewDatabase = {
-  prepare(sql: string): {
-    bind(...values: unknown[]): BoundStatement;
-  };
-};
-
 export function normalizeViewSessionId(value: unknown) {
   if (typeof value !== 'string') return null;
   const sessionId = value.trim();
@@ -18,7 +7,7 @@ export function normalizeViewSessionId(value: unknown) {
   return sessionId;
 }
 
-export async function dashboardViewCount(database: ViewDatabase) {
+export async function dashboardViewCount(database: D1Database) {
   const row = await database
     .prepare('SELECT COUNT(*) AS count FROM front_page_views WHERE scope=?')
     .bind(DASHBOARD_VIEW_SCOPE)
@@ -28,7 +17,7 @@ export async function dashboardViewCount(database: ViewDatabase) {
 }
 
 export async function registerDashboardView(
-  database: ViewDatabase,
+  database: D1Database,
   sessionIdValue: unknown,
   observedAt = Date.now(),
 ) {
