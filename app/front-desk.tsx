@@ -6,7 +6,7 @@ import {
   Activity,
   ChevronDown,
   ChevronUp,
-
+  Eye,
   Flame,
   RefreshCw,
   Settings,
@@ -209,7 +209,7 @@ function CoinPill({coin}:{coin:Coin}){
   </span>;
 }
 
-export default function FrontDesk(){
+export default function FrontDesk({viewCount}:{viewCount:number|null}){
   const [feed,setFeed] = useState<Feed|null>(null);
   const [expanded,setExpanded] = useState<string|null>(null);
   const [details,setDetails] = useState<Record<string,Detail>>({});
@@ -371,6 +371,7 @@ export default function FrontDesk(){
     <div className={styles.statusbar}>
       <Activity size={14}/><span>{status}</span><span className={styles.dot}/>
       <span>Last evidence {stats?.lastSeen?`${ago(stats.lastSeen,renderAt)} ago`:'—'}</span>
+      <span><Eye size={13}/><b>{viewCount==null?'—':compact(viewCount)}</b> dashboard views</span>
       {feed?.learning&&<span>Private learning {feed.learning.examples} examples · {feed.learning.activeFeatures} active patterns</span>}
     </div>
 
