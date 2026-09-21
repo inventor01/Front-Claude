@@ -1,5 +1,21 @@
 # Front Bug / Fix Log
 
+## 2026-09-21 — Dashboard view counter was missing
+
+### Root cause
+Front had engagement/view metrics for discovered X and TikTok evidence, but it did not have a durable counter for views of the Front dashboard itself. A client-only counter would reset on refresh, while a naive increment inside the dashboard component would overcount because the dashboard intentionally remounts after completed scans and React can replay effects during development.
+
+### Permanent fix
+- Add a dedicated D1-backed `front_page_views` table keyed by dashboard scope + opaque browser-session ID.
+- Add authenticated `GET /api/views` and same-origin `POST /api/views` endpoints.
+- Generate and persist an opaque session ID in `sessionStorage`; repeated mounts, scan refreshes, and React effect replays reuse the same ID.
+- Use `INSERT OR IGNORE` so the server, not the browser, is the source of truth for idempotency.
+- Do not store email, name, content, IP address, or other viewer profile data in the counter table.
+- Display the durable total in the main Front status bar.
+
+### Regression / release gate
+The SQL integration test now verifies that the same session remains one view and a distinct session increments the total. The normal migration replay, D1 migration, typecheck, lint, build, browser-bridge, and deploy-bundle gates must also pass before merge.
+
 ## 2026-09-11 — Ranking could not learn from verified outcomes
 
 ### Root cause
