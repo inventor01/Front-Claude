@@ -133,6 +133,10 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='GET'&&cjPath==='/product/variant/query'){
     return cj(res,[{vid:'CJ-VARIANT-1',variantSku:'CJ-CD-V1',variantNameEn:'Black',variantSellPrice:8,variantImage:''}]);
   }
+  if(req.method==='GET'&&cjPath==='/product/variant/queryByVid'){
+    return cj(res,{vid:'CJ-VARIANT-1',pid:'CJ-PRODUCT-1',variantSku:'CJ-CD-V1',variantNameEn:'Black',
+      variantSellPrice:8,inventories:[{countryCode:'CN',totalInventory:500,cjInventory:100,factoryInventory:400,verifiedWarehouse:1}]});
+  }
   if(req.method==='GET'&&cjPath==='/product/stock/queryByVid'){
     return cj(res,[{totalInventoryNum:500,countryCode:'CN',verifiedWarehouse:1,warehouseName:'QA Warehouse'}]);
   }
