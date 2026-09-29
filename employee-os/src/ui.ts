@@ -187,17 +187,56 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     document.getElementById('content').innerHTML=h;bindView();
   }
 
+  function blockerProvider(x){
+    var text=[x.objective||'',x.reason||'',((x.blockers||[]).join(' '))].join(' ');
+    if(/Shopify/i.test(text))return 'Shopify';
+    if(/Creative rendering|renderer|Runway/i.test(text))return 'Runway';
+    if(/Social publishing|TikTok|Instagram/i.test(text))return 'Social publishing';
+    if(/EMAIL support|customer email|support provider/i.test(text))return 'Customer email';
+    if(/CJ|fulfillment/i.test(text))return 'CJdropshipping';
+    return '';
+  }
+  function collapseWork(rows){
+    var grouped={};
+    (rows||[]).forEach(function(w){
+      var key=[w.objective||'',w.status||'',w.assigned_employee_slug||'',JSON.stringify(w.blockers||[])].join('||');
+      if(!grouped[key])grouped[key]={item:w,count:0,projects:{}};
+      grouped[key].count++;
+      if(w.project_id)grouped[key].projects[w.project_id]=true;
+    });
+    return Object.keys(grouped).map(function(k){
+      var g=grouped[k];g.projectCount=Object.keys(g.projects).length;return g;
+    });
+  }
+  function connectionButton(x){
+    var provider=blockerProvider(x);
+    return provider?'<button class="secondary open-connections" data-provider="'+esc(provider)+'">Connect '+esc(provider)+'</button>':'';
+  }
   function renderToday(){
-    var decisions=(briefing&&briefing.decisionsNeeded)||[], attention=(briefing&&briefing.attention)||[], projects=(briefing&&briefing.activeProjects)||[];
-    var urgent=decisions.length?decisions.length+' decision'+(decisions.length===1?'':'s')+' need you.':attention.length?attention.length+' blocker'+(attention.length===1?'':'s')+' visible.':'Nothing urgent needs you.';
-    return '<div class="hero"><h2>'+esc(urgent)+'</h2><p>Give Ava an outcome. The company persists the work, delegates it, and surfaces only evidence-backed results and real blockers.</p></div>'+
-    '<div class="grid"><div class="card"><span class="metric">'+projects.length+'</span><span class="label">Active projects</span></div><div class="card"><span class="metric">'+decisions.length+'</span><span class="label">Decisions</span></div><div class="card"><span class="metric">'+attention.length+'</span><span class="label">Attention items</span></div></div>'+
+    var decisions=(briefing&&briefing.decisionsNeeded)||[], rawAttention=(briefing&&briefing.attention)||[], projects=(briefing&&briefing.activeProjects)||[];
+    var attention=collapseWork(rawAttention);
+    var urgent=decisions.length?decisions.length+' decision'+(decisions.length===1?'':'s')+' need you.':attention.length?attention.length+' unique blocker'+(attention.length===1?'':'s')+' visible.':'Nothing urgent needs you.';
+    return '<div class="hero"><h2>'+esc(urgent)+'</h2><p>Give Ava an outcome. The company persists the work, delegates it, and surfaces only evidence-backed results and real blockers. Repeated historical runs are collapsed here instead of shown as duplicate emergencies.</p></div>'+
+    '<div class="grid"><div class="card"><span class="metric">'+projects.length+'</span><span class="label">Active projects</span></div><div class="card"><span class="metric">'+decisions.length+'</span><span class="label">Decisions</span></div><div class="card"><span class="metric">'+attention.length+'</span><span class="label">Unique blockers</span></div></div>'+
     '<h3 class="section-title">Launch from a reference link</h3><div class="card"><form id="linkLaunchQuickForm" class="form"><input id="linkLaunchQuickUrl" placeholder="Paste Instagram Reel, TikTok, X, YouTube, or product-demo URL"/><button class="action">Reverse-engineer and build venture</button></form><p>Employee OS preserves the source, identifies the product, reverse-sources it, and sends the creative structure to Maya without copying the creator\\'s exact assets.</p></div>'+
     '<h3 class="section-title">Or give Ava an objective</h3><div class="card"><form id="objectiveForm" class="form"><textarea id="objectiveText">Find a product that is demonstrably selling now and build the business from start to finish. Verify demand, supplier viability, stock, U.S. freight, landed economics, contentability, and risk. Build the brand and Shopify storefront, connect fulfillment, create the creative and distribution system, and continue until the business is launch-ready. Only bring me decisions or external actions that genuinely require owner approval. Never assume unknown facts and never call work complete without evidence.</textarea><input id="objectiveQuery" placeholder="Optional focus — leave blank and Rowan chooses the product from current evidence"/><button class="action">Start durable work</button></form></div>'+
-    '<h3 class="section-title">What needs me</h3><div class="stack">'+(decisions.concat(attention).slice(0,8).map(renderAttention).join('')||'<div class="empty">No owner decision is waiting.</div>')+'</div>';
+    '<h3 class="section-title">What needs me</h3><div class="stack">'+(decisions.slice(0,8).map(renderAttention).concat(attention.slice(0,8).map(function(g){return renderAttention(g.item,g.count,g.projectCount);})).join('')||'<div class="empty">No owner decision is waiting.</div>')+'</div>';
   }
-  function renderAttention(x){return '<div class="item attention"><div class="row"><b>'+esc(x.action_type||x.objective||'Attention')+'</b>'+badge(x.status||x.risk)+'</div><p>'+esc(x.reason||((x.blockers||[]).join(' · ')))+'</p></div>';}
-  function renderWork(){return '<div class="stack">'+((state.workOrders||[]).map(function(w){return '<div class="item"><div class="row"><b>'+esc(w.objective)+'</b>'+badge(w.status)+'</div><p>Assigned to '+esc(w.assigned_employee_slug)+' · '+esc((w.blockers||[]).join(' · '))+'</p></div>';}).join('')||'<div class="empty">No work orders yet.</div>')+'</div>';}
+  function renderAttention(x,count,projectCount){
+    var repeat=count&&count>1?'<span class="badge">'+esc(count)+' runs collapsed</span>':'';
+    var meta=repeat+(projectCount&&projectCount>1?' <span class="muted">across '+esc(projectCount)+' projects</span>':'');
+    return '<div class="item attention"><div class="row"><b>'+esc(x.action_type||x.objective||'Attention')+'</b><div>'+meta+' '+badge(x.status||x.risk)+'</div></div><p>'+esc(x.reason||((x.blockers||[]).join(' · ')))+'</p>'+connectionButton(x)+'</div>';
+  }
+  function renderWork(){
+    var groups=collapseWork((state&&state.workOrders)||[]);
+    var required={};groups.forEach(function(g){var p=blockerProvider(g.item);if(p&&/^BLOCKED/.test(String(g.item.status||'')))required[p]=true;});
+    var providers=Object.keys(required);
+    var summary=providers.length?'<div class="error"><b>'+esc(providers.length)+' external connection'+(providers.length===1?'':'s')+' blocking work:</b> '+esc(providers.join(', '))+'. Historical repeats are collapsed below.</div>':'';
+    return summary+'<div class="stack">'+(groups.map(function(g){
+      var w=g.item,repeat=g.count>1?'<span class="badge">'+esc(g.count)+' runs collapsed</span>':'';
+      return '<div class="item"><div class="row"><b>'+esc(w.objective)+'</b><div>'+repeat+' '+badge(w.status)+'</div></div><p>Assigned to '+esc(w.assigned_employee_slug)+' · '+esc((w.blockers||[]).join(' · '))+'</p>'+connectionButton(w)+'</div>';
+    }).join('')||'<div class="empty">No work orders yet.</div>')+'</div>';
+  }
   function renderTeam(){return '<div class="grid two">'+(state.employees||[]).map(function(e){return '<div class="card employee"><div class="avatar">'+esc(e.name.slice(0,1))+'</div><div><div class="row"><b>'+esc(e.name)+'</b>'+badge(e.status)+'</div><p>'+esc(e.title)+'</p><span class="muted">'+esc(e.mission)+'</span></div></div>';}).join('')+'</div>';}
   function packageCard(title,pkg,extra){
     if(!pkg)return '<div class="card package"><h3>'+esc(title)+'</h3><p>Not created yet.</p></div>';
@@ -356,6 +395,12 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
       await request('/api/company/'+companyId+'/ventures/from-link',{method:'POST',body:JSON.stringify({url:url,constraints:constraints||[],budgetCents:null})});
       notice('Link-to-Launch started. Work will continue in the background.');setTimeout(load,1400);
     }
+    document.querySelectorAll('.open-connections').forEach(function(b){b.onclick=function(){
+      view='connections';
+      document.querySelectorAll('#nav button').forEach(function(n){n.classList.toggle('active',n.dataset.view==='connections');});
+      render();
+      notice('Open the '+(b.dataset.provider||'required')+' connection below to resume blocked work automatically.');
+    };});
     var quick=document.getElementById('linkLaunchQuickForm');
     if(quick)quick.onsubmit=async function(e){e.preventDefault();try{await submitLinkLaunch(document.getElementById('linkLaunchQuickUrl').value,[]);}catch(err){notice(err.message,'error');}};
     document.querySelectorAll('.link-retry').forEach(function(b){b.onclick=async function(){try{
