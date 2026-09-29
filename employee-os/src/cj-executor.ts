@@ -159,7 +159,7 @@ function flattenProducts(data:any){
 }
 
 export async function searchCJ(companyId:string,query:string){
-  const data=await cjGet<any>(companyId,'/product/listV2',{page:1,size:20,keyWord:query});
+  const data=await cjGet<any>(companyId,'/product/listV2',{page:1,size:20,keyWord:query,verifiedWarehouse:1,startInventory:1});
   const products=flattenProducts(data).map((p:any)=>({
     id:String(p.id||p.pid||''),
     name:String(p.nameEn||p.productNameEn||p.name||''),
@@ -168,7 +168,8 @@ export async function searchCJ(companyId:string,query:string){
     sellPrice:String(p.sellPrice||p.nowPrice||''),
     sourcePrice:minNumber(p.nowPrice||p.sellPrice),
     listedNum:Number(p.listedNum||0),
-    totalInventory:Number(p.totalVerifiedInventory??p.warehouseInventoryNum??0),
+    verifiedInventory:Number(p.totalVerifiedInventory||0),
+    totalInventory:Number(p.warehouseInventoryNum??p.totalVerifiedInventory??0),
     supplierName:String(p.supplierName||''),
     matchScore:matchScore(query,String(p.nameEn||p.productNameEn||p.name||''))
   })).filter((p:any)=>p.id&&p.name).sort((a:any,b:any)=>b.matchScore-a.matchScore||b.listedNum-a.listedNum);
@@ -200,14 +201,27 @@ export async function mapCandidateToCJ(companyId:string,candidateId:string){
   })).filter((v:any)=>v.vid&&v.price>0).sort((a:any,b:any)=>a.price-b.price)[0];
   if(!variant)throw new Error('BLOCKED_SUPPLIER_MAPPING: CJ product has no priced variant.');
 
-  const stock=await cjGet<any[]>(companyId,'/product/stock/queryByVid',{vid:variant.vid});
+  const [stock,variantDetail]=await Promise.all([
+    cjGet<any[]>(companyId,'/product/stock/queryByVid',{vid:variant.vid}),
+    cjGet<any>(companyId,'/product/variant/queryByVid',{vid:variant.vid,features:'enable_inventory'})
+  ]);
   const warehouses=Array.isArray(stock)?stock:[];
   const totalInventory=warehouses.reduce((sum:number,w:any)=>sum+Math.max(0,Number(w.totalInventoryNum||0)),0);
-  const verifiedInventory=warehouses.filter((w:any)=>Number(w.verifiedWarehouse||1)===1)
-    .reduce((sum:number,w:any)=>sum+Math.max(0,Number(w.totalInventoryNum||0)),0);
   if(totalInventory<=0)throw new Error('BLOCKED_SUPPLIER_STOCK: CJ variant currently shows no inventory.');
 
-  const origin=String(warehouses.find((w:any)=>Number(w.totalInventoryNum||0)>0)?.countryCode||'CN');
+  const detailInventories=Array.isArray(variantDetail?.inventories)?variantDetail.inventories:[];
+  const verifiedInventory=detailInventories
+    .filter((w:any)=>Number(w.verifiedWarehouse)===1)
+    .reduce((sum:number,w:any)=>sum+Math.max(0,Number(w.totalInventory||w.totalInventoryNum||0)),0);
+  if(verifiedInventory<=0){
+    throw new Error('BLOCKED_SUPPLIER_STOCK: CJ variant does not show verified warehouse inventory.');
+  }
+
+  const origin=String(
+    detailInventories.find((w:any)=>Number(w.verifiedWarehouse)===1&&Number(w.totalInventory||w.totalInventoryNum||0)>0)?.countryCode||
+    warehouses.find((w:any)=>Number(w.totalInventoryNum||0)>0)?.countryCode||
+    'CN'
+  );
   const freight=await cjPost<any>(companyId,'/logistic/freightCalculate',{
     startCountryCode:origin,endCountryCode:'US',products:[{quantity:1,vid:variant.vid}]
   });
@@ -220,7 +234,7 @@ export async function mapCandidateToCJ(companyId:string,candidateId:string){
   const landed=variant.price+minFreight;
   const market=Number(candidate.observed_market_price||0);
   const marginPct=market>0?((market-landed)/market)*100:null;
-  const status=verifiedInventory>0?'VERIFIED':'VERIFIED_WITH_UNVERIFIED_STOCK';
+  const status='VERIFIED';
   const mapping=await pool.query(`INSERT INTO supplier_product_mappings(
     company_id,candidate_id,provider,supplier_product_id,supplier_variant_id,supplier_sku,product_name,variant_name,
     source_price,stock_state,stock_detail,freight_state,freight_options,match_score,status,verified_at,
@@ -235,7 +249,7 @@ export async function mapCandidateToCJ(companyId:string,candidateId:string){
     landed_cost_estimate=EXCLUDED.landed_cost_estimate,updated_at=now()
   RETURNING *`,[
     companyId,candidateId,best.id,variant.vid,variant.sku,best.name,variant.name,variant.price,
-    verifiedInventory>0?'VERIFIED_IN_STOCK':'IN_STOCK_UNVERIFIED',
+    'VERIFIED_IN_STOCK',
     JSON.stringify({warehouses,totalInventory,verifiedInventory,origin}),
     JSON.stringify(options),best.matchScore,status,minFreight,landed
   ]);
@@ -249,7 +263,7 @@ export async function mapCandidateToCJ(companyId:string,candidateId:string){
 
 export async function requireVerifiedCJMapping(companyId:string,candidateId:string){
   const r=await pool.query(`SELECT * FROM supplier_product_mappings WHERE company_id=$1 AND candidate_id=$2 AND provider='CJ'
-    AND status IN ('VERIFIED','VERIFIED_WITH_UNVERIFIED_STOCK') AND freight_state='VERIFIED'
+    AND status='VERIFIED' AND stock_state='VERIFIED_IN_STOCK' AND freight_state='VERIFIED'
     ORDER BY verified_at DESC LIMIT 1`,[companyId,candidateId]);
   if(!r.rowCount)throw new Error('BLOCKED_FULFILLMENT: A verified CJ supplier mapping with freight evidence is required before publication.');
   const row=r.rows[0];
