@@ -5,6 +5,8 @@ import { pool,tx } from './db.js';
 import { hashPassword,verifyPassword,signSession,requireUser,requireCompany } from './auth.js';
 import { commandCenterHtml } from './ui.js';
 import { ensureAcademyDefaults,ingestTrainingSource,discoverTools,recommendVerificationTools,getEmployeeIntelligenceContext } from './academy.js';
+import { connectShopify,disconnectShopify,shopifyStatus } from './shopify-executor.js';
+import { compileSkill,testSkill } from './skills-engine.js';
 
 const app=Fastify({logger:true});
 await app.register(cors,{origin:true});
@@ -81,7 +83,7 @@ app.get('/api/company/:companyId/execution',async req=>{
 app.get('/api/company/:companyId/academy',async req=>{
   const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
   await ensureAcademyDefaults(companyId);
-  const [profiles,sources,lessons,tools,discoveries,claims]=await Promise.all([
+  const [profiles,sources,lessons,tools,discoveries,claims,skills,skillTests]=await Promise.all([
     pool.query('SELECT * FROM reasoning_profiles WHERE company_id=$1 ORDER BY employee_slug',[companyId]),
     pool.query(`SELECT id,employee_slug,source_type,title,source_url,source_author,source_quality,status,tags,ingest_metadata,created_at,updated_at
       FROM training_sources WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200`,[companyId]),
@@ -90,9 +92,11 @@ app.get('/api/company/:companyId/academy',async req=>{
       WHERE l.company_id=$1 ORDER BY l.created_at DESC LIMIT 500`,[companyId]),
     pool.query('SELECT * FROM tool_catalog WHERE company_id=$1 ORDER BY verification_grade,name',[companyId]),
     pool.query('SELECT * FROM tool_discovery_runs WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
-    pool.query('SELECT * FROM verification_claims WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200',[companyId])
+    pool.query('SELECT * FROM verification_claims WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200',[companyId]),
+    pool.query('SELECT * FROM skill_definitions WHERE company_id=$1 ORDER BY updated_at DESC LIMIT 200',[companyId]),
+    pool.query('SELECT * FROM skill_test_runs WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200',[companyId])
   ]);
-  return {profiles:profiles.rows,sources:sources.rows,lessons:lessons.rows,tools:tools.rows,discoveries:discoveries.rows,claims:claims.rows};
+  return {profiles:profiles.rows,sources:sources.rows,lessons:lessons.rows,tools:tools.rows,discoveries:discoveries.rows,claims:claims.rows,skills:skills.rows,skillTests:skillTests.rows};
 });
 
 app.get('/api/company/:companyId/academy/employees/:employeeSlug/context',async req=>{
@@ -185,6 +189,61 @@ app.post('/api/company/:companyId/academy/claims',async(req,reply)=>{
       'No known verification tool matched. Run tool discovery before making the claim.'
   ]);
   return reply.code(201).send({claim:r.rows[0],recommended});
+});
+
+app.post('/api/company/:companyId/academy/skills/compile',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({
+    employeeSlug:z.string().min(1).max(60).nullable().default(null),
+    name:z.string().min(3).max(160),
+    purpose:z.string().min(10).max(2000),
+    sourceIds:z.array(z.string().uuid()).max(50).default([])
+  }).parse(req.body);
+  const result=await compileSkill({
+    companyId,userId,employeeSlug:body.employeeSlug,name:body.name,purpose:body.purpose,sourceIds:body.sourceIds
+  });
+  return reply.code(201).send(result);
+});
+
+app.post('/api/company/:companyId/academy/skills/:skillId/test',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId,skillId}=req.params as {companyId:string;skillId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return testSkill(companyId,skillId);
+});
+
+app.get('/api/company/:companyId/integrations/shopify',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  return shopifyStatus(companyId);
+});
+
+app.post('/api/company/:companyId/integrations/shopify/connect',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({
+    storeDomain:z.string().min(5).max(255),
+    accessToken:z.string().min(10).max(500)
+  }).parse(req.body);
+  const result=await connectShopify({companyId,storeDomain:body.storeDomain,accessToken:body.accessToken});
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
+    companyId,JSON.stringify({provider:'SHOPIFY',storeDomain:result.shop.myshopifyDomain,primaryDomain:result.shop.primaryDomain?.url||null})
+  ]);
+  return reply.code(201).send({
+    connected:true,
+    shop:result.shop,
+    publication:result.onlineStorePublication,
+    connection:{id:result.connection.id,status:result.connection.status,metadata:result.connection.metadata}
+  });
+});
+
+app.delete('/api/company/:companyId/integrations/shopify',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return disconnectShopify(companyId);
 });
 
 app.post('/api/company/:companyId/objectives',async(req,reply)=>{
