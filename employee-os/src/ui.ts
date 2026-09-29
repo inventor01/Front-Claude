@@ -71,7 +71,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
 (function(){
   var token=localStorage.getItem('employee_os_token')||'';
   var companyId=localStorage.getItem('employee_os_company')||'';
-  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null, cj=null, apify=null, openai=null;
+  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null, cj=null, apify=null, openai=null, runway=null;
 
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
   function badge(v){var x=String(v||'');var cls=/DONE|SUCCEEDED|APPROVED|READY_FOR/.test(x)?'good':/BLOCK|FAILED|REJECT/.test(x)?'bad':'warn';return '<span class="badge '+cls+'">'+esc(x)+'</span>';}
@@ -85,29 +85,61 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
   }
   function notice(msg,type){document.getElementById('notice').innerHTML=msg?'<div class="'+(type||'success')+'">'+esc(msg)+'</div>':'';}
   async function resolveCompany(){
-    var me=await request('/api/me');var m=me.memberships&&me.memberships[0];if(!m)throw new Error('No company membership found.');
-    companyId=m.company_id;localStorage.setItem('employee_os_company',companyId);document.getElementById('companyNameTop').textContent=m.company_name||'Company';
+    var me=await request('/api/me');
+    var memberships=(me&&me.memberships)||[];
+    var m=memberships.find(function(x){return x.company_id===companyId;})||memberships[0];
+    if(!m)throw new Error('No company membership found.');
+    companyId=m.company_id;
+    localStorage.setItem('employee_os_company',companyId);
+    document.getElementById('companyNameTop').textContent=m.company_name||'Company';
+    return m;
+  }
+  async function optionalRequest(path,fallback,label){
+    try{return await request(path);}
+    catch(e){
+      if(e.status===401)throw e;
+      console.error('Optional Employee OS module failed:',label,e);
+      return fallback;
+    }
   }
   async function load(){
     if(!token)return showAuth();
     try{
-      if(!companyId)await resolveCompany();
+      await resolveCompany();
+      document.getElementById('auth').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+
       var all=await Promise.all([
-        request('/api/company/'+companyId+'/state'),
-        request('/api/company/'+companyId+'/briefing'),
-        request('/api/company/'+companyId+'/execution'),
-        request('/api/company/'+companyId+'/memories'),
-        request('/api/company/'+companyId+'/academy'),
-        request('/api/company/'+companyId+'/integrations/shopify'),
-        request('/api/company/'+companyId+'/integrations/cj'),
-        request('/api/company/'+companyId+'/integrations/apify'),
-        request('/api/company/'+companyId+'/integrations/openai')
+        optionalRequest('/api/company/'+companyId+'/state',{employees:[],objectives:[],projects:[],workOrders:[],approvals:[],events:[],productCandidates:[],storePackages:[],creativePackages:[],distributionPackages:[],supportCases:[],issuePatterns:[],toolConnections:[],supplierMappings:[],fulfillmentOrders:[],referenceSources:[],linkLaunches:[]},'state'),
+        optionalRequest('/api/company/'+companyId+'/briefing',{decisionsNeeded:[],attention:[],activeProjects:[]},'briefing'),
+        optionalRequest('/api/company/'+companyId+'/execution',{jobs:[],steps:[],evidence:[],messages:[]},'execution'),
+        optionalRequest('/api/company/'+companyId+'/memories',{memories:[]},'memories'),
+        optionalRequest('/api/company/'+companyId+'/academy',{profiles:[],sources:[],lessons:[],tools:[],discoveries:[],claims:[],skills:[],skillTests:[]},'academy'),
+        optionalRequest('/api/company/'+companyId+'/integrations/shopify',{connected:false,status:'UNAVAILABLE'},'shopify'),
+        optionalRequest('/api/company/'+companyId+'/integrations/cj',{connected:false,status:'UNAVAILABLE'},'cj'),
+        optionalRequest('/api/company/'+companyId+'/integrations/apify',{connected:false,status:'UNAVAILABLE'},'apify'),
+        optionalRequest('/api/company/'+companyId+'/integrations/openai',{connected:false,status:'UNAVAILABLE'},'openai'),
+        optionalRequest('/api/company/'+companyId+'/integrations/runway',{connected:false,status:'UNAVAILABLE'},'runway')
       ]);
-      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];cj=all[6];apify=all[7];openai=all[8];
-      document.getElementById('auth').classList.add('hidden');document.getElementById('app').classList.remove('hidden');render();
-    }catch(e){if(e.status===401){localStorage.clear();token='';companyId='';showAuth();}else notice(e.message,'error');}
+      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];cj=all[6];apify=all[7];openai=all[8];runway=all[9];
+      render();
+    }catch(e){
+      if(e.status===401){
+        localStorage.removeItem('employee_os_token');
+        localStorage.removeItem('employee_os_company');
+        token='';companyId='';showAuth('Your session expired. Sign in again.');
+      }else{
+        document.getElementById('auth').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+        notice(e.message||'Employee OS could not finish loading.','error');
+      }
+    }
   }
-  function showAuth(){document.getElementById('auth').classList.remove('hidden');document.getElementById('app').classList.add('hidden');}
+  function showAuth(message){
+    document.getElementById('auth').classList.remove('hidden');
+    document.getElementById('app').classList.add('hidden');
+    if(message)document.getElementById('authError').innerHTML='<div class="error">'+esc(message)+'</div>';
+  }
   document.getElementById('authSwitch').onclick=function(){
     mode=mode==='register'?'login':'register';
     document.getElementById('companyName').classList.toggle('hidden',mode==='login');
@@ -119,10 +151,15 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     try{
       var body={email:document.getElementById('email').value,password:document.getElementById('password').value};
       if(mode==='register')body.companyName=document.getElementById('companyName').value;
+      if(mode==='login'){
+        localStorage.removeItem('employee_os_company');
+        companyId='';
+      }
       var r=await request('/api/auth/'+mode,{method:'POST',body:JSON.stringify(body)});
-      token=r.token;localStorage.setItem('employee_os_token',token);
+      token=r.token;
+      localStorage.setItem('employee_os_token',token);
       if(r.company){companyId=r.company.id;localStorage.setItem('employee_os_company',companyId);}
-      await resolveCompany();await load();
+      await load();
     }catch(err){document.getElementById('authError').innerHTML='<div class="error">'+esc(err.message)+'</div>';}
   };
   document.getElementById('logout').onclick=function(){localStorage.clear();token='';companyId='';location.reload();};
