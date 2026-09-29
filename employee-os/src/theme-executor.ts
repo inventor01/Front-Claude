@@ -105,8 +105,8 @@ async function waitThemeReady(graph:ShopifyGraph,themeId:string){
 }
 async function waitGraphJob(graph:ShopifyGraph,jobId:string){
   for(let i=0;i<40;i++){
-    const data=await graph<{node:{id:string;done:boolean}|null}>('query ThemeFileJob($id:ID!){node(id:$id){... on Job{id done}}}',{id:jobId});
-    if(data.node?.done)return;
+    const data=await graph<{job:{id:string;done:boolean}|null}>('query ThemeFileJob($id:ID!){job(id:$id){id done}}',{id:jobId});
+    if(data.job?.done)return;
     await new Promise((resolve)=>setTimeout(resolve,750));
   }
   throw new Error('Shopify theme-file write job did not complete in time.');
