@@ -1,6 +1,7 @@
 import { pool } from './db.js';
 import { readCredential,storeCredential,deleteCredential } from './credentials.js';
 import { mapCandidateToCJ,requireVerifiedCJMapping } from './cj-executor.js';
+import { buildAndPublishTheme } from './theme-executor.js';
 
 const API_VERSION='2026-07';
 const PROVIDER_TEST_MODE=process.env.PROVIDER_TEST_MODE==='1';
@@ -62,7 +63,7 @@ export async function connectShopify(input:{companyId:string;storeDomain:string;
   }`);
 
   const granted=new Set(data.currentAppInstallation.accessScopes.map((scope)=>scope.handle));
-  const required=['read_products','write_products','read_orders','read_publications','write_publications','read_content','write_content','read_online_store_pages','write_online_store_pages','read_merchant_managed_fulfillment_orders','write_merchant_managed_fulfillment_orders','read_third_party_fulfillment_orders','write_third_party_fulfillment_orders'];
+  const required=['read_products','write_products','read_orders','read_publications','write_publications','read_content','write_content','read_themes','write_themes','read_online_store_pages','write_online_store_pages','read_merchant_managed_fulfillment_orders','write_merchant_managed_fulfillment_orders','read_third_party_fulfillment_orders','write_third_party_fulfillment_orders'];
   const missing=required.filter((scope)=>!granted.has(scope));
   if(missing.length){
     throw new Error(`Shopify connection is missing required scopes: ${missing.join(', ')}`);
@@ -226,6 +227,11 @@ export async function executeStorePackage(input:{
     tags:['employee-os-venture','verified-research','organic-commerce'],
     seo:{title:`${title} | Shop`.slice(0,70),description:`Shop ${title}. Product details and claims are based on the current verified store package.`.slice(0,300)},
     productOptions:[{name:'Title',position:1,values:[{name:'Default Title'}]}],
+    files:(()=>{
+      const stock=(mapping.stock_detail&&typeof mapping.stock_detail==='object')?mapping.stock_detail as Record<string,unknown>:{};
+      const image=String(stock.variantImage||stock.productImage||'');
+      return /^https:\/\//i.test(image)?[{originalSource:image,contentType:'IMAGE',alt:title,duplicateResolutionMode:'APPEND_UUID'}]:[];
+    })(),
     variants:[{
       optionValues:[{optionName:'Title',name:'Default Title'}],
       price,
@@ -256,6 +262,10 @@ export async function executeStorePackage(input:{
   const shipping=await ensurePage(credential,'Shipping & Returns','shipping-returns',
     '<h2>Shipping & Returns</h2><p>Delivery estimates depend on the connected fulfillment source and destination. Exact windows are only shown after they are verified. Return requests are handled according to the store policy and order status.</p>');
 
+  const theme=await buildAndPublishTheme(
+    async <T>(query:string,variables:Record<string,unknown>={})=>graph<T>(credential,query,variables),
+    pkg,product.handle,title
+  );
   const meta=connection.metadata||{};
   const primary=String(meta.primaryDomain?.url||`https://${credential.storeDomain}`).replace(/\/$/,'');
   const productUrl=`${primary}/products/${product.handle}`;
@@ -270,6 +280,8 @@ export async function executeStorePackage(input:{
     price,
     published:Boolean(published.publishablePublish.publishable?.publishedOnPublication),
     storefrontReachable,
+    homepageReachable:false,
+    theme,
     faqPage:faq,
     shippingPage:shipping,
     supplier:{
@@ -285,6 +297,13 @@ export async function executeStorePackage(input:{
     },
     executedAt:new Date().toISOString()
   };
+  const homepageCheck=await fetch(primary+'/',{redirect:'follow',headers:{'user-agent':'AI-Employee-OS-QA/0.5'}});
+  result.homepageReachable=homepageCheck.ok;
+  if(!result.homepageReachable||!result.storefrontReachable){
+    throw new Error('Shopify storefront QA failed: homepage or product URL is not reachable after theme publication.');
+  }
+  await pool.query(`UPDATE link_launches SET status='STORE_LIVE',store_url=$2,product_url=$3,updated_at=now()
+    WHERE project_id=$1`,[input.projectId,primary,productUrl]);
   await pool.query(`UPDATE store_packages SET status=$2,external_state=$3,updated_at=now() WHERE id=$1`,[
     pkg.id,
     result.published&&storefrontReachable?'LIVE':'EXTERNAL_QA_FAILED',
