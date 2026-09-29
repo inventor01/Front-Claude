@@ -209,7 +209,7 @@ export async function mapCandidateToCJ(companyId:string,candidateId:string){
   });
   const options=Array.isArray(freight)?freight:Array.isArray(freight?.list)?freight.list:Array.isArray(freight?.logistics)?freight.logistics:[];
   if(!options.length)throw new Error('BLOCKED_SUPPLIER_FREIGHT: CJ returned no U.S. freight option for this variant.');
-  const costs=options.map(freightCost).filter((x):(x is number)=>x!==null&&Number.isFinite(x));
+  const costs=options.map(freightCost).filter((x): x is number => x!==null&&Number.isFinite(x));
   const minFreight=costs.length?Math.min(...costs):null;
   if(minFreight===null)throw new Error('BLOCKED_SUPPLIER_FREIGHT: CJ freight options did not include a usable price.');
 
