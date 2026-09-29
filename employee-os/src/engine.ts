@@ -65,7 +65,7 @@ export async function runOne(){
     const result=await executeStep(job,step);
     await stepSuccess(step.id,result.output,result.evidenceRefs);
     const remaining=await nextStep(job.id);
-    if(remaining && String((result.output as any)?.status||'').startsWith('BLOCKED')){
+    if(String((result.output as any)?.status||'').startsWith('BLOCKED') || String((result.output as any)?.status||'').startsWith('WAITING_')){
       await pool.query(`UPDATE jobs SET status='BLOCKED',last_error=$2,lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,[job.id,(result.output as any).status]);
       await pool.query(`UPDATE work_orders SET status='BLOCKED',blockers=$2,updated_at=now() WHERE id=$1`,[job.work_order_id,JSON.stringify([(result.output as any).status])]);
       return {processed:true,jobId:job.id,status:'BLOCKED'};
