@@ -252,3 +252,114 @@ export async function requireVerifiedCJMapping(companyId:string,candidateId:stri
   if(Number(row.landed_cost_estimate||0)<=0)throw new Error('BLOCKED_FULFILLMENT: Supplier mapping is missing landed-cost evidence.');
   return row;
 }
+
+
+function logisticsName(mapping:any){
+  const options=Array.isArray(mapping.freight_options)?mapping.freight_options:[];
+  if(!options.length)throw new Error('CJ mapping is missing freight options.');
+  const scored=options.map((option:any)=>({option,cost:freightCost(option)}))
+    .filter((row:any)=>row.cost!==null)
+    .sort((a:any,b:any)=>a.cost-b.cost);
+  const selected=scored[0]?.option||options[0];
+  const name=String(selected.logisticName||selected.logisticsName||selected.name||selected.enName||selected.logisticNameEn||'').trim();
+  if(!name)throw new Error('CJ mapping freight option is missing logisticName.');
+  return name;
+}
+
+function countryName(code:string){
+  const names:Record<string,string>={US:'United States',CA:'Canada',GB:'United Kingdom',AU:'Australia'};
+  return names[code.toUpperCase()]||code.toUpperCase();
+}
+
+export async function createCJOrderForShopify(input:{
+  companyId:string;
+  shopifyOrderId:string;
+  shopifyOrderName:string;
+  shippingAddress:{
+    name:string;address1:string;address2?:string|null;city:string;province?:string|null;
+    zip?:string|null;country?:string|null;countryCodeV2:string;phone?:string|null;
+  };
+  lines:Array<{mappingId:string;quantity:number;shippingName:string}>;
+}){
+  if(!input.shippingAddress.name||!input.shippingAddress.address1||!input.shippingAddress.city||!input.shippingAddress.countryCodeV2){
+    throw new Error('BLOCKED_CUSTOMER_DATA: CJ fulfillment requires recipient name, street, city, and country.');
+  }
+  if(!input.shippingAddress.phone){
+    throw new Error('BLOCKED_CUSTOMER_DATA: CJ fulfillment requires a customer shipping phone number.');
+  }
+  if(!input.lines.length)throw new Error('BLOCKED_FULFILLMENT: No mapped CJ line items were supplied.');
+
+  const mappings:any[]=[];
+  for(const line of input.lines){
+    const r=await pool.query(`SELECT * FROM supplier_product_mappings WHERE id=$1 AND company_id=$2 AND provider='CJ'`,[
+      line.mappingId,input.companyId
+    ]);
+    if(!r.rowCount)throw new Error('BLOCKED_FULFILLMENT: Supplier mapping was not found for a Shopify line item.');
+    mappings.push({...r.rows[0],quantity:line.quantity,shippingName:line.shippingName});
+  }
+
+  const first=mappings[0];
+  const freightName=logisticsName(first);
+  const origin=String(first.stock_detail?.origin||'CN');
+  const body={
+    orderNumber:input.shopifyOrderName.slice(0,50),
+    shippingCountryCode:input.shippingAddress.countryCodeV2,
+    shippingCountry:input.shippingAddress.country||countryName(input.shippingAddress.countryCodeV2),
+    shippingProvince:input.shippingAddress.province||'',
+    shippingCity:input.shippingAddress.city,
+    shippingAddress:input.shippingAddress.address1,
+    shippingAddress2:input.shippingAddress.address2||'',
+    shippingCustomerName:input.shippingAddress.name,
+    shippingZip:input.shippingAddress.zip||'',
+    shippingPhone:input.shippingAddress.phone,
+    remark:`Employee OS fulfillment for Shopify ${input.shopifyOrderName}`,
+    logisticName:freightName,
+    fromCountryCode:origin,
+    platform:'Shopify',
+    payType:3,
+    isSandbox:0,
+    products:mappings.map((m)=>({
+      vid:String(m.supplier_variant_id),
+      quantity:Number(m.quantity),
+      shippingName:String(m.shippingName||m.product_name).slice(0,200)
+    }))
+  };
+  const orderId=await cjPost<string>(input.companyId,'/shopping/order/createOrderV2',body);
+  if(!orderId)throw new Error('CJ order creation returned no order id.');
+  const detail=await cjGet<any>(input.companyId,'/shopping/order/getOrderDetail',{orderId});
+  return {
+    orderId,
+    orderNumber:String(detail?.orderNum||input.shopifyOrderName),
+    cjOrderCode:String(detail?.cjOrderCode||orderId),
+    orderStatus:String(detail?.orderStatus||'CREATED'),
+    amount:Number(detail?.orderAmount||0),
+    productAmount:Number(detail?.productAmount||0),
+    postageAmount:Number(detail?.postageAmount||0),
+    trackingNumber:String(detail?.trackNumber||''),
+    trackingUrl:String(detail?.trackingUrl||''),
+    raw:detail
+  };
+}
+
+export async function payCJOrder(companyId:string,shipmentOrderId:string){
+  const balance=await cjGet<any>(companyId,'/shopping/pay/getBalance');
+  const result=await cjPost<any>(companyId,'/shopping/pay/payBalanceV2',{shipmentOrderId});
+  return {paid:true,balanceBefore:Number(balance?.amount||0),result};
+}
+
+export async function getCJOrderDetail(companyId:string,orderId:string){
+  const detail=await cjGet<any>(companyId,'/shopping/order/getOrderDetail',{orderId});
+  return {
+    orderId:String(detail?.orderId||orderId),
+    orderNumber:String(detail?.orderNum||''),
+    cjOrderCode:String(detail?.cjOrderCode||orderId),
+    orderStatus:String(detail?.orderStatus||'UNKNOWN'),
+    amount:Number(detail?.orderAmount||0),
+    productAmount:Number(detail?.productAmount||0),
+    postageAmount:Number(detail?.postageAmount||0),
+    trackingNumber:String(detail?.trackNumber||''),
+    trackingProvider:String(detail?.trackingProvider||''),
+    trackingUrl:String(detail?.trackingUrl||''),
+    raw:detail
+  };
+}
