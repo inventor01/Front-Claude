@@ -1,0 +1,157 @@
+name: Employee OS Module 7 Live QA
+
+on:
+  push:
+    branches: [front-commerce-dev]
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-module7-live-qa.yml'
+  pull_request:
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-module7-live-qa.yml'
+
+jobs:
+  academy-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify live Employee Academy, reasoning, and tool verification
+        env:
+          BASE: https://employee-os-api-production.up.railway.app
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, urllib.error, uuid
+
+          BASE=os.environ["BASE"].rstrip("/")
+
+          def call(path, method="GET", body=None, token=None, timeout=60):
+              headers={"content-type":"application/json"}
+              if token:
+                  headers["authorization"]="Bearer "+token
+              data=None if body is None else json.dumps(body).encode()
+              req=urllib.request.Request(BASE+path,data=data,headers=headers,method=method)
+              with urllib.request.urlopen(req,timeout=timeout) as r:
+                  payload=r.read().decode()
+                  return r.status, json.loads(payload or "{}")
+
+          # wait for current Railway deploy
+          for _ in range(40):
+              try:
+                  status,health=call("/health",timeout=10)
+                  if status==200 and health.get("ok"):
+                      break
+              except Exception:
+                  pass
+              time.sleep(3)
+          else:
+              raise SystemExit("live API never became healthy")
+
+          suffix=str(uuid.uuid4()).replace("-","")[:12]
+          status,reg=call("/api/auth/register","POST",{
+              "email":f"qa-academy-{suffix}@example.com",
+              "password":"Qa!Academy-"+suffix+"-Aa9",
+              "companyName":"Academy Live QA"
+          })
+          assert status==201,reg
+          token=reg["token"]; company=reg["company"]["id"]
+
+          # Defaults: first-principles profiles + verification registry
+          _,academy=call(f"/api/company/{company}/academy",token=token)
+          profiles=academy["profiles"]
+          assert len(profiles)>=6,profiles
+          assert all(p["first_principles"] is True for p in profiles),profiles
+          assert all(int(p["forward_horizon_steps"])>=3 for p in profiles),profiles
+          assert all(p["uncertainty_policy"]=="NEVER_ASSUME" for p in profiles),profiles
+
+          tools={x["tool_id"]:x for x in academy["tools"]}
+          assert tools["shophunter"]["verification_grade"]=="ESTIMATE",tools["shophunter"]
+          assert tools["shophunter"]["automation_policy"]=="AUTHORIZED_API_OR_MANUAL_ONLY",tools["shophunter"]
+          assert tools["shopify-analytics"]["verification_grade"]=="VERIFIED_FIRST_PARTY",tools["shopify-analytics"]
+
+          # Real X tutorial -> Maya
+          x_url="https://x.com/chatcutapp/status/2041763561333264865"
+          status,training=call(f"/api/company/{company}/academy/sources","POST",{
+              "employeeSlug":"maya",
+              "url":x_url,
+              "title":"Seedance AI video prompting tutorial",
+              "tags":["ai-video","seedance","camera","prompting"]
+          },token,90)
+          assert status==201,training
+          assert training["source"]["source_type"]=="X_THREAD",training["source"]
+          assert training["source"]["source_quality"]=="COMMUNITY_TUTORIAL",training["source"]
+          assert len(training["lessons"])>=1,training
+          maya_source_id=training["source"]["id"]
+
+          _,maya=call(f"/api/company/{company}/academy/employees/maya/context",token=token)
+          assert maya["profile"]["firstPrinciples"] is True,maya
+          assert maya["profile"]["uncertaintyPolicy"]=="NEVER_ASSUME",maya
+          assert any(x["sourceId"]==maya_source_id for x in maya["lessons"]),maya["lessons"]
+
+          # Rowan receives explicit first-principles/verification training.
+          _,rowan_training=call(f"/api/company/{company}/academy/sources","POST",{
+              "employeeSlug":"rowan",
+              "title":"First-principles research rule",
+              "text":"Always decompose a business claim into what is directly observed, what is estimated, what is assumed, and what still needs verification. Never convert an estimate into a verified fact. Before recommending a product, identify the strongest available verification method and state the limitation of every source.",
+              "tags":["first-principles","verification","research"]
+          },token)
+          assert len(rowan_training["lessons"])>=1,rowan_training
+          rowan_lesson_ids={x["id"] for x in rowan_training["lessons"]}
+
+          # Revenue claim must not let ShopHunter masquerade as exact verified revenue.
+          _,claim=call(f"/api/company/{company}/academy/claims","POST",{
+              "employeeSlug":"rowan",
+              "claimType":"COMPETITOR_REVENUE",
+              "claimText":"This competitor makes exactly $80,000 per month.",
+              "desiredGrade":"VERIFIED_FIRST_PARTY"
+          },token)
+          recommended=claim["recommended"]
+          sh=[x for x in recommended if x["tool_id"]=="shophunter"]
+          assert sh and sh[0]["verification_grade"]=="ESTIMATE",recommended
+          assert claim["claim"]["selected_tool_id"]=="shophunter",claim
+          assert "Do not report a stronger claim" in claim["claim"]["result_summary"],claim["claim"]
+
+          # Tool Scout must at least use the known registry; web discovery can be auth-gated.
+          _,discovery=call(f"/api/company/{company}/academy/tools/discover","POST",{
+              "claimType":"COMPETITOR_REVENUE",
+              "claimDescription":"Determine the strongest defensible evidence for a competitor Shopify store's revenue."
+          },token,90)
+          assert any(x["tool_id"]=="shophunter" for x in discovery["recommended"]),discovery
+          assert discovery["webSearchStatus"] in ("AUTH_REQUIRED","DONE","FAILED"),discovery
+
+          # Prove Academy context follows Rowan into an actual durable worker step.
+          _,created=call(f"/api/company/{company}/objectives","POST",{
+              "statement":"Research a promising organic dropshipping product using first-principles verification. Do not spend money or publish anything without approval.",
+              "constraints":["Never assume unknown facts","Label estimates explicitly","No spending without owner approval"],
+              "query":"car diffuser"
+          },token)
+          job_id=created["job"]["id"]
+
+          applied=None
+          for _ in range(25):
+              time.sleep(2)
+              _,execution=call(f"/api/company/{company}/execution",token=token)
+              steps=[x for x in execution["steps"] if x["job_id"]==job_id and x.get("output")]
+              for step in steps:
+                  ai=(step.get("output") or {}).get("appliedIntelligence")
+                  if ai:
+                      applied=ai
+                      break
+              if applied:
+                  break
+          assert applied, "no durable worker step recorded Academy context"
+          assert applied["employee"]=="rowan",applied
+          assert applied["reasoning"]["firstPrinciples"] is True,applied
+          assert applied["reasoning"]["uncertaintyPolicy"]=="NEVER_ASSUME",applied
+          assert rowan_lesson_ids.intersection(set(applied["trainingLessonIds"])),(rowan_lesson_ids,applied)
+
+          print("MODULE 7 LIVE QA PASSED")
+          print(json.dumps({
+              "mayaTrainingSource":maya_source_id,
+              "mayaLessons":len(maya["lessons"]),
+              "rowanAppliedLessonCount":len(applied["trainingLessonIds"]),
+              "competitorRevenueTool":"shophunter",
+              "competitorRevenueGrade":"ESTIMATE",
+              "toolScout":discovery["webSearchStatus"]
+          },indent=2))
+          PY
