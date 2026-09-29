@@ -222,3 +222,23 @@ CREATE TABLE IF NOT EXISTS product_candidates (
   UNIQUE(project_id, name)
 );
 CREATE INDEX IF NOT EXISTS product_candidates_company_idx ON product_candidates(company_id, created_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS store_packages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  work_order_id uuid NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  candidate_id uuid NOT NULL REFERENCES product_candidates(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'DRAFT',
+  brand_direction jsonb NOT NULL DEFAULT '{}'::jsonb,
+  offer jsonb NOT NULL DEFAULT '{}'::jsonb,
+  page_architecture jsonb NOT NULL DEFAULT '[]'::jsonb,
+  copy_draft jsonb NOT NULL DEFAULT '{}'::jsonb,
+  qa_result jsonb NOT NULL DEFAULT '{}'::jsonb,
+  external_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(project_id,candidate_id)
+);
+CREATE INDEX IF NOT EXISTS store_packages_company_idx ON store_packages(company_id,created_at DESC);
