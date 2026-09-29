@@ -264,33 +264,57 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
   }
   function renderConnections(){
     var connected=shopify&&shopify.connected, meta=(shopify&&shopify.metadata)||{};
-    var shopifyStatus=connected?'<div class="success"><b>Shopify connected</b><br>'+esc(meta.storeName||meta.storeDomain||'Store')+' · '+esc((meta.primaryDomain||{}).url||meta.storeDomain||'')+'</div>':'<div class="error"><b>Shopify not connected</b><br>Luca cannot publish a live designed storefront until a dedicated venture store is authorized once.</div>';
+    var shopifyStatus=connected
+      ? '<div class="success"><b>Shopify connected</b><br>'+esc(meta.storeName||meta.storeDomain||'Store')+' · '+esc((meta.primaryDomain||{}).url||meta.storeDomain||'')+'</div>'
+      : '<div class="error"><b>Shopify not connected</b><br>Luca cannot publish a live designed storefront until a dedicated venture store is authorized once.</div>';
     var scopes='read_products, write_products, read_orders, read_publications, write_publications, read_content, write_content, read_themes, write_themes, read_files, write_files, read_online_store_pages, write_online_store_pages, read_merchant_managed_fulfillment_orders, write_merchant_managed_fulfillment_orders, read_third_party_fulfillment_orders, write_third_party_fulfillment_orders';
+
     var cjConnected=cj&&cj.connected, cjMeta=(cj&&cj.metadata)||{};
-    var cjStatusHtml=cjConnected?'<div class="success"><b>CJdropshipping connected</b><br>Fulfillment account '+esc(cjMeta.openId||'connected')+' · API 2.0</div>':'<div class="error"><b>CJdropshipping not connected</b><br>No venture product can publish until a supplier variant, stock, U.S. freight, and landed cost are verified.</div>';
+    var cjStatusHtml=cjConnected
+      ? '<div class="success"><b>CJdropshipping connected</b><br>Fulfillment account '+esc(cjMeta.openId||'connected')+' · API 2.0</div>'
+      : '<div class="error"><b>CJdropshipping not connected</b><br>No venture product can publish until a supplier variant, stock, U.S. freight, and landed cost are verified.</div>';
+
     var apifyConnected=apify&&apify.connected;
-    var apifyHtml=apifyConnected?'<div class="success"><b>Social reference capture connected</b><br>Instagram Reels can be captured from public URLs.</div>':'<div class="error"><b>Social reference capture not connected</b><br>Instagram can block ordinary fetchers. Connect Apify once so public Reels can be captured reliably.</div>';
+    var apifyHtml=apifyConnected
+      ? '<div class="success"><b>Social reference capture connected</b><br>Instagram Reels can be captured from public URLs.</div>'
+      : '<div class="error"><b>Social reference capture not connected</b><br>Instagram can block ordinary fetchers. Connect Apify once so public Reels can be captured reliably.</div>';
+
     var openaiConnected=openai&&openai.connected, openaiMeta=(openai&&openai.metadata)||{};
-    var openaiHtml=openaiConnected?'<div class="success"><b>Multimodal analyzer connected</b><br>'+esc(openaiMeta.model||'Vision model')+' · sampled Reel frames can be analyzed.</div>':'<div class="error"><b>Multimodal analyzer not connected</b><br>Link-to-Launch needs image understanding to identify products and deconstruct creative from sampled video frames.</div>';
+    var openaiHtml=openaiConnected
+      ? '<div class="success"><b>Multimodal analyzer connected</b><br>'+esc(openaiMeta.model||'Vision model')+' · sampled Reel frames can be analyzed.</div>'
+      : '<div class="error"><b>Multimodal analyzer not connected</b><br>Link-to-Launch needs image understanding to identify products and deconstruct creative from sampled video frames.</div>';
+
     var runwayConnected=runway&&runway.connected, runwayMeta=(runway&&runway.metadata)||{};
     var runwayCost=((Number(runwayMeta.estimatedDefaultCostCents||180))/100).toFixed(2);
-    var runwayHtml=runwayConnected?'<div class="success"><b>Runway renderer connected</b><br>'+esc(runwayMeta.model||'Video model')+' · default package '+esc(runwayMeta.defaultClipCount||3)+' clips · estimated 
+    var runwayHtml=runwayConnected
+      ? '<div class="success"><b>Runway renderer connected</b><br>'+esc(runwayMeta.model||'Video model')+' · default package '+esc(runwayMeta.defaultClipCount||3)+' clips / estimated $'+esc(runwayCost)+'</div>'
+      : '<div class="error"><b>Runway renderer not connected</b><br>Maya can build scripts and storyboards, but cannot generate final original video assets.</div>';
+
+    return '<div class="hero"><h2>Connections</h2><p>Authorize external tools once. Employees can then use them through audited backend adapters without exposing credentials to the browser again.</p></div>'+
       '<div class="grid two"><div class="card"><h3>Social reference capture</h3>'+apifyHtml+
-      (apifyConnected?'<button id="disconnectApify" class="danger">Disconnect capture</button>':'<form id="apifyConnectForm" class="form"><input id="apifyToken" type="password" placeholder="Apify API token" autocomplete="new-password"/><button class="action">Connect Reel capture</button></form><p class="muted">Used for public Instagram reference capture. Token stays encrypted server-side.</p>')+
+      (apifyConnected
+        ? '<button id="disconnectApify" class="danger">Disconnect capture</button>'
+        : '<form id="apifyConnectForm" class="form"><input id="apifyToken" type="password" placeholder="Apify API token" autocomplete="new-password"/><button class="action">Connect Reel capture</button></form><p class="muted">Used for public Instagram reference capture. Token stays encrypted server-side.</p>')+
       '</div><div class="card"><h3>Multimodal reference analysis</h3>'+openaiHtml+
-      (openaiConnected?'<button id="disconnectOpenAI" class="danger">Disconnect analyzer</button>':'<form id="openaiConnectForm" class="form"><input id="openaiApiKey" type="password" placeholder="OpenAI API key" autocomplete="new-password"/><button class="action">Connect visual analyzer</button></form><p class="muted">Employee OS samples frames and sends only the required reference context for product/creative analysis.</p>')+
+      (openaiConnected
+        ? '<button id="disconnectOpenAI" class="danger">Disconnect analyzer</button>'
+        : '<form id="openaiConnectForm" class="form"><input id="openaiApiKey" type="password" placeholder="OpenAI API key" autocomplete="new-password"/><button class="action">Connect visual analyzer</button></form><p class="muted">Employee OS samples frames and sends only the required reference context for product and creative analysis.</p>')+
       '</div></div>'+
       '<div class="grid two" style="margin-top:10px"><div class="card"><h3>Runway video rendering</h3>'+runwayHtml+
-      (runwayConnected?'<button id="disconnectRunway" class="danger">Disconnect Runway</button>':'<form id="runwayConnectForm" class="form"><input id="runwayApiSecret" type="password" placeholder="Runway Dev API secret" autocomplete="new-password"/><input id="runwayModel" value="gen4.5" placeholder="Model"/><button class="action">Connect Runway renderer</button></form><p class="muted">Rendering always remains approval-gated because it can create provider cost. Finished clips are copied into Shopify Files so temporary Runway URLs are never treated as durable assets.</p>')+
-      '</div><div class="card"><h3>Creative execution rule</h3><p>Maya is only DONE after approved clips are rendered, Shopify-hosted assets are READY, and Nova receives those durable URLs. Scripts alone are not completion.</p></div></div>'+
+      (runwayConnected
+        ? '<button id="disconnectRunway" class="danger">Disconnect Runway</button>'
+        : '<form id="runwayConnectForm" class="form"><input id="runwayApiSecret" type="password" placeholder="Runway Dev API secret" autocomplete="new-password"/><input id="runwayModel" value="gen4.5" placeholder="Model"/><button class="action">Connect Runway renderer</button></form><p class="muted">Rendering remains approval-gated because it can create provider cost. Finished clips are copied into Shopify Files so temporary Runway URLs are never treated as durable assets.</p>')+
+      '</div><div class="card"><h3>Creative execution rule</h3><p>Maya is only DONE after approved clips are rendered, Shopify-hosted assets are READY, and Nova receives durable URLs. Scripts alone are not completion.</p></div></div>'+
       '<div class="grid two" style="margin-top:10px"><div class="card"><h3>Shopify execution</h3>'+shopifyStatus+
-      (connected?'<p>API version: '+esc(meta.apiVersion||'2026-07')+' · Online Store: '+esc(meta.publicationTitle||'Online Store')+'</p><button id="disconnectShopify" class="danger">Disconnect Shopify</button>':
-      '<form id="shopifyConnectForm" class="form"><input id="shopifyDomain" placeholder="venture-store.myshopify.com" autocomplete="off"/><input id="shopifyToken" type="password" placeholder="Admin API access token" autocomplete="new-password"/><button class="action">Connect dedicated venture store</button></form><p class="muted">Required custom-app scopes: '+esc(scopes)+'. The token is encrypted server-side and never returned by this API.</p>')+
+      (connected
+        ? '<p>API version: '+esc(meta.apiVersion||'2026-07')+' · Online Store: '+esc(meta.publicationTitle||'Online Store')+'</p><button id="disconnectShopify" class="danger">Disconnect Shopify</button>'
+        : '<form id="shopifyConnectForm" class="form"><input id="shopifyDomain" placeholder="venture-store.myshopify.com" autocomplete="off"/><input id="shopifyToken" type="password" placeholder="Admin API access token" autocomplete="new-password"/><button class="action">Connect dedicated venture store</button></form><p class="muted">Required custom-app scopes: '+esc(scopes)+'. The token is encrypted server-side and never returned by this API.</p>')+
       '</div><div class="card"><h3>CJdropshipping fulfillment</h3>'+cjStatusHtml+
-      (cjConnected?'<p>Access tokens stay backend-only and are refreshed automatically before expiry.</p><button id="disconnectCJ" class="danger">Disconnect CJ</button>':
-      '<form id="cjConnectForm" class="form"><input id="cjApiKey" type="password" placeholder="CJ API key" autocomplete="new-password"/><button class="action">Connect CJdropshipping</button></form><p class="muted">Employee OS exchanges the API key for backend-only CJ access/refresh tokens.</p>')+
+      (cjConnected
+        ? '<p>Access tokens stay backend-only and are refreshed automatically before expiry.</p><button id="disconnectCJ" class="danger">Disconnect CJ</button>'
+        : '<form id="cjConnectForm" class="form"><input id="cjApiKey" type="password" placeholder="CJ API key" autocomplete="new-password"/><button class="action">Connect CJdropshipping</button></form><p class="muted">Employee OS exchanges the API key for backend-only CJ access and refresh tokens.</p>')+
       '</div></div>'+
-      '<div class="card" style="margin-top:10px"><h3>Finish-line rule</h3><p>Link-to-Launch is DONE only after source provenance, product identity, verified supplier mapping, stock + freight + landed cost, designed Shopify theme, product publication, reachable URL, creative package, and fulfillment path are all persisted.</p></div>';
+      '<div class="card" style="margin-top:10px"><h3>Finish-line rule</h3><p>Link-to-Launch is DONE only after source provenance, product identity, verified supplier mapping, stock, freight, landed cost, designed Shopify theme, product publication, reachable URL, creative package, and fulfillment path are all persisted.</p></div>';
   }
   function renderActivity(){return '<div class="stack">'+((state.events||[]).map(function(e){return '<div class="item"><div class="row"><b>'+esc(e.type)+'</b><span class="muted">'+esc(fmt(e.created_at))+'</span></div><p>'+esc(JSON.stringify(e.payload))+'</p></div>';}).join('')||'<div class="empty">No events yet.</div>')+'</div>';}
 
