@@ -222,6 +222,73 @@ jobs:
             [.messages[] | select(.project_id==$p and .type=="BLOCKER" and .from_employee_slug=="nova" and .to_employee_slug=="ava" and .payload.reason=="SOCIAL_PUBLISHING_NOT_CONNECTED")] | length >= 1
           ' <<<"$EXEC5" >/dev/null
 
+          echo "Module 6 Command Center and Customer Ops QA"
+          ROOT_HTML="$(curl -fsS "$BASE/")"
+          grep -q "AI Employee OS" <<<"$ROOT_HTML"
+          grep -q "Give Ava an objective" <<<"$ROOT_HTML"
+          grep -q "Customer Ops" <<<"$ROOT_HTML"
+
+          SUPPORT1="$(curl -fsS -X POST "$BASE/api/company/$COMPANY/support/cases"             "${auth[@]}" -H "content-type: application/json"             -d '{"channel":"EMAIL","customerRef":"qa-customer-1@example.test","subject":"Does this work with my setup?","message":"Does this work with my car setup and what size does it fit?"}')"
+          SUPPORT1_JOB="$(jq -r '.job.id' <<<"$SUPPORT1")"
+          SUPPORT1_CASE="$(jq -r '.supportCase.id' <<<"$SUPPORT1")"
+          test "$(jq -r '.job.status' <<<"$SUPPORT1")" = "QUEUED"
+
+          SUPPORT2="$(curl -fsS -X POST "$BASE/api/company/$COMPANY/support/cases"             "${auth[@]}" -H "content-type: application/json"             -d '{"channel":"EMAIL","customerRef":"qa-customer-2@example.test","subject":"Compatibility question","message":"Will this work with my vehicle setup and is it compatible with a small car?"}')"
+          SUPPORT2_JOB="$(jq -r '.job.id' <<<"$SUPPORT2")"
+          SUPPORT2_CASE="$(jq -r '.supportCase.id' <<<"$SUPPORT2")"
+          test "$(jq -r '.job.status' <<<"$SUPPORT2")" = "QUEUED"
+
+          for i in $(seq 1 40); do
+            STATE6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            S1="$(jq -r --arg j "$SUPPORT1_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC6")"
+            S2="$(jq -r --arg j "$SUPPORT2_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC6")"
+            if [[ "$S1" == "BLOCKED" && "$S2" == "BLOCKED" ]]; then break; fi
+            sleep 2
+          done
+
+          test "$S1" = "BLOCKED"
+          test "$S2" = "BLOCKED"
+          STATE6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          for JOB in "$SUPPORT1_JOB" "$SUPPORT2_JOB"; do
+            for STEP in SUPPORT_CLASSIFY SUPPORT_DRAFT SUPPORT_FEEDBACK; do
+              test "$(jq -r --arg j "$JOB" --arg s "$STEP" '[.steps[] | select(.job_id==$j and .step_type==$s)] | .[0].status' <<<"$EXEC6")" = "SUCCEEDED"
+            done
+            test "$(jq -r --arg j "$JOB" '[.steps[] | select(.job_id==$j and .step_type=="SUPPORT_SEND_HANDOFF")] | .[0].status' <<<"$EXEC6")" = "BLOCKED"
+          done
+
+          jq -e --arg id "$SUPPORT1_CASE" '
+            [.supportCases[] | select(.id==$id)] | length == 1 and
+            .[0].category == "COMPATIBILITY" and
+            (. [0].draft_response | length) > 20 and
+            .[0].status == "READY_NEEDS_SUPPORT_CONNECTION" and
+            .[0].external_state.sent == false
+          ' <<<"$STATE6" >/dev/null
+          jq -e --arg id "$SUPPORT2_CASE" '
+            [.supportCases[] | select(.id==$id)] | length == 1 and
+            .[0].category == "COMPATIBILITY" and
+            (. [0].draft_response | length) > 20 and
+            .[0].status == "READY_NEEDS_SUPPORT_CONNECTION" and
+            .[0].external_state.sent == false
+          ' <<<"$STATE6" >/dev/null
+
+          jq -e '
+            [.issuePatterns[] | select(.category=="COMPATIBILITY" and .occurrences>=2)] | length >= 1
+          ' <<<"$STATE6" >/dev/null
+          jq -e '
+            [.messages[] | select(.type=="INFO_REQUEST" and .from_employee_slug=="ellis" and .to_employee_slug=="luca")] | length >= 1
+          ' <<<"$EXEC6" >/dev/null
+          jq -e '
+            [.messages[] | select(.type=="INFO_REQUEST" and .from_employee_slug=="ellis" and .to_employee_slug=="maya")] | length >= 1
+          ' <<<"$EXEC6" >/dev/null
+          test "$(jq -r '[.approvals[] | select(.action_type=="SUPPORT_SEND")] | length' <<<"$STATE6")" = "0"
+
+          BRIEF6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/briefing")"
+          jq -e '[.attention[] | select(.assigned_employee_slug=="ellis" and .status=="BLOCKED_EXTERNAL_AUTH")] | length >= 1' <<<"$BRIEF6" >/dev/null
+
+          echo "MODULE 6 LIVE QA PASSED"
           echo "MODULE 5 LIVE QA PASSED"
           echo "MODULE 4 LIVE QA PASSED"
           echo "MODULE 3 LIVE QA PASSED"
