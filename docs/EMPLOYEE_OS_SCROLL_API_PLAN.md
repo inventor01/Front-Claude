@@ -6,6 +6,21 @@ Make Front the single intelligence gateway used by AI Employee OS for authentica
 
 AI Employee OS must never receive X/TikTok cookies, passwords, browser profiles, or platform session tokens.
 
+## Phase 0 — persistence and runtime gate
+
+Do not enable remote scroll-job orchestration while Front is using ephemeral D1 fallback storage.
+
+Before rollout:
+
+1. Expand or safely clean the existing Front Railway volume.
+2. Confirm `FRONT_PERSIST_DIR` / Railway volume mount has at least 256 MB free.
+3. Restart Front on the persistent mount.
+4. Run migrations and verify a sentinel D1 row survives a redeploy.
+5. Keep the current ephemeral fallback only as an availability fallback, not as the normal production datastore.
+6. Upgrade the Front Wrangler/Miniflare toolchain to remove the current high-severity `undici` development dependency advisory before calling Front CI fully green.
+
+The scroll queue and bridge leases must be durable across Front restarts.
+
 ## Architecture
 
 ```
