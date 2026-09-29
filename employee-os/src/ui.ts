@@ -57,7 +57,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     <button data-view="venture">Venture</button>
     <button data-view="approvals">Approvals</button>
     <button data-view="support">Customer Ops</button>
-    <button data-view="brain">Company Brain</button>
+    <button data-view="brain">Company Brain</button>\n    <button data-view="academy">Academy</button>
     <button data-view="activity">Activity</button>
   </nav>
   <div class="aside-foot"><button id="logout">Log out</button></div>
@@ -72,7 +72,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
 (function(){
   var token=localStorage.getItem('employee_os_token')||'';
   var companyId=localStorage.getItem('employee_os_company')||'';
-  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null;
+  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null;
 
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
   function badge(v){var x=String(v||'');var cls=/DONE|SUCCEEDED|APPROVED|READY_FOR/.test(x)?'good':/BLOCK|FAILED|REJECT/.test(x)?'bad':'warn';return '<span class="badge '+cls+'">'+esc(x)+'</span>';}
@@ -96,9 +96,10 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
         request('/api/company/'+companyId+'/state'),
         request('/api/company/'+companyId+'/briefing'),
         request('/api/company/'+companyId+'/execution'),
-        request('/api/company/'+companyId+'/memories')
+        request('/api/company/'+companyId+'/memories'),
+        request('/api/company/'+companyId+'/academy')
       ]);
-      state=all[0];briefing=all[1];execution=all[2];memories=all[3];
+      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];
       document.getElementById('auth').classList.add('hidden');document.getElementById('app').classList.remove('hidden');render();
     }catch(e){if(e.status===401){localStorage.clear();token='';companyId='';showAuth();}else notice(e.message,'error');}
   }
@@ -166,6 +167,33 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     return '<div class="grid two"><div class="card"><h3>Test / manual customer case</h3><form id="supportForm" class="form"><select id="supportChannel"><option>EMAIL</option><option>LIVE_CHAT</option></select><input id="supportCustomer" placeholder="Customer reference" value="customer@example.test"/><input id="supportSubject" placeholder="Subject" value="Does this work with my setup?"/><textarea id="supportMessage">Does this work in a small car and how long does shipping take?</textarea><button class="action">Send to Ellis</button></form></div><div class="card"><h3>Recurring issue intelligence</h3><div class="stack">'+(patterns.map(function(p){return '<div class="item"><div class="row"><b>'+esc(p.category)+'</b><span class="badge">'+esc(p.occurrences)+'×</span></div><p>'+esc(p.latest_example)+'</p></div>';}).join('')||'<div class="empty">No repeated issue patterns yet.</div>')+'</div></div></div><h3 class="section-title">Cases</h3><div class="stack">'+(cases.map(function(x){return '<div class="item"><div class="row"><b>'+esc(x.subject)+'</b>'+badge(x.status)+'</div><p>'+esc(x.customer_message)+'</p><p><b>Ellis draft:</b> '+esc(x.draft_response||'Pending')+'</p></div>';}).join('')||'<div class="empty">No support cases yet.</div>')+'</div>';
   }
   function renderBrain(){return '<div class="stack">'+(((memories&&memories.memories)||[]).map(function(m){return '<div class="item"><div class="row"><b>'+esc(m.subject)+'</b>'+badge(m.type)+'</div><p>'+esc(m.content)+'</p><span class="muted">'+esc(m.source||'No source')+' · confidence '+esc(m.confidence)+'</span></div>';}).join('')||'<div class="empty">Company Brain has no active memory yet.</div>')+'</div>';}
+  function renderAcademy(){
+    var profiles=(academy&&academy.profiles)||[],sources=(academy&&academy.sources)||[],lessons=(academy&&academy.lessons)||[],tools=(academy&&academy.tools)||[],claims=(academy&&academy.claims)||[];
+    var employeeOptions='<option value="">Company-wide</option>'+((state&&state.employees)||[]).map(function(e){return '<option value="'+esc(e.slug)+'">'+esc(e.name)+' — '+esc(e.title)+'</option>';}).join('');
+    var profileCards=profiles.map(function(p){
+      return '<div class="item"><div class="row"><b>'+esc(p.employee_slug)+'</b>'+badge(p.uncertainty_policy)+'</div><p>First principles: '+esc(p.first_principles?'ON':'OFF')+' · think '+esc(p.forward_horizon_steps)+' moves ahead</p><span class="muted">'+esc(p.learning_policy)+'</span></div>';
+    }).join('');
+    var sourceCards=sources.slice(0,30).map(function(s){
+      return '<div class="item"><div class="row"><b>'+esc(s.title)+'</b>'+badge(s.source_quality)+'</div><p>'+esc(s.employee_slug||'Company-wide')+' · '+esc(s.source_type)+'</p><span class="muted">'+esc(s.source_url||'Pasted training note')+'</span></div>';
+    }).join('');
+    var lessonCards=lessons.slice(0,40).map(function(l){
+      return '<div class="item"><div class="row"><b>'+esc(l.lesson_type)+'</b>'+badge(l.confidence)+'</div><p>'+esc(l.principle)+'</p><span class="muted">'+esc(l.employee_slug||'Company-wide')+' · '+esc(l.source_title)+'</span></div>';
+    }).join('');
+    var toolCards=tools.slice(0,40).map(function(t){
+      return '<div class="item"><div class="row"><b>'+esc(t.name)+'</b>'+badge(t.verification_grade)+'</div><p>'+esc(t.capability)+'</p><span class="muted">'+esc(t.automation_policy)+' · '+esc(t.provider)+'</span></div>';
+    }).join('');
+    var claimCards=claims.slice(0,20).map(function(c){
+      return '<div class="item"><div class="row"><b>'+esc(c.claim_type)+'</b>'+badge(c.status)+'</div><p>'+esc(c.claim_text)+'</p><span class="muted">Tool: '+esc(c.selected_tool_id||'none yet')+' · desired '+esc(c.desired_grade)+'</span></div>';
+    }).join('');
+    return '<div class="hero"><h2>Employee Academy</h2><p>Teach each AI from threads, tutorials, docs, examples, and your own notes. Sources stay traceable; lessons do not silently become facts.</p></div>'+
+      '<div class="grid two"><div class="card"><h3>Train an employee</h3><form id="trainingForm" class="form"><select id="trainingEmployee">'+employeeOptions+'</select><input id="trainingTitle" placeholder="Optional title"/><input id="trainingUrl" placeholder="X thread, tutorial, docs, or public URL"/><textarea id="trainingText" placeholder="Or paste training text / notes here"></textarea><input id="trainingTags" placeholder="Tags, comma separated (ai-video, hooks, editing)"/><button class="action">Ingest training source</button></form></div>'+
+      '<div class="card"><h3>Find the right verification tool</h3><form id="toolDiscoveryForm" class="form"><select id="claimType"><option>OWN_REVENUE</option><option>COMPETITOR_REVENUE</option><option>TRAFFIC</option><option>AD_ACTIVITY</option><option>TREND</option></select><textarea id="claimDescription">Verify whether a competitor store is actually generating the revenue being claimed.</textarea><button class="action">Find verification tools</button></form><p class="muted">The system distinguishes first-party verification, public records, corroboration, estimates, and signals.</p></div></div>'+
+      '<h3 class="section-title">Reasoning contracts</h3><div class="grid two">'+(profileCards||'<div class="empty">No reasoning profiles yet.</div>')+'</div>'+
+      '<h3 class="section-title">Training sources</h3><div class="stack">'+(sourceCards||'<div class="empty">Add your first tutorial, thread, document, or note.</div>')+'</div>'+
+      '<h3 class="section-title">Extracted lessons</h3><div class="stack">'+(lessonCards||'<div class="empty">Lessons will appear after training ingestion.</div>')+'</div>'+
+      '<h3 class="section-title">Verification tool registry</h3><div class="grid two">'+(toolCards||'<div class="empty">Tool catalog is empty.</div>')+'</div>'+
+      '<h3 class="section-title">Verification claims</h3><div class="stack">'+(claimCards||'<div class="empty">No claim-verification requests yet.</div>')+'</div>';
+  }
   function renderActivity(){return '<div class="stack">'+((state.events||[]).map(function(e){return '<div class="item"><div class="row"><b>'+esc(e.type)+'</b><span class="muted">'+esc(fmt(e.created_at))+'</span></div><p>'+esc(JSON.stringify(e.payload))+'</p></div>';}).join('')||'<div class="empty">No events yet.</div>')+'</div>';}
 
   function bindView(){
@@ -174,6 +202,19 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     document.querySelectorAll('.approval').forEach(function(b){b.onclick=async function(){try{await request('/api/company/'+companyId+'/approvals/'+b.dataset.id+'/'+b.dataset.decision,{method:'POST'});notice('Decision recorded.');await load();}catch(err){notice(err.message,'error');}};});
     var support=document.getElementById('supportForm');
     if(support)support.onsubmit=async function(e){e.preventDefault();try{await request('/api/company/'+companyId+'/support/cases',{method:'POST',body:JSON.stringify({channel:document.getElementById('supportChannel').value,customerRef:document.getElementById('supportCustomer').value,subject:document.getElementById('supportSubject').value,message:document.getElementById('supportMessage').value})});notice('Case accepted by Ellis.');setTimeout(load,1200);}catch(err){notice(err.message,'error');}};
+    var training=document.getElementById('trainingForm');
+    if(training)training.onsubmit=async function(e){e.preventDefault();try{
+      var tags=document.getElementById('trainingTags').value.split(',').map(function(x){return x.trim();}).filter(Boolean);
+      var body={employeeSlug:document.getElementById('trainingEmployee').value||null,title:document.getElementById('trainingTitle').value||undefined,url:document.getElementById('trainingUrl').value||undefined,text:document.getElementById('trainingText').value||undefined,tags:tags};
+      var result=await request('/api/company/'+companyId+'/academy/sources',{method:'POST',body:JSON.stringify(body)});
+      notice('Training ingested: '+result.lessons.length+' sourced lessons extracted.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var discover=document.getElementById('toolDiscoveryForm');
+    if(discover)discover.onsubmit=async function(e){e.preventDefault();try{
+      var result=await request('/api/company/'+companyId+'/academy/tools/discover',{method:'POST',body:JSON.stringify({claimType:document.getElementById('claimType').value,claimDescription:document.getElementById('claimDescription').value})});
+      var suffix=result.webSearchStatus==='AUTH_REQUIRED'?' Existing verified catalog searched; web tool scout needs a Jina Search API key.':' Tool discovery completed.';
+      notice('Verification tools evaluated.'+suffix);await load();
+    }catch(err){notice(err.message,'error');}};
   }
   load();
 })();
