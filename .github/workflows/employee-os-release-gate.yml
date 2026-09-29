@@ -57,3 +57,5 @@ jobs:
         run: node tests/failure-recovery-sandbox.mjs
       - name: Module 9 — Hoodies 4/4 aggregate external execution
         run: node tests/hoodies-release-gate-sandbox.mjs
+      - name: Module 10 — Apify connection and blocked-source resume
+        run: node tests/apify-sandbox.mjs

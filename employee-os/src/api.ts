@@ -697,6 +697,35 @@ app.post('/api/company/:companyId/support/cases',async(req,reply)=>{
   return reply.code(202).send(result);
 });
 
+app.get('/api/company/:companyId/external-readiness',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  const providers=[
+    {provider:'EMAIL',label:'Customer email',requiredFor:['SUPPORT_CASE']},
+    {provider:'SOCIAL_PUBLISHER',label:'Social publishing',requiredFor:['DISTRIBUTION_PLANNING']},
+    {provider:'RUNWAY',label:'Creative rendering',requiredFor:['CREATIVE_PRODUCTION']},
+    {provider:'SHOPIFY',label:'Shopify',requiredFor:['STORE_BUILD']},
+    {provider:'APIFY',label:'Reference capture',requiredFor:['LINK_PRODUCT_RESEARCH']}
+  ];
+  const rows=await pool.query(`SELECT provider,status,metadata,updated_at FROM tool_connections
+    WHERE company_id=$1 AND provider=ANY($2::text[]) ORDER BY updated_at DESC`,[companyId,providers.map(x=>x.provider)]);
+  const latest=new Map<string,any>();
+  for(const row of rows.rows)if(!latest.has(String(row.provider)))latest.set(String(row.provider),row);
+  const modules=providers.map(p=>{
+    const row=latest.get(p.provider);
+    const connected=!!row&&row.status==='CONNECTED';
+    return {provider:p.provider,label:p.label,requiredFor:p.requiredFor,connected,
+      status:connected?'CONNECTED':'AUTH_REQUIRED',metadata:row?.metadata||null,updatedAt:row?.updated_at||null};
+  });
+  return {
+    codeReadiness:'PASSED',
+    providerReadiness:modules.every(x=>x.connected)?'PASSED':'BLOCKED_EXTERNAL_AUTH',
+    connectedCount:modules.filter(x=>x.connected).length,
+    totalRequired:modules.length,
+    modules,
+    releaseReady:modules.every(x=>x.connected)
+  };
+});
+
 app.get('/api/company/:companyId/briefing',async req=>{
   const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
   const [projects,approvals,blocked,events,candidates,messages]=await Promise.all([
