@@ -6,7 +6,16 @@ import {
   type DemandResult,type SupplierResult
 } from './research.js';
 
-type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:any;status:string;attempt_count:number;retry_count:number;max_attempts:number;lease_id:string|null};
+type JsonRecord=Record<string,unknown>;
+type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:JsonRecord;status:string;attempt_count:number;retry_count:number;max_attempts:number;lease_id:string|null};
+type StepRow={id:string;step_type:string};
+type CreativeScene={action?:unknown;onScreenText?:unknown};
+type CreativeScript={id?:unknown;hook?:unknown;cta?:unknown;scenes?:CreativeScene[];renderedAssetId?:unknown};
+type DistributionCalendarItem={platform?:unknown;status?:unknown};
+function resultStatus(output:unknown){
+  if(typeof output!=='object'||output===null||!('status' in output))return '';
+  return String((output as {status?:unknown}).status||'');
+}
 const retryable=(m:string)=>/timeout|rate|temporar|connection|502|503|504/i.test(m);
 
 export async function emitEvent(companyId:string,type:string,payload:unknown){
@@ -65,7 +74,7 @@ async function candidateName(job:JobRow){
   return discovery?.candidate||String(job.payload?.query||'').trim();
 }
 
-async function executeStep(job:JobRow,step:any){
+async function executeStep(job:JobRow,step:StepRow){
   if(job.job_type==='STORE_BUILD' && step.step_type==='BRAND_STRATEGY'){
     const candidateId=String(job.payload?.candidateId||'');
     const r=await pool.query('SELECT * FROM product_candidates WHERE id=$1 AND company_id=$2',[candidateId,job.company_id]);
@@ -393,7 +402,7 @@ async function executeStep(job:JobRow,step:any){
       `Would this actually work for your setup? Let's test it.`,
       `Three things I'd want to know before buying ${product}.`,
       `The fastest way to understand why ${product} is getting attention.`,
-      ...base.map((x:any)=>String(x))
+      ...base.map((x:unknown)=>String(x))
     ].filter((x,i,a)=>x&&a.indexOf(x)===i).slice(0,18);
     const u=await pool.query(`UPDATE creative_packages SET hooks=$2,status='HOOKS_READY',updated_at=now() WHERE id=$1 RETURNING *`,[
       pkg.id,JSON.stringify(hooks)
@@ -414,7 +423,7 @@ async function executeStep(job:JobRow,step:any){
       ['faq','20','lead with a real purchase question','Answer compatibility, usage, care, and what the product does not promise.','Check the product details before buying.'],
       ['reaction','15','unbox and inspect before using','Show first impression, setup, one use, and honest takeaway.','See the full product details.']
     ];
-    const scripts=formats.map((f:any[],i:number)=>({
+    const scripts=formats.map((f,i:number)=>({
       id:`creative-${i+1}`,format:f[0],durationSec:Number(f[1]),hook:String(hooks[i]||hooks[0]||`Watch ${product} in use.`),
       hypothesis:`${f[0]} format can make the product use case understandable without relying on unsupported claims.`,
       scenes:[
@@ -436,10 +445,10 @@ async function executeStep(job:JobRow,step:any){
     const candidateId=String(job.payload?.candidateId||'');
     const r=await pool.query('SELECT * FROM creative_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
     if(!r.rowCount)throw new Error('Creative package missing for storyboards.');
-    const pkg=r.rows[0], scripts=Array.isArray(pkg.scripts)?pkg.scripts:[];
-    const storyboards=scripts.map((script:any)=>({
+    const pkg=r.rows[0], scripts:CreativeScript[]=Array.isArray(pkg.scripts)?pkg.scripts:[];
+    const storyboards=scripts.map((script)=>({
       scriptId:script.id,
-      shots:(script.scenes||[]).map((scene:any,index:number)=>({
+      shots:(script.scenes||[]).map((scene,index:number)=>({
         shot:index+1,
         framing:index===0?'tight product/problem close-up':index===1?'hands-on medium demonstration':'clean product close',
         action:scene.action,
@@ -458,11 +467,11 @@ async function executeStep(job:JobRow,step:any){
     const r=await pool.query('SELECT * FROM creative_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
     if(!r.rowCount)throw new Error('Creative package missing for QA.');
     const pkg=r.rows[0], failures:string[]=[];
-    const hooks=Array.isArray(pkg.hooks)?pkg.hooks:[], scripts=Array.isArray(pkg.scripts)?pkg.scripts:[], boards=Array.isArray(pkg.storyboards)?pkg.storyboards:[];
+    const hooks=Array.isArray(pkg.hooks)?pkg.hooks:[], scripts:CreativeScript[]=Array.isArray(pkg.scripts)?pkg.scripts:[], boards=Array.isArray(pkg.storyboards)?pkg.storyboards:[];
     if(hooks.length<10)failures.push('fewer than 10 hooks');
     if(scripts.length<6)failures.push('fewer than 6 scripts');
     if(boards.length<scripts.length)failures.push('missing storyboards');
-    if(scripts.some((s:any)=>!s.hook||!s.cta||!Array.isArray(s.scenes)||s.scenes.length<3))failures.push('script structure incomplete');
+    if(scripts.some((script)=>!script.hook||!script.cta||!Array.isArray(script.scenes)||script.scenes.length<3))failures.push('script structure incomplete');
     const serialized=JSON.stringify({hooks,scripts,boards}).toLowerCase();
     if(/guaranteed result|guaranteed to|100% guaranteed|real customer said|5-star customer/.test(serialized))failures.push('unsupported or fabricated claim detected');
     const qa={passed:failures.length===0,failures,checks:['10+ hooks','6+ structured short-form scripts','storyboard for every script','CTA on every script','no fake testimonial or guarantee language','render state remains separate from script state']};
@@ -588,11 +597,11 @@ async function executeStep(job:JobRow,step:any){
     const r=await pool.query('SELECT * FROM distribution_packages WHERE project_id=$1 AND creative_package_id=$2',[job.project_id,creativePackageId]);
     if(!r.rowCount)throw new Error('Distribution package missing for QA.');
     const pkg=r.rows[0], failures:string[]=[];
-    const calendar=Array.isArray(pkg.calendar)?pkg.calendar:[];
+    const calendar:DistributionCalendarItem[]=Array.isArray(pkg.calendar)?pkg.calendar:[];
     if(calendar.length<10)failures.push('calendar has fewer than 10 planned posts');
-    if(!calendar.some((x:any)=>x.platform==='TikTok'))failures.push('TikTok missing');
-    if(!calendar.some((x:any)=>x.platform==='Instagram Reels'))failures.push('Instagram Reels missing');
-    if(calendar.some((x:any)=>x.status!=='PLANNED_NOT_PUBLISHED'))failures.push('calendar falsely claims publishing');
+    if(!calendar.some((item)=>item.platform==='TikTok'))failures.push('TikTok missing');
+    if(!calendar.some((item)=>item.platform==='Instagram Reels'))failures.push('Instagram Reels missing');
+    if(calendar.some((item)=>item.status!=='PLANNED_NOT_PUBLISHED'))failures.push('calendar falsely claims publishing');
     const qa={passed:failures.length===0,failures,checks:['10+ planned posts','TikTok present','Instagram Reels present','every item explicitly not published','channel plan preserves measurement loop']};
     const status=qa.passed?'READY_FOR_PUBLISHING':'QA_FAILED';
     const u=await pool.query(`UPDATE distribution_packages SET qa_result=$2,status=$3,updated_at=now() WHERE id=$1 RETURNING *`,[
@@ -738,7 +747,7 @@ async function executeStep(job:JobRow,step:any){
     const candidate=inserted.rows[0];
 
     const refsR=await pool.query(`SELECT evidence_refs FROM job_steps WHERE job_id=$1 ORDER BY sequence`,[job.id]);
-    const evidenceRefs:string[]=[...new Set<string>(refsR.rows.flatMap((r:any)=>Array.isArray(r.evidence_refs)?r.evidence_refs.map(String):[]))];
+    const evidenceRefs:string[]=[...new Set<string>(refsR.rows.flatMap((row:{evidence_refs:unknown})=>Array.isArray(row.evidence_refs)?row.evidence_refs.map(String):[]))];
 
     await pool.query(`INSERT INTO employee_messages(
       company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,evidence_refs,authority_context,payload
@@ -797,10 +806,11 @@ export async function runOne(){
     const result=await executeStep(job,step);
     await stepSuccess(step.id,result.output,result.evidenceRefs);
 
-    if(String((result.output as any)?.status||'').startsWith('BLOCKED') || String((result.output as any)?.status||'').startsWith('WAITING_')){
-      await pool.query(`UPDATE jobs SET status='BLOCKED',last_error=$2,lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,[job.id,(result.output as any).status]);
-      await pool.query(`UPDATE work_orders SET status='BLOCKED',blockers=$2,updated_at=now() WHERE id=$1`,[job.work_order_id,JSON.stringify([(result.output as any).status])]);
-      await emitEvent(job.company_id,'JOB_BLOCKED',{jobId:job.id,workOrderId:job.work_order_id,reason:(result.output as any).status});
+    const outputStatus=resultStatus(result.output);
+    if(outputStatus.startsWith('BLOCKED') || outputStatus.startsWith('WAITING_')){
+      await pool.query(`UPDATE jobs SET status='BLOCKED',last_error=$2,lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,[job.id,outputStatus]);
+      await pool.query(`UPDATE work_orders SET status='BLOCKED',blockers=$2,updated_at=now() WHERE id=$1`,[job.work_order_id,JSON.stringify([outputStatus])]);
+      await emitEvent(job.company_id,'JOB_BLOCKED',{jobId:job.id,workOrderId:job.work_order_id,reason:outputStatus});
       return {processed:true,jobId:job.id,status:'BLOCKED'};
     }
 
