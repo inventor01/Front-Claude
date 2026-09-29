@@ -66,6 +66,141 @@ async function candidateName(job:JobRow){
 }
 
 async function executeStep(job:JobRow,step:any){
+  if(job.job_type==='STORE_BUILD' && step.step_type==='BRAND_STRATEGY'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const r=await pool.query('SELECT * FROM product_candidates WHERE id=$1 AND company_id=$2',[candidateId,job.company_id]);
+    if(!r.rowCount)throw new Error('Store build candidate not found.');
+    const candidate=r.rows[0];
+    const root=String(candidate.name||'Product').split(/\s+/).filter(Boolean)[0]||'Product';
+    const brandDirection={
+      namingStatus:'UNVERIFIED_TRADEMARK',
+      workingNameOptions:[`${root}Lab`,`${root}Haus`,`${root}Co`],
+      positioning:`A focused direct-to-consumer brand built around the clearest use-case for ${candidate.name}.`,
+      audience:'People actively searching for the problem/use-case demonstrated by the approved product candidate.',
+      visualDirection:['clean product-first composition','strong contrast','mobile-first typography','social-native demonstration imagery'],
+      guardrails:['No unsupported performance claims','No fake reviews','No unverified shipping promises','Final brand name requires trademark/domain review']
+    };
+    const inserted=await pool.query(`INSERT INTO store_packages(
+      company_id,project_id,work_order_id,candidate_id,status,brand_direction,external_state
+    ) VALUES($1,$2,$3,$4,'DRAFT',$5,$6)
+    ON CONFLICT(project_id,candidate_id) DO UPDATE SET
+      brand_direction=EXCLUDED.brand_direction,updated_at=now()
+    RETURNING *`,[
+      job.company_id,job.project_id,job.work_order_id,candidate.id,JSON.stringify(brandDirection),
+      JSON.stringify({shopify:'NOT_CONNECTED',publishAllowed:false})
+    ]);
+    return {output:{packageId:inserted.rows[0].id,brandDirection,status:'DRAFT'},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='STORE_BUILD' && step.step_type==='STORE_BRIEF'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const p=await pool.query('SELECT * FROM store_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
+    const c=await pool.query('SELECT * FROM product_candidates WHERE id=$1 AND company_id=$2',[candidateId,job.company_id]);
+    if(!p.rowCount||!c.rowCount)throw new Error('Store package or candidate missing.');
+    const candidate=c.rows[0];
+    const offer={
+      pricingStatus:'REQUIRES_VERIFIED_LANDED_COST',
+      primaryOffer:`Single-product offer for ${candidate.name}`,
+      bundleTests:['1x starter','2x value bundle','3x best-value bundle'],
+      guarantees:['Do not promise outcome guarantees until policy/legal review'],
+      shipping:'Use verified supplier shipping only; no invented delivery windows'
+    };
+    const pageArchitecture=[
+      {section:'Hero',goal:'Explain product and primary benefit in one screen',content:['product visual','specific non-hyped headline','primary CTA']},
+      {section:'Problem / Use Case',goal:'Make the customer recognize the need',content:['real scenario','no exaggerated pain claims']},
+      {section:'Demonstration',goal:'Show how the product works',content:['step-by-step demo','before/after only when truthful']},
+      {section:'Benefits',goal:'Translate features into outcomes',content:['3-5 evidence-safe benefits']},
+      {section:'How It Works',goal:'Reduce uncertainty',content:['setup','usage','care']},
+      {section:'FAQ',goal:'Resolve objections',content:['compatibility','shipping','returns','usage']},
+      {section:'Offer / CTA',goal:'Make purchase decision simple',content:['bundle options','clear price','CTA']},
+      {section:'Policies',goal:'Set expectations honestly',content:['shipping','returns','privacy','terms']}
+    ];
+    const copyDraft={
+      headline:`${candidate.name}, explained clearly.`,
+      subheadline:'A product-first page built to prove the use case before asking for the sale.',
+      cta:'See the offer',
+      note:'Copy is an internal draft; unsupported claims and invented testimonials are prohibited.'
+    };
+    const u=await pool.query(`UPDATE store_packages SET offer=$2,page_architecture=$3,copy_draft=$4,status='BRIEF_READY',updated_at=now()
+      WHERE id=$1 RETURNING *`,[p.rows[0].id,JSON.stringify(offer),JSON.stringify(pageArchitecture),JSON.stringify(copyDraft)]);
+    return {output:{packageId:u.rows[0].id,status:'BRIEF_READY',offer,pageArchitecture,copyDraft},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='STORE_BUILD' && step.step_type==='STORE_QA'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const p=await pool.query('SELECT * FROM store_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
+    if(!p.rowCount)throw new Error('Store package missing for QA.');
+    const pkg=p.rows[0];
+    const failures:string[]=[];
+    if(!pkg.brand_direction||!Object.keys(pkg.brand_direction).length)failures.push('brand_direction missing');
+    if(!pkg.offer||!Object.keys(pkg.offer).length)failures.push('offer missing');
+    if(!Array.isArray(pkg.page_architecture)||pkg.page_architecture.length<6)failures.push('page_architecture incomplete');
+    if(!pkg.copy_draft||!Object.keys(pkg.copy_draft).length)failures.push('copy_draft missing');
+    const qa={
+      passed:failures.length===0,
+      failures,
+      checks:[
+        'brand direction exists',
+        'offer does not invent economics',
+        'mobile-first page architecture exists',
+        'copy contains no fake testimonials',
+        'shipping/returns remain evidence-gated',
+        'publish authority remains false'
+      ]
+    };
+    const status=qa.passed?'READY_FOR_EXTERNAL':'QA_FAILED';
+    const u=await pool.query(`UPDATE store_packages SET qa_result=$2,status=$3,updated_at=now() WHERE id=$1 RETURNING *`,[
+      pkg.id,JSON.stringify(qa),status
+    ]);
+    if(!qa.passed)throw new Error(`Store package QA failed: ${failures.join(', ')}`);
+    return {output:{packageId:u.rows[0].id,status,qa},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='STORE_BUILD' && step.step_type==='EXTERNAL_HANDOFF'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const p=await pool.query('SELECT * FROM store_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
+    if(!p.rowCount)throw new Error('Store package missing for external handoff.');
+    const connection=await pool.query(`SELECT * FROM tool_connections
+      WHERE company_id=$1 AND provider='SHOPIFY' AND status='CONNECTED'
+      ORDER BY updated_at DESC LIMIT 1`,[job.company_id]);
+    if(!connection.rowCount){
+      await pool.query(`UPDATE store_packages SET status='READY_NEEDS_CONNECTION',
+        external_state=$2,updated_at=now() WHERE id=$1`,[
+        p.rows[0].id,JSON.stringify({shopify:'NOT_CONNECTED',publishAllowed:false,lastCheckedAt:new Date().toISOString()})
+      ]);
+      const existing=await pool.query(`SELECT id FROM employee_messages
+        WHERE company_id=$1 AND work_order_id=$2 AND type='BLOCKER'
+        AND from_employee_slug='luca' AND to_employee_slug='ava' AND consumed_at IS NULL LIMIT 1`,[
+        job.company_id,job.work_order_id
+      ]);
+      if(!existing.rowCount){
+        await pool.query(`INSERT INTO employee_messages(
+          company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,authority_context,payload
+        ) VALUES($1,$2,$3,'BLOCKER','luca','ava','Shopify connection required','Connect an authorized Shopify execution tool',$4,$5)`,[
+          job.company_id,job.project_id,job.work_order_id,
+          JSON.stringify({publishAllowed:false,spendAllowed:false}),
+          JSON.stringify({packageId:p.rows[0].id,reason:'SHOPIFY_NOT_CONNECTED'})
+        ]);
+      }
+      throw new Error('BLOCKED_EXTERNAL_AUTH: Shopify store execution is not connected');
+    }
+
+    const approval=await pool.query(`INSERT INTO approvals(
+      company_id,project_id,work_order_id,job_id,requested_by_employee_slug,action_type,action_payload,reason,risk,cost_cents,status
+    ) VALUES($1,$2,$3,$4,'luca','SHOPIFY_DRAFT_BUILD',$5,$6,'MEDIUM',0,'PENDING') RETURNING id`,[
+      job.company_id,job.project_id,job.work_order_id,job.id,
+      JSON.stringify({packageId:p.rows[0].id,connectionId:connection.rows[0].id}),
+      'Luca completed internal store QA. Owner approval is required before creating or changing a Shopify draft store.'
+    ]);
+    await pool.query(`UPDATE store_packages SET status='NEEDS_EXTERNAL_APPROVAL',
+      external_state=$2,updated_at=now() WHERE id=$1`,[
+      p.rows[0].id,JSON.stringify({shopify:'CONNECTED',publishAllowed:false,approvalId:approval.rows[0].id})
+    ]);
+    await pool.query(`UPDATE work_orders SET status='NEEDS_APPROVAL',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.work_order_id]);
+    await pool.query(`UPDATE projects SET phase='STORE_EXTERNAL_APPROVAL',updated_at=now() WHERE id=$1`,[job.project_id]);
+    return {output:{status:'WAITING_APPROVAL',approvalId:approval.rows[0].id,packageId:p.rows[0].id},evidenceRefs:[]};
+  }
+
   if(step.step_type==='DISCOVERY'){
     const result=await discoverCandidate(String(job.payload?.query||''));
     const evidenceRefs=await recordEvidence(job,result.evidence,'DISCOVERY');
