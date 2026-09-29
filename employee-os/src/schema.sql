@@ -414,3 +414,61 @@ CREATE TABLE IF NOT EXISTS verification_claims (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS verification_claims_company_idx ON verification_claims(company_id,status,created_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS integration_credentials (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  provider text NOT NULL,
+  connection_id uuid NOT NULL REFERENCES tool_connections(id) ON DELETE CASCADE,
+  ciphertext text NOT NULL,
+  iv text NOT NULL,
+  auth_tag text NOT NULL,
+  key_version text NOT NULL DEFAULT 'v1',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(company_id,provider,connection_id)
+);
+
+CREATE TABLE IF NOT EXISTS skill_definitions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  employee_slug text,
+  slug text NOT NULL,
+  name text NOT NULL,
+  purpose text NOT NULL,
+  status text NOT NULL DEFAULT 'DRAFT',
+  current_version integer NOT NULL DEFAULT 1,
+  source_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  required_tools jsonb NOT NULL DEFAULT '[]'::jsonb,
+  success_criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(company_id,slug)
+);
+
+CREATE TABLE IF NOT EXISTS skill_versions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  skill_id uuid NOT NULL REFERENCES skill_definitions(id) ON DELETE CASCADE,
+  version integer NOT NULL,
+  procedure jsonb NOT NULL,
+  source_lesson_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  assumptions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  verification_rules jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'DRAFT',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(skill_id,version)
+);
+
+CREATE TABLE IF NOT EXISTS skill_test_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  skill_id uuid NOT NULL REFERENCES skill_definitions(id) ON DELETE CASCADE,
+  version integer NOT NULL,
+  status text NOT NULL,
+  results jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS skill_definitions_company_idx ON skill_definitions(company_id,employee_slug,status,updated_at DESC);
