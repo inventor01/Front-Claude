@@ -11,7 +11,7 @@ export type SourceEvidence={
 
 export type DiscoveryResult={
   candidate:string;
-  discoveryMode:'OWNER_QUERY'|'SHOPIFY_TREND';
+  discoveryMode:'OWNER_QUERY'|'SHOPIFY_TREND'|'SOCIAL_REFERENCE';
   trendStatement:string|null;
   trendGrowthPct:number|null;
   evidence:SourceEvidence[];
