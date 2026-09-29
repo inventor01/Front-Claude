@@ -471,10 +471,9 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     const draft=String(sc.draft_response||'').trim();
     if(!draft)throw new Error('Support draft is missing.');
     const sent=await sendSupportEmail({
-      companyId:job.company_id,
-      to,
-      subject:String(sc.subject||'Support reply'),
-      text:draft
+      companyId:job.company_id,jobId:job.id,workOrderId:job.work_order_id,employeeSlug:job.employee_slug,
+      idempotencyKey:`support-send:${job.id}:${caseId}`,
+      to,subject:String(sc.subject||'Support reply'),text:draft
     });
     await pool.query(`UPDATE support_cases SET status='SENT',
       external_state=$2,updated_at=now() WHERE id=$1`,[
@@ -749,8 +748,9 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     });
 
     const rendered=await renderOriginalProductClips({
-      companyId:job.company_id,promptImage,specs,
-      clipCount:DEFAULT_RENDER_CLIPS,duration:DEFAULT_RENDER_DURATION
+      companyId:job.company_id,jobId:job.id,workOrderId:job.work_order_id,employeeSlug:job.employee_slug,
+      idempotencyKey:`creative-render:${job.id}:${pkg.id}`,
+      promptImage,specs,clipCount:DEFAULT_RENDER_CLIPS,duration:DEFAULT_RENDER_DURATION
     });
     const durable=await persistVideosToShopify({
       companyId:job.company_id,projectId:job.project_id,creativePackageId:String(pkg.id),
@@ -931,10 +931,9 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     const captions=Array.isArray(pkg.caption_templates)?pkg.caption_templates:[];
     const post=String(captions[0]||`New product launch: ${String(job.payload?.candidate||'See the product in action.')}`);
     const published=await publishSocial({
-      companyId:job.company_id,
-      post,
-      platforms:['instagram','tiktok'],
-      mediaUrls:[mediaUrls[0]]
+      companyId:job.company_id,jobId:job.id,workOrderId:job.work_order_id,employeeSlug:job.employee_slug,
+      idempotencyKey:`social-publish:${job.id}:${pkg.id}`,
+      post,platforms:['instagram','tiktok'],mediaUrls:[mediaUrls[0]]
     });
     const postIds=Array.isArray(published?.postIds)?published.postIds:[];
     const successful=postIds.filter((x:any)=>String(x?.status||'').toLowerCase()==='success');
@@ -1177,10 +1176,10 @@ export async function runOne(){
     return {processed:true,jobId:job.id,status:'STEP_SUCCEEDED'};
   }catch(e){
     const message=e instanceof Error?e.message:'Unknown worker error';
-    const blockedExternalAuth=message.startsWith('BLOCKED_EXTERNAL_AUTH:');
-    const terminal=blockedExternalAuth || job.retry_count>=job.max_attempts || !retryable(message);
-    const jobStatus=blockedExternalAuth ? 'BLOCKED' : terminal ? 'FAILED' : 'RETRY_SCHEDULED';
-    const stepStatus=blockedExternalAuth ? 'BLOCKED' : terminal ? 'FAILED' : 'WAITING';
+    const blockedExternal=message.startsWith('BLOCKED_EXTERNAL_');
+    const terminal=blockedExternal || job.retry_count>=job.max_attempts || !retryable(message);
+    const jobStatus=blockedExternal ? 'BLOCKED' : terminal ? 'FAILED' : 'RETRY_SCHEDULED';
+    const stepStatus=blockedExternal ? 'BLOCKED' : terminal ? 'FAILED' : 'WAITING';
 
     await pool.query(`UPDATE job_steps
       SET status=$2,last_error=$3,attempt_history=attempt_history || $4::jsonb,updated_at=now()
@@ -1194,7 +1193,7 @@ export async function runOne(){
       [job.id,jobStatus,message]);
 
     if(terminal){
-      const workStatus=blockedExternalAuth ? 'BLOCKED_EXTERNAL_AUTH' : 'FAILED';
+      const workStatus=message.startsWith('BLOCKED_EXTERNAL_AUTH:') ? 'BLOCKED_EXTERNAL_AUTH' : blockedExternal ? 'BLOCKED' : 'FAILED';
       await pool.query(`UPDATE work_orders SET status=$2,blockers=$3,updated_at=now() WHERE id=$1`,
         [job.work_order_id,workStatus,JSON.stringify([message])]);
     }else{
@@ -1202,7 +1201,7 @@ export async function runOne(){
         [job.work_order_id,JSON.stringify([message])]);
     }
 
-    const eventType=blockedExternalAuth ? 'JOB_BLOCKED' : terminal ? 'JOB_FAILED' : 'JOB_RETRY_SCHEDULED';
+    const eventType=blockedExternal ? 'JOB_BLOCKED' : terminal ? 'JOB_FAILED' : 'JOB_RETRY_SCHEDULED';
     await emitEvent(job.company_id,eventType,{jobId:job.id,workOrderId:job.work_order_id,error:message});
     return {processed:true,jobId:job.id,status:jobStatus,error:message};
   }

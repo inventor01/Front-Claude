@@ -120,6 +120,34 @@ export async function shopifyStatus(companyId:string){
   return {connected:row.status==='CONNECTED',status:row.status,metadata:row.metadata,updatedAt:row.updated_at};
 }
 
+export async function verifyShopifyDraftWrite(companyId:string){
+  const connectionR=await pool.query(`SELECT * FROM tool_connections
+    WHERE company_id=$1 AND provider='SHOPIFY' AND status='CONNECTED'
+    ORDER BY updated_at DESC LIMIT 1`,[companyId]);
+  if(!connectionR.rowCount)throw new Error('BLOCKED_EXTERNAL_AUTH: Shopify store execution is not connected');
+  const connection=connectionR.rows[0];
+  const credential=await readCredential<ShopifyCredential>(companyId,'SHOPIFY',String(connection.id));
+  const read=await graph<{shop:{name:string;myshopifyDomain:string};products:{nodes:Array<{id:string;title:string;status:string}>}}>(
+    credential,`query EmployeeOSReleaseGateRead { shop { name myshopifyDomain } products(first:1){nodes{id title status}} }`
+  );
+  const handle=`employee-os-release-gate-${companyId.slice(0,8)}`;
+  const write=await graph<{productSet:{product:{id:string;handle:string;title:string;status:string}|null;userErrors:Array<{field:string[];message:string}>}}>(
+    credential,
+    `mutation EmployeeOSReleaseGateDraft($input:ProductSetInput!,$identifier:ProductSetIdentifiers){
+      productSet(synchronous:true,input:$input,identifier:$identifier){
+        product{id handle title status} userErrors{field message}
+      }
+    }`,
+    {identifier:{handle},input:{
+      title:'Employee OS Release Gate QA — Safe Draft',handle,status:'DRAFT',
+      productType:'QA Verification',vendor:'Employee OS',tags:['employee-os-release-gate','qa-do-not-publish']
+    }}
+  );
+  if(write.productSet.userErrors.length)throw new Error(`Shopify draft QA error: ${write.productSet.userErrors.map(e=>e.message).join('; ')}`);
+  if(!write.productSet.product||write.productSet.product.status!=='DRAFT')throw new Error('Shopify draft QA failed: provider did not confirm DRAFT status.');
+  return {shop:read.shop,productReadSucceeded:true,draftProduct:write.productSet.product,verifiedAt:new Date().toISOString()};
+}
+
 function slugify(value:string){
   const slug=value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,70);
   return slug||`product-${Date.now()}`;
@@ -212,8 +240,8 @@ export async function executeStorePackage(input:{
   const productData=await graph<{productSet:{
     product:{id:string;handle:string;title:string;status:string;variants:{nodes:Array<{id:string;price:string}>}}|null;
     userErrors:Array<{field:string[];message:string}>;
-  }}>(credential,`mutation BuildProduct($input:ProductSetInput!){
-    productSet(synchronous:true,input:$input){
+  }}>(credential,`mutation BuildProduct($input:ProductSetInput!,$identifier:ProductSetIdentifiers){
+    productSet(synchronous:true,input:$input,identifier:$identifier){
       product{id handle title status variants(first:5){nodes{id price}}}
       userErrors{field message}
     }

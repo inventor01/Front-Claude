@@ -1,5 +1,6 @@
 import { pool } from './db.js';
 import { readCredential,storeCredential,deleteCredential } from './credentials.js';
+import { startExternalAction,completeExternalAction,failExternalAction } from './external-actions.js';
 
 const AYRSHARE_BASE=(process.env.AYRSHARE_TEST_BASE_URL||'https://app.ayrshare.com').replace(/\/$/,'');
 const RESEND_BASE=(process.env.RESEND_TEST_BASE_URL||'https://api.resend.com').replace(/\/$/,'');
@@ -122,43 +123,94 @@ export async function searchCredential(companyId:string){
 
 
 export async function publishSocial(input:{
-  companyId:string;post:string;platforms:string[];mediaUrls:string[];scheduleDate?:string|null;
+  companyId:string;jobId:string|null;workOrderId:string|null;employeeSlug:string;idempotencyKey:string;
+  post:string;platforms:string[];mediaUrls:string[];scheduleDate?:string|null;
 }){
   const row=await latest(input.companyId,'SOCIAL_PUBLISHER');
   if(!row||row.status!=='CONNECTED')throw new Error('BLOCKED_EXTERNAL_AUTH: Social publishing is not connected');
   const credential=await readCredential<{apiKey:string}>(input.companyId,'SOCIAL_PUBLISHER',String(row.id));
-  const body:Record<string,unknown>={
-    post:input.post,
-    platforms:input.platforms,
-    mediaUrls:input.mediaUrls
-  };
-  if(input.scheduleDate)body.scheduleDate=input.scheduleDate;
-  const res=await fetch(`${AYRSHARE_BASE}/api/post`,{
-    method:'POST',
-    headers:{authorization:`Bearer ${credential.apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.6'},
-    body:JSON.stringify(body)
+  const started=await startExternalAction({
+    companyId:input.companyId,jobId:input.jobId,workOrderId:input.workOrderId,employeeSlug:input.employeeSlug,
+    provider:'AYRSHARE',actionType:'SOCIAL_PUBLISH',target:input.platforms.join(','),idempotencyKey:input.idempotencyKey
   });
+  if(started.reused)return started.result;
+  const body:Record<string,unknown>={post:input.post,platforms:input.platforms,mediaUrls:input.mediaUrls};
+  if(input.scheduleDate)body.scheduleDate=input.scheduleDate;
+  let res:Response;
+  try{
+    res=await fetch(`${AYRSHARE_BASE}/api/post`,{
+      method:'POST',
+      headers:{authorization:`Bearer ${credential.apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.7'},
+      body:JSON.stringify(body)
+    });
+  }catch(error){
+    const message=error instanceof Error?error.message:'Ayrshare network failure';
+    await failExternalAction(String(started.action.id),message,'RECONCILIATION_REQUIRED');
+    throw new Error(`BLOCKED_EXTERNAL_RECONCILIATION: Ayrshare request outcome is unknown; reconcile before retry. ${message}`);
+  }
   const text=await res.text();
-  if(!res.ok)throw new Error(`Ayrshare publish failed (HTTP ${res.status}): ${text.slice(0,800)}`);
-  let parsed:any;try{parsed=JSON.parse(text);}catch{throw new Error('Ayrshare returned invalid publish JSON.');}
-  if(parsed?.status==='error'||parsed?.error)throw new Error(`Ayrshare publish failed: ${String(parsed.error||parsed.message||'unknown error')}`);
+  if(!res.ok){
+    const message=`Ayrshare publish failed (HTTP ${res.status}): ${text.slice(0,800)}`;
+    await failExternalAction(String(started.action.id),message,res.status===429||res.status>=500?'RETRYABLE_FAILURE':'FAILED');
+    throw new Error(message);
+  }
+  let parsed:any;
+  try{parsed=JSON.parse(text);}catch{
+    await failExternalAction(String(started.action.id),'Ayrshare returned invalid publish JSON.','RECONCILIATION_REQUIRED');
+    throw new Error('BLOCKED_EXTERNAL_RECONCILIATION: Ayrshare returned an ambiguous publish response.');
+  }
+  if(parsed?.status==='error'||parsed?.error){
+    const message=`Ayrshare publish failed: ${String(parsed.error||parsed.message||'unknown error')}`;
+    await failExternalAction(String(started.action.id),message,'FAILED'); throw new Error(message);
+  }
+  const externalId=String(parsed?.id||parsed?.postIds?.[0]?.id||'')||null;
+  await completeExternalAction(String(started.action.id),externalId,parsed);
   return parsed;
 }
 
 export async function sendSupportEmail(input:{
-  companyId:string;to:string;subject:string;text:string;
+  companyId:string;jobId:string|null;workOrderId:string|null;employeeSlug:string;idempotencyKey:string;
+  to:string;subject:string;text:string;
 }){
   const row=await latest(input.companyId,'EMAIL');
   if(!row||row.status!=='CONNECTED')throw new Error('BLOCKED_EXTERNAL_AUTH: Customer email is not connected');
   const credential=await readCredential<{apiKey:string;fromEmail:string}>(input.companyId,'EMAIL',String(row.id));
-  const res=await fetch(`${RESEND_BASE}/emails`,{
-    method:'POST',
-    headers:{authorization:`Bearer ${credential.apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.6'},
-    body:JSON.stringify({from:credential.fromEmail,to:[input.to],subject:input.subject,text:input.text})
+  const started=await startExternalAction({
+    companyId:input.companyId,jobId:input.jobId,workOrderId:input.workOrderId,employeeSlug:input.employeeSlug,
+    provider:'RESEND',actionType:'EMAIL_SEND',target:input.to,idempotencyKey:input.idempotencyKey
   });
+  if(started.reused)return started.result;
+  let res:Response;
+  try{
+    res=await fetch(`${RESEND_BASE}/emails`,{
+      method:'POST',
+      headers:{
+        authorization:`Bearer ${credential.apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.7',
+        'Idempotency-Key':input.idempotencyKey.slice(0,256)
+      },
+      body:JSON.stringify({from:credential.fromEmail,to:[input.to],subject:input.subject,text:input.text})
+    });
+  }catch(error){
+    const message=error instanceof Error?error.message:'Resend network failure';
+    await failExternalAction(String(started.action.id),message,'RETRYABLE_FAILURE');
+    throw new Error(`Temporary Resend connection failure: ${message}`);
+  }
   const raw=await res.text();
-  if(!res.ok)throw new Error(`Resend send failed (HTTP ${res.status}): ${raw.slice(0,800)}`);
-  let body:any;try{body=JSON.parse(raw);}catch{throw new Error('Resend returned invalid send JSON.');}
-  if(!body?.id)throw new Error('Resend did not return a message id.');
-  return {id:String(body.id),from:credential.fromEmail,to:input.to};
+  if(!res.ok){
+    const message=`Resend send failed (HTTP ${res.status}): ${raw.slice(0,800)}`;
+    await failExternalAction(String(started.action.id),message,res.status===429||res.status>=500?'RETRYABLE_FAILURE':'FAILED');
+    throw new Error(message);
+  }
+  let body:any;
+  try{body=JSON.parse(raw);}catch{
+    await failExternalAction(String(started.action.id),'Resend returned invalid send JSON.','RETRYABLE_FAILURE');
+    throw new Error('Temporary Resend response parsing failure.');
+  }
+  if(!body?.id){
+    await failExternalAction(String(started.action.id),'Resend did not return a message id.','FAILED');
+    throw new Error('Resend did not return a message id.');
+  }
+  const result={id:String(body.id),from:credential.fromEmail,to:input.to};
+  await completeExternalAction(String(started.action.id),result.id,result);
+  return result;
 }

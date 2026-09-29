@@ -184,6 +184,31 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY(company_id, key)
 );
+
+CREATE TABLE IF NOT EXISTS external_actions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  job_id uuid REFERENCES jobs(id) ON DELETE SET NULL,
+  work_order_id uuid REFERENCES work_orders(id) ON DELETE SET NULL,
+  employee_slug text,
+  provider text NOT NULL,
+  action_type text NOT NULL,
+  target text,
+  idempotency_key text NOT NULL,
+  status text NOT NULL DEFAULT 'PREPARED',
+  attempt_count integer NOT NULL DEFAULT 0,
+  provider_external_id text,
+  result jsonb NOT NULL DEFAULT '{}'::jsonb,
+  last_error text,
+  started_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(company_id,idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS external_actions_company_status_idx
+  ON external_actions(company_id,status,updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS tool_connections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

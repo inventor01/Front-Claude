@@ -5,7 +5,7 @@ import { pool,tx } from './db.js';
 import { hashPassword,verifyPassword,signSession,requireUser,requireCompany } from './auth.js';
 import { commandCenterHtml } from './ui.js';
 import { ensureAcademyDefaults,ingestTrainingSource,discoverTools,recommendVerificationTools,getEmployeeIntelligenceContext } from './academy.js';
-import { connectShopify,disconnectShopify,shopifyStatus } from './shopify-executor.js';
+import { connectShopify,disconnectShopify,shopifyStatus,verifyShopifyDraftWrite } from './shopify-executor.js';
 import { compileSkill,testSkill } from './skills-engine.js';
 import { connectCJ,disconnectCJ,cjStatus,searchCJ,mapCandidateToCJ } from './cj-executor.js';
 import { connectApify,disconnectApify,apifyStatus,connectOpenAI,disconnectOpenAI,openAIStatus } from './source-intel.js';
@@ -305,6 +305,17 @@ app.post('/api/company/:companyId/integrations/shopify/connect',async(req,reply)
   });
 });
 
+app.post('/api/company/:companyId/integrations/shopify/verify',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const result=await verifyShopifyDraftWrite(companyId);
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'SHOPIFY_RELEASE_GATE_VERIFIED',$2)`,[
+    companyId,JSON.stringify({draftProductId:result.draftProduct.id,status:result.draftProduct.status,verifiedAt:result.verifiedAt})
+  ]);
+  return reply.code(200).send(result);
+});
+
 app.delete('/api/company/:companyId/integrations/shopify',async(req,reply)=>{
   const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
   const membership=await requireCompany(userId,companyId);
@@ -410,10 +421,11 @@ app.post('/api/company/:companyId/integrations/runway/connect',async(req,reply)=
     model:z.string().min(2).max(80).default('gen4.5')
   }).parse(req.body);
   const result=await connectRunway({companyId,apiSecret:body.apiSecret,model:body.model});
+  const resumed=await resumeBlockedJobsForConnection(companyId,'RUNWAY');
   await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
-    companyId,JSON.stringify({provider:'RUNWAY',purpose:'CREATIVE_VIDEO_RENDERING',model:body.model})
+    companyId,JSON.stringify({provider:'RUNWAY',purpose:'CREATIVE_VIDEO_RENDERING',model:body.model,resumedJobs:resumed})
   ]);
-  return reply.code(201).send(result);
+  return reply.code(201).send({...result,resumedJobs:resumed});
 });
 app.delete('/api/company/:companyId/integrations/runway',async(req,reply)=>{
   const userId=await requireUser(req),{companyId}=req.params as {companyId:string};

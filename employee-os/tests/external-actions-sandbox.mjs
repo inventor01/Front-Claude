@@ -65,27 +65,37 @@ try{
   assert.equal((await socialStatus(company)).connected,true);
   assert.equal((await emailStatus(company)).connected,true);
 
-  const posted=await publishSocial({
-    companyId:company,
-    post:'Launch QA post',
-    platforms:['instagram','tiktok'],
-    mediaUrls:['https://cdn.example.test/video.mp4']
-  });
+  const socialInput={
+    companyId:company,jobId:null,workOrderId:null,employeeSlug:'nova',idempotencyKey:'qa-social-post-1',
+    post:'Launch QA post',platforms:['instagram','tiktok'],mediaUrls:['https://cdn.example.test/video.mp4']
+  };
+  const posted=await publishSocial(socialInput);
   assert.equal(posted.status,'success');
   assert.equal(seen.socialPosts,1);
   assert.deepEqual(lastPost.platforms,['instagram','tiktok']);
   assert.deepEqual(lastPost.mediaUrls,['https://cdn.example.test/video.mp4']);
 
-  const sent=await sendSupportEmail({
-    companyId:company,
-    to:'customer@example.test',
-    subject:'Your support answer',
-    text:'This is the approved response.'
-  });
+  const emailInput={
+    companyId:company,jobId:null,workOrderId:null,employeeSlug:'ellis',idempotencyKey:'qa-email-1',
+    to:'customer@example.test',subject:'Your support answer',text:'This is the approved response.'
+  };
+  const sent=await sendSupportEmail(emailInput);
   assert.equal(sent.id,'email-message-qa');
   assert.equal(seen.emails,1);
   assert.deepEqual(lastEmail.to,['customer@example.test']);
   assert.equal(lastEmail.from,'support@example.test');
+
+  const postedAgain=await publishSocial(socialInput);
+  const sentAgain=await sendSupportEmail(emailInput);
+  assert.equal(seen.socialPosts,1,'social retry must reuse the completed external action');
+  assert.equal(seen.emails,1,'email retry must reuse the completed external action');
+  assert.deepEqual(postedAgain,posted);
+  assert.deepEqual(sentAgain,sent);
+
+  const actions=await pool.query("SELECT provider,action_type,status,attempt_count,provider_external_id FROM external_actions WHERE company_id=$1 ORDER BY provider",[company]);
+  assert.equal(actions.rowCount,2);
+  assert(actions.rows.every(x=>x.status==='SUCCEEDED'));
+  assert(actions.rows.every(x=>Number(x.attempt_count)===1));
 
   const creds=await pool.query("SELECT provider,ciphertext FROM integration_credentials WHERE company_id=$1 ORDER BY provider",[company]);
   assert.equal(creds.rowCount,2);

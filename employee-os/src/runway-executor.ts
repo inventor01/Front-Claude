@@ -1,5 +1,6 @@
 import { pool } from './db.js';
 import { readCredential,storeCredential,deleteCredential } from './credentials.js';
+import { startExternalAction,markExternalWaiting,completeExternalAction,failExternalAction } from './external-actions.js';
 
 const API_VERSION='2024-11-06';
 const PROVIDER_TEST_MODE=process.env.PROVIDER_TEST_MODE==='1';
@@ -155,6 +156,10 @@ async function waitTask(secret:string,taskId:string,timeoutMs=6*60*1000){
 
 export async function renderOriginalProductClips(input:{
   companyId:string;
+  jobId:string;
+  workOrderId:string;
+  employeeSlug:string;
+  idempotencyKey:string;
   promptImage:string;
   specs:Array<{id:string;promptText:string}>;
   clipCount?:number;
@@ -167,27 +172,41 @@ export async function renderOriginalProductClips(input:{
   const selected=input.specs.slice(0,clipCount);
   if(!selected.length)throw new Error('No creative render specifications were supplied.');
 
-  const tasks:Array<{spec:RenderSpec;taskId:string}>=[];
+  const results:RunwayAsset[]=[];
   for(const row of selected){
     const spec:RenderSpec={
-      id:row.id,
-      promptImage:input.promptImage,
-      promptText:row.promptText.slice(0,1800),
-      ratio:'768:1280',
-      duration
+      id:row.id,promptImage:input.promptImage,promptText:row.promptText.slice(0,1800),
+      ratio:'768:1280',duration
     };
-    const taskId=await createTask(credential.apiSecret,credential.model||DEFAULT_RENDER_MODEL,spec);
-    tasks.push({spec,taskId});
+    const action=await startExternalAction({
+      companyId:input.companyId,jobId:input.jobId,workOrderId:input.workOrderId,employeeSlug:input.employeeSlug,
+      provider:'RUNWAY',actionType:'CREATIVE_RENDER',target:spec.id,idempotencyKey:`${input.idempotencyKey}:${spec.id}`
+    });
+    if(action.reused){ results.push(action.result as RunwayAsset); continue; }
+    let taskId=String(action.action.provider_external_id||'');
+    if(!taskId){
+      try{
+        taskId=await createTask(credential.apiSecret,credential.model||DEFAULT_RENDER_MODEL,spec);
+        await markExternalWaiting(String(action.action.id),taskId,{specId:spec.id});
+      }catch(error){
+        const message=error instanceof Error?error.message:'Runway task creation failed';
+        await failExternalAction(String(action.action.id),message,'RECONCILIATION_REQUIRED');
+        throw new Error(`BLOCKED_EXTERNAL_RECONCILIATION: Runway task creation outcome is unknown; reconcile before retry. ${message}`);
+      }
+    }
+    try{
+      const asset:RunwayAsset={
+        specId:spec.id,taskId,temporaryUrl:await waitTask(credential.apiSecret,taskId),
+        promptText:spec.promptText,model:credential.model||DEFAULT_RENDER_MODEL,duration:spec.duration,ratio:spec.ratio
+      };
+      await completeExternalAction(String(action.action.id),taskId,asset);
+      results.push(asset);
+    }catch(error){
+      const message=error instanceof Error?error.message:'Runway task wait failed';
+      if(/did not finish before/i.test(message))await markExternalWaiting(String(action.action.id),taskId,{specId:spec.id});
+      else await failExternalAction(String(action.action.id),message,'FAILED');
+      throw error;
+    }
   }
-
-  const results=await Promise.all(tasks.map(async({spec,taskId})=>({
-    specId:spec.id,
-    taskId,
-    temporaryUrl:await waitTask(credential.apiSecret,taskId),
-    promptText:spec.promptText,
-    model:credential.model||DEFAULT_RENDER_MODEL,
-    duration:spec.duration,
-    ratio:spec.ratio
-  })));
   return results;
 }
