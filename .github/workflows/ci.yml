@@ -38,6 +38,12 @@ jobs:
       - name: Full dependency high-severity audit
         run: npm audit --audit-level=high
 
+      - name: Install Employee OS dependencies
+        run: npm install --prefix employee-os --no-audit --no-fund
+
+      - name: Employee OS typecheck and build
+        run: npm run build --prefix employee-os
+
       - name: Install browser bridge dependencies
         run: npm install --prefix browser-bridge --no-audit --no-fund
 
