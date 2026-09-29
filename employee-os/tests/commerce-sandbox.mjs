@@ -14,6 +14,10 @@ const mock={
   payCalls:0,
   fulfillmentCreateCalls:0,
   trackingUpdateCalls:0,
+  themeDuplicateCalls:0,
+  themeWriteCalls:0,
+  themePublishCalls:0,
+  themePublished:false,
   pages:new Map(),
   cjOrder:null,
   cjPaid:false
@@ -29,7 +33,7 @@ function cjFail(res,message='Not found'){json(res,200,{code:1600100,result:false
 
 const shopifyScopes=[
   'read_products','write_products','read_orders','read_publications','write_publications',
-  'read_content','write_content','read_online_store_pages','write_online_store_pages',
+  'read_content','write_content','read_themes','write_themes','read_online_store_pages','write_online_store_pages',
   'read_merchant_managed_fulfillment_orders','write_merchant_managed_fulfillment_orders',
   'read_third_party_fulfillment_orders','write_third_party_fulfillment_orders'
 ];
@@ -73,6 +77,29 @@ const server=http.createServer(async(req,res)=>{
       mock.pages.set(page.handle,p);
       return json(res,200,{data:{pageCreate:{page:p,userErrors:[]}}});
     }
+    if(query.includes('MainTheme')){
+      return json(res,200,{data:{themes:{nodes:[{id:'gid://shopify/OnlineStoreTheme/9001',name:'QA Main',role:'MAIN',processing:false}]}}});
+    }
+    if(query.includes('DuplicateTheme')){
+      mock.themeDuplicateCalls++;
+      return json(res,200,{data:{themeDuplicate:{newTheme:{id:'gid://shopify/OnlineStoreTheme/9002',name:'Employee OS QA',role:'UNPUBLISHED',processing:false},userErrors:[]}}});
+    }
+    if(query.includes('ThemeReady')){
+      return json(res,200,{data:{theme:{id:'gid://shopify/OnlineStoreTheme/9002',name:'Employee OS QA',role:'UNPUBLISHED',processing:false}}});
+    }
+    if(query.includes('WriteVentureTheme')){
+      mock.themeWriteCalls++;
+      const files=Array.isArray(body.variables?.files)?body.variables.files:[];
+      if(files.length<5)return json(res,200,{data:{themeFilesUpsert:{job:null,userErrors:[{filename:'templates/index.json',message:'Expected full venture theme files'}]}}});
+      return json(res,200,{data:{themeFilesUpsert:{job:{id:'gid://shopify/Job/9100',done:true},userErrors:[]}}});
+    }
+    if(query.includes('ThemeFileJob')){
+      return json(res,200,{data:{job:{id:'gid://shopify/Job/9100',done:true}}});
+    }
+    if(query.includes('PublishVentureTheme')){
+      mock.themePublishCalls++;mock.themePublished=true;
+      return json(res,200,{data:{themePublish:{theme:{id:'gid://shopify/OnlineStoreTheme/9002',name:'Employee OS QA',role:'MAIN'},userErrors:[]}}});
+    }
     if(query.includes('FulfillmentOrdersForOrder')){
       return json(res,200,{data:{order:{
         id:'gid://shopify/Order/5001',
@@ -114,6 +141,10 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='GET'&&url.pathname==='/products/car-diffuser'){
     res.writeHead(mock.published?200:404,{'content-type':'text/html'});return res.end('<html><body>QA product</body></html>');
   }
+  if(req.method==='GET'&&url.pathname==='/'){
+    res.writeHead(mock.themePublished?200:404,{'content-type':'text/html'});return res.end('<html><body>QA venture home</body></html>');
+  }
+
 
   const cjPath=url.pathname.replace(/^\/api2\.0\/v1/,'');
   if(req.method==='POST'&&cjPath==='/authentication/getAccessToken'){
@@ -294,6 +325,11 @@ assert(live.external_state.productUrl===`http://127.0.0.1:${MOCK_PORT}/products/
 assert(live.external_state.supplier?.provider==='CJ','CJ mapping not persisted with live store');
 assert(mock.productSetCalls===1,'Shopify product should be created exactly once');
 assert(mock.publishCalls===1,'Shopify product should be published exactly once');
+assert(mock.themeDuplicateCalls===1,'Shopify main theme should be duplicated exactly once');
+assert(mock.themeWriteCalls===1,'Venture theme files should be written exactly once');
+assert(mock.themePublishCalls===1,'Venture theme should be published exactly once');
+assert(live.external_state.theme?.themeId==='gid://shopify/OnlineStoreTheme/9002','published venture theme ID was not persisted');
+assert(live.external_state.homepageReachable===true,'homepage QA was not persisted');
 
 const paymentApproval=await waitFor(async()=>{
   const s=await api(`/api/company/${company}/state`,{headers:auth});
@@ -337,6 +373,8 @@ console.log(JSON.stringify({
   createOrderCalls:mock.createOrderCalls,
   payCalls:mock.payCalls,
   shopifyFulfillmentCalls:mock.fulfillmentCreateCalls,
+  themePublished:mock.themePublished,
+  themeWriteCalls:mock.themeWriteCalls,
   encryptedCredentialRows:creds.rowCount
 },null,2));
 
