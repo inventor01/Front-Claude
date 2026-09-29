@@ -71,7 +71,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
 (function(){
   var token=localStorage.getItem('employee_os_token')||'';
   var companyId=localStorage.getItem('employee_os_company')||'';
-  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null, cj=null, apify=null, openai=null, runway=null, front=null, social=null, emailConn=null, searchConn=null;
+  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, readiness=null, shopify=null, cj=null, apify=null, openai=null, runway=null, front=null, social=null, emailConn=null, searchConn=null;
 
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
   function badge(v){var x=String(v||'');var cls=/DONE|SUCCEEDED|APPROVED|READY_FOR/.test(x)?'good':/BLOCK|FAILED|REJECT/.test(x)?'bad':'warn';return '<span class="badge '+cls+'">'+esc(x)+'</span>';}
@@ -115,6 +115,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
         optionalRequest('/api/company/'+companyId+'/execution',{jobs:[],steps:[],evidence:[],messages:[]},'execution'),
         optionalRequest('/api/company/'+companyId+'/memories',{memories:[]},'memories'),
         optionalRequest('/api/company/'+companyId+'/academy',{profiles:[],sources:[],lessons:[],tools:[],discoveries:[],claims:[],skills:[],skillTests:[]},'academy'),
+        optionalRequest('/api/company/'+companyId+'/external-readiness',{codeReadiness:'UNKNOWN',providerReadiness:'UNKNOWN',connectedCount:0,totalRequired:5,modules:[],releaseReady:false},'external-readiness'),
         optionalRequest('/api/company/'+companyId+'/integrations/shopify',{connected:false,status:'UNAVAILABLE'},'shopify'),
         optionalRequest('/api/company/'+companyId+'/integrations/cj',{connected:false,status:'UNAVAILABLE'},'cj'),
         optionalRequest('/api/company/'+companyId+'/integrations/apify',{connected:false,status:'UNAVAILABLE'},'apify'),
@@ -125,7 +126,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
         optionalRequest('/api/company/'+companyId+'/integrations/email',{connected:false,status:'UNAVAILABLE'},'email'),
         optionalRequest('/api/company/'+companyId+'/integrations/search',{connected:false,status:'UNAVAILABLE'},'search')
       ]);
-      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];cj=all[6];apify=all[7];openai=all[8];runway=all[9];front=all[10];social=all[11];emailConn=all[12];searchConn=all[13];
+      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];readiness=all[5];shopify=all[6];cj=all[7];apify=all[8];openai=all[9];runway=all[10];front=all[11];social=all[12];emailConn=all[13];searchConn=all[14];
       render();
     }catch(e){
       if(e.status===401){
@@ -193,6 +194,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     if(/Creative rendering|renderer|Runway/i.test(text))return 'Runway';
     if(/Social publishing|TikTok|Instagram/i.test(text))return 'Social publishing';
     if(/EMAIL support|customer email|support provider/i.test(text))return 'Customer email';
+    if(/APIFY|source capture|reference product|Instagram capture/i.test(text))return 'Apify';
     if(/CJ|fulfillment/i.test(text))return 'CJdropshipping';
     return '';
   }
@@ -216,8 +218,13 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var decisions=(briefing&&briefing.decisionsNeeded)||[], rawAttention=(briefing&&briefing.attention)||[], projects=(briefing&&briefing.activeProjects)||[];
     var attention=collapseWork(rawAttention);
     var urgent=decisions.length?decisions.length+' decision'+(decisions.length===1?'':'s')+' need you.':attention.length?attention.length+' unique blocker'+(attention.length===1?'':'s')+' visible.':'Nothing urgent needs you.';
+    var readyCount=(readiness&&readiness.connectedCount)||0,totalRequired=(readiness&&readiness.totalRequired)||5;
+    var readinessHtml='<div class="card"><span class="metric">'+esc(readyCount)+'/'+esc(totalRequired)+'</span><span class="label">External providers connected</span><p>'+
+      ((readiness&&readiness.codeReadiness)==='PASSED'
+        ? 'Execution code passed QA. Remaining blockers are provider authorization only.'
+        : 'Execution readiness has not been verified.')+'</p></div>';
     return '<div class="hero"><h2>'+esc(urgent)+'</h2><p>Give Ava an outcome. The company persists the work, delegates it, and surfaces only evidence-backed results and real blockers. Repeated historical runs are collapsed here instead of shown as duplicate emergencies.</p></div>'+
-    '<div class="grid"><div class="card"><span class="metric">'+projects.length+'</span><span class="label">Active projects</span></div><div class="card"><span class="metric">'+decisions.length+'</span><span class="label">Decisions</span></div><div class="card"><span class="metric">'+attention.length+'</span><span class="label">Unique blockers</span></div></div>'+
+    '<div class="grid"><div class="card"><span class="metric">'+projects.length+'</span><span class="label">Active projects</span></div><div class="card"><span class="metric">'+decisions.length+'</span><span class="label">Decisions</span></div>'+readinessHtml+'</div>'+
     '<h3 class="section-title">Launch from a reference link</h3><div class="card"><form id="linkLaunchQuickForm" class="form"><input id="linkLaunchQuickUrl" placeholder="Paste Instagram Reel, TikTok, X, YouTube, or product-demo URL"/><button class="action">Reverse-engineer and build venture</button></form><p>Employee OS preserves the source, identifies the product, reverse-sources it, and sends the creative structure to Maya without copying the creator\\'s exact assets.</p></div>'+
     '<h3 class="section-title">Or give Ava an objective</h3><div class="card"><form id="objectiveForm" class="form"><textarea id="objectiveText">Find a product that is demonstrably selling now and build the business from start to finish. Verify demand, supplier viability, stock, U.S. freight, landed economics, contentability, and risk. Build the brand and Shopify storefront, connect fulfillment, create the creative and distribution system, and continue until the business is launch-ready. Only bring me decisions or external actions that genuinely require owner approval. Never assume unknown facts and never call work complete without evidence.</textarea><input id="objectiveQuery" placeholder="Optional focus — leave blank and Rowan chooses the product from current evidence"/><button class="action">Start durable work</button></form></div>'+
     '<h3 class="section-title">What needs me</h3><div class="stack">'+(decisions.slice(0,8).map(renderAttention).concat(attention.slice(0,8).map(function(g){return renderAttention(g.item,g.count,g.projectCount);})).join('')||'<div class="empty">No owner decision is waiting.</div>')+'</div>';
@@ -324,6 +331,18 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
         ? '<div class="success"><b>'+esc(name)+' connected</b><br>'+esc(okText)+'</div>'
         : '<div class="error"><b>'+esc(name)+' not connected</b><br>'+esc(missingText)+'</div>';
     }
+    var readinessModules=(readiness&&readiness.modules)||[];
+    var readinessCards=readinessModules.map(function(m){
+      return '<div class="item"><div class="row"><b>'+esc(m.label)+'</b>'+badge(m.status)+'</div><p>'+
+        (m.connected?'Authorized and eligible to resume blocked work.':'Authorization required. Existing blocked jobs will resume after connection.')+
+        '</p></div>';
+    }).join('');
+    var readinessPanel='<div class="'+((readiness&&readiness.releaseReady)?'success':'error')+'"><b>External execution readiness: '+
+      esc((readiness&&readiness.connectedCount)||0)+'/'+esc((readiness&&readiness.totalRequired)||5)+'</b><br>'+
+      ((readiness&&readiness.codeReadiness)==='PASSED'?'Execution code QA passed. ':'')+
+      ((readiness&&readiness.releaseReady)?'All required providers are connected.':'Only provider authorization remains for the modules below.')+
+      '</div><div class="stack">'+readinessCards+'</div><h3 class="section-title">Provider setup</h3>';
+
 
     var frontMeta=(front&&front.metadata)||{};
     var socialMeta=(social&&social.metadata)||{};
@@ -343,7 +362,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var runwayHtml=stateBox(runway,'Runway',String(runwayMeta.model||'Video model')+' · default package '+String(runwayMeta.defaultClipCount||3)+' clips / est. $'+runwayCost,'Maya can storyboard, but cannot generate final original videos.');
 
     return '<div class="hero"><h2>Connections</h2><p>One operating panel for the entire company stack. Core business tools are first-class; source-capture providers are implementation details behind Front whenever possible.</p></div>'+
-      '<h3 class="section-title">Intelligence & verification</h3>'+
+      readinessPanel+'<h3 class="section-title">Intelligence & verification</h3>'+
       '<div class="grid two"><div class="card"><h3>Front Intelligence</h3>'+frontHtml+
       (front&&front.connected
         ? '<button id="disconnectFront" class="danger">Disconnect Front</button>'
