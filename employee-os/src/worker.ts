@@ -1,5 +1,6 @@
 import { runOne } from './engine.js';
 import { processOneManagerMessage } from './manager.js';
+import { pollPaidShopifyOrdersOnce,processApprovedCJPaymentsOnce,syncCJFulfillmentOnce } from './commerce-sync.js';
 
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 console.log('employee worker started');
@@ -17,6 +18,12 @@ for(;;){
       if(!m.processed)break;
       processed++;
     }
+    const orders=await pollPaidShopifyOrdersOnce();
+    processed+=orders.processed;
+    const payments=await processApprovedCJPaymentsOnce();
+    processed+=payments.processed;
+    const tracking=await syncCJFulfillmentOnce();
+    processed+=tracking.processed;
     if(!processed)await sleep(3000);
   }catch(e){
     console.error('worker loop error',e);
