@@ -8,6 +8,7 @@ import { ensureAcademyDefaults,ingestTrainingSource,discoverTools,recommendVerif
 import { connectShopify,disconnectShopify,shopifyStatus } from './shopify-executor.js';
 import { compileSkill,testSkill } from './skills-engine.js';
 import { connectCJ,disconnectCJ,cjStatus,searchCJ,mapCandidateToCJ } from './cj-executor.js';
+import { connectApify,disconnectApify,apifyStatus,connectOpenAI,disconnectOpenAI,openAIStatus } from './source-intel.js';
 
 const app=Fastify({logger:true});
 await app.register(cors,{origin:true});
@@ -53,7 +54,7 @@ app.get('/api/me',async req=>{
 });
 app.get('/api/company/:companyId/state',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
-  const [employees,objectives,projects,work,approvals,events,candidates,storePackages,creativePackages,distributionPackages,supportCases,issuePatterns,toolConnections,supplierMappings,fulfillmentOrders]=await Promise.all([
+  const [employees,objectives,projects,work,approvals,events,candidates,storePackages,creativePackages,distributionPackages,supportCases,issuePatterns,toolConnections,supplierMappings,fulfillmentOrders,referenceSources,linkLaunches]=await Promise.all([
     pool.query('SELECT * FROM employees WHERE company_id=$1 ORDER BY created_at',[companyId]),
     pool.query('SELECT * FROM objectives WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
     pool.query('SELECT * FROM projects WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
@@ -68,9 +69,11 @@ app.get('/api/company/:companyId/state',async req=>{
     pool.query('SELECT * FROM issue_patterns WHERE company_id=$1 ORDER BY last_seen_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT id,tool_id,provider,risk_class,status,metadata,updated_at FROM tool_connections WHERE company_id=$1 ORDER BY provider',[companyId]),
     pool.query('SELECT * FROM supplier_product_mappings WHERE company_id=$1 ORDER BY updated_at DESC LIMIT 100',[companyId]),
-    pool.query('SELECT * FROM fulfillment_orders WHERE company_id=$1 ORDER BY updated_at DESC LIMIT 100',[companyId])
+    pool.query('SELECT * FROM fulfillment_orders WHERE company_id=$1 ORDER BY updated_at DESC LIMIT 100',[companyId]),
+    pool.query('SELECT * FROM reference_sources WHERE company_id=$1 ORDER BY updated_at DESC LIMIT 100',[companyId]),
+    pool.query('SELECT * FROM link_launches WHERE company_id=$1 ORDER BY updated_at DESC LIMIT 100',[companyId])
   ]);
-  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows,storePackages:storePackages.rows,creativePackages:creativePackages.rows,distributionPackages:distributionPackages.rows,supportCases:supportCases.rows,issuePatterns:issuePatterns.rows,toolConnections:toolConnections.rows,supplierMappings:supplierMappings.rows,fulfillmentOrders:fulfillmentOrders.rows};
+  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows,storePackages:storePackages.rows,creativePackages:creativePackages.rows,distributionPackages:distributionPackages.rows,supportCases:supportCases.rows,issuePatterns:issuePatterns.rows,toolConnections:toolConnections.rows,supplierMappings:supplierMappings.rows,fulfillmentOrders:fulfillmentOrders.rows,referenceSources:referenceSources.rows,linkLaunches:linkLaunches.rows};
 });
 app.get('/api/company/:companyId/execution',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
@@ -285,6 +288,111 @@ app.post('/api/company/:companyId/candidates/:candidateId/supplier-map',async(re
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   const result=await mapCandidateToCJ(companyId,candidateId);
   return reply.code(result.status==='NEEDS_REVIEW'?202:201).send(result);
+});
+
+app.get('/api/company/:companyId/integrations/apify',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  return apifyStatus(companyId);
+});
+app.post('/api/company/:companyId/integrations/apify/connect',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({token:z.string().min(10).max(1000)}).parse(req.body);
+  const result=await connectApify({companyId,token:body.token});
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
+    companyId,JSON.stringify({provider:'APIFY',purpose:'SOCIAL_REFERENCE_CAPTURE'})
+  ]);
+  return reply.code(201).send(result);
+});
+app.delete('/api/company/:companyId/integrations/apify',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return disconnectApify(companyId);
+});
+
+app.get('/api/company/:companyId/integrations/openai',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  return openAIStatus(companyId);
+});
+app.post('/api/company/:companyId/integrations/openai/connect',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({apiKey:z.string().min(10).max(1000)}).parse(req.body);
+  const result=await connectOpenAI({companyId,apiKey:body.apiKey});
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
+    companyId,JSON.stringify({provider:'OPENAI',purpose:'MULTIMODAL_REFERENCE_ANALYSIS',model:result.model})
+  ]);
+  return reply.code(201).send(result);
+});
+app.delete('/api/company/:companyId/integrations/openai',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return disconnectOpenAI(companyId);
+});
+
+app.post('/api/company/:companyId/ventures/from-link',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  const body=z.object({
+    url:z.string().url().max(2000),
+    constraints:z.array(z.string().max(500)).max(30).default([]),
+    budgetCents:z.number().int().min(0).max(100000000).nullable().default(null)
+  }).parse(req.body);
+  const result=await tx(async db=>{
+    const statement='Turn this social-commerce reference into a verified, original ecommerce venture from product identification through sourcing, storefront, creative, distribution, and fulfillment.';
+    const constraints=[
+      'Never assume product identity, economics, stock, shipping, or performance.',
+      'Model creative structure but do not copy exact footage, branding, script, music, or creator expression.',
+      'No spending or publishing without the required owner approval.',
+      ...body.constraints
+    ];
+    const objective=await db.query(`INSERT INTO objectives(company_id,created_by,statement,constraints)
+      VALUES($1,$2,$3,$4) RETURNING *`,[companyId,userId,statement,JSON.stringify(constraints)]);
+    const project=await db.query(`INSERT INTO projects(company_id,objective_id,name,phase,status)
+      VALUES($1,$2,'Link-to-Launch Venture','REFERENCE_INTELLIGENCE','ACTIVE') RETURNING *`,[companyId,objective.rows[0].id]);
+    const source=await db.query(`INSERT INTO reference_sources(company_id,project_id,source_url,provider,status)
+      VALUES($1,$2,$3,$4,'PENDING_CAPTURE')
+      ON CONFLICT(company_id,source_url) DO UPDATE SET project_id=EXCLUDED.project_id,status='PENDING_CAPTURE',error=NULL,updated_at=now()
+      RETURNING *`,[
+      companyId,project.rows[0].id,body.url,
+      new URL(body.url).hostname.toLowerCase().includes('instagram')?'INSTAGRAM':'WEB'
+    ]);
+    const launch=await db.query(`INSERT INTO link_launches(company_id,project_id,source_id,objective_id,status)
+      VALUES($1,$2,$3,$4,'SOURCE_CAPTURE')
+      ON CONFLICT(project_id) DO UPDATE SET source_id=EXCLUDED.source_id,status='SOURCE_CAPTURE',updated_at=now()
+      RETURNING *`,[companyId,project.rows[0].id,source.rows[0].id,objective.rows[0].id]);
+    const work=await db.query(`INSERT INTO work_orders(company_id,project_id,owner_employee_slug,assigned_employee_slug,objective,status,risk_level,success_criteria)
+      VALUES($1,$2,'ava','rowan','Identify the reference product and verify the opportunity','READY','MEDIUM',$3) RETURNING *`,[
+      companyId,project.rows[0].id,JSON.stringify([
+        'reference captured with provenance','product identified with explicit confidence','demand and supplier evidence verified',
+        'economics remain explicit','creative reference retained for Maya','manager receives structured launch result'
+      ])
+    ]);
+    const job=await db.query(`INSERT INTO jobs(company_id,project_id,work_order_id,employee_slug,job_type,payload,idempotency_key)
+      VALUES($1,$2,$3,'rowan','LINK_PRODUCT_RESEARCH',$4,$5) RETURNING *`,[
+      companyId,project.rows[0].id,work.rows[0].id,
+      JSON.stringify({sourceId:source.rows[0].id,sourceUrl:body.url,statement,constraints,budgetCents:body.budgetCents}),
+      `link-product-research:${project.rows[0].id}`
+    ]);
+    const steps=['SOURCE_CAPTURE','SOURCE_ANALYSIS','DISCOVERY','FRONT_SCAN','DEMAND_VALIDATION','SUPPLIER_VALIDATION','ECONOMICS','CONTENTABILITY','RISK_REVIEW','MANAGER_REVIEW'];
+    for(let i=0;i<steps.length;i++)await db.query(`INSERT INTO job_steps(company_id,job_id,sequence,step_type,input)
+      VALUES($1,$2,$3,$4,$5)`,[companyId,job.rows[0].id,i+1,steps[i],JSON.stringify({sourceId:source.rows[0].id,sourceUrl:body.url})]);
+    await db.query(`INSERT INTO employee_messages(company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,authority_context,payload)
+      VALUES($1,$2,$3,'WORK_ASSIGNMENT','ava','rowan',$4,'Identify product, preserve reference evidence, and return a sourced candidate',$5,$6)`,[
+      companyId,project.rows[0].id,work.rows[0].id,statement,
+      JSON.stringify({risk:'MEDIUM',spendAllowed:false,publishAllowed:false,sourceUrl:body.url}),
+      JSON.stringify({jobId:job.rows[0].id,sourceId:source.rows[0].id})
+    ]);
+    await db.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'LINK_LAUNCH_CREATED',$2),($1,'JOB_QUEUED',$3)`,[
+      companyId,JSON.stringify({linkLaunchId:launch.rows[0].id,projectId:project.rows[0].id,sourceId:source.rows[0].id,url:body.url}),
+      JSON.stringify({jobId:job.rows[0].id,employee:'rowan'})
+    ]);
+    return {objective:objective.rows[0],project:project.rows[0],source:source.rows[0],linkLaunch:launch.rows[0],workOrder:work.rows[0],job:job.rows[0]};
+  });
+  return reply.code(202).send(result);
 });
 
 app.post('/api/company/:companyId/objectives',async(req,reply)=>{
