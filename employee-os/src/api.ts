@@ -10,6 +10,7 @@ import { compileSkill,testSkill } from './skills-engine.js';
 import { connectCJ,disconnectCJ,cjStatus,searchCJ,mapCandidateToCJ } from './cj-executor.js';
 import { connectApify,disconnectApify,apifyStatus,connectOpenAI,disconnectOpenAI,openAIStatus } from './source-intel.js';
 import { connectRunway,disconnectRunway,runwayStatus } from './runway-executor.js';
+import { connectFront,disconnectFront,frontStatus,connectAyrshare,disconnectSocial,socialStatus,connectResend,disconnectEmail,emailStatus,connectJina,disconnectSearch,searchStatus } from './external-connections.js';
 
 const app=Fastify({logger:true});
 
@@ -489,6 +490,78 @@ app.post('/api/company/:companyId/ventures/from-link',async(req,reply)=>{
     return {objective:objective.rows[0],project:project.rows[0],source:source.rows[0],linkLaunch:launch.rows[0],workOrder:work.rows[0],job:job.rows[0]};
   });
   return reply.code(202).send(result);
+});
+
+app.get('/api/company/:companyId/integrations/front',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  return frontStatus(companyId);
+});
+app.post('/api/company/:companyId/integrations/front/connect',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({baseUrl:z.string().url().max(1000),apiKey:z.string().min(8).max(1000)}).parse(req.body);
+  const result=await connectFront({companyId,...body});
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[companyId,JSON.stringify({provider:'FRONT'})]);
+  return reply.code(201).send(result);
+});
+app.delete('/api/company/:companyId/integrations/front',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return disconnectFront(companyId);
+});
+
+app.get('/api/company/:companyId/integrations/social',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  return socialStatus(companyId);
+});
+app.post('/api/company/:companyId/integrations/social/connect',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({apiKey:z.string().min(8).max(1000)}).parse(req.body);
+  const result=await connectAyrshare({companyId,apiKey:body.apiKey});
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[companyId,JSON.stringify({provider:'SOCIAL_PUBLISHER',name:'Ayrshare'})]);
+  return reply.code(201).send(result);
+});
+app.delete('/api/company/:companyId/integrations/social',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return disconnectSocial(companyId);
+});
+
+app.get('/api/company/:companyId/integrations/email',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  return emailStatus(companyId);
+});
+app.post('/api/company/:companyId/integrations/email/connect',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({apiKey:z.string().min(8).max(1000),fromEmail:z.string().email().max(320)}).parse(req.body);
+  const result=await connectResend({companyId,...body});
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[companyId,JSON.stringify({provider:'EMAIL',name:'Resend',fromEmail:body.fromEmail})]);
+  return reply.code(201).send(result);
+});
+app.delete('/api/company/:companyId/integrations/email',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return disconnectEmail(companyId);
+});
+
+app.get('/api/company/:companyId/integrations/search',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  return searchStatus(companyId);
+});
+app.post('/api/company/:companyId/integrations/search/connect',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({apiKey:z.string().min(8).max(1000)}).parse(req.body);
+  const result=await connectJina({companyId,apiKey:body.apiKey});
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[companyId,JSON.stringify({provider:'SEARCH',name:'Jina Search'})]);
+  return reply.code(201).send(result);
+});
+app.delete('/api/company/:companyId/integrations/search',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return disconnectSearch(companyId);
 });
 
 app.post('/api/company/:companyId/objectives',async(req,reply)=>{
