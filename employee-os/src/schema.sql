@@ -243,3 +243,42 @@ CREATE TABLE IF NOT EXISTS store_packages (
   UNIQUE(project_id,candidate_id)
 );
 CREATE INDEX IF NOT EXISTS store_packages_company_idx ON store_packages(company_id,created_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS creative_packages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  work_order_id uuid NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  candidate_id uuid NOT NULL REFERENCES product_candidates(id) ON DELETE CASCADE,
+  store_package_id uuid REFERENCES store_packages(id) ON DELETE SET NULL,
+  status text NOT NULL DEFAULT 'DRAFT',
+  strategy jsonb NOT NULL DEFAULT '{}'::jsonb,
+  hooks jsonb NOT NULL DEFAULT '[]'::jsonb,
+  scripts jsonb NOT NULL DEFAULT '[]'::jsonb,
+  storyboards jsonb NOT NULL DEFAULT '[]'::jsonb,
+  qa_result jsonb NOT NULL DEFAULT '{}'::jsonb,
+  external_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(project_id,candidate_id)
+);
+CREATE INDEX IF NOT EXISTS creative_packages_company_idx ON creative_packages(company_id,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS distribution_packages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  work_order_id uuid NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  creative_package_id uuid NOT NULL REFERENCES creative_packages(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'DRAFT',
+  channel_plan jsonb NOT NULL DEFAULT '{}'::jsonb,
+  calendar jsonb NOT NULL DEFAULT '[]'::jsonb,
+  caption_templates jsonb NOT NULL DEFAULT '[]'::jsonb,
+  qa_result jsonb NOT NULL DEFAULT '{}'::jsonb,
+  external_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(project_id,creative_package_id)
+);
+CREATE INDEX IF NOT EXISTS distribution_packages_company_idx ON distribution_packages(company_id,created_at DESC);
