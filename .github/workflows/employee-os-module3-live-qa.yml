@@ -1,0 +1,91 @@
+name: Employee OS Module 3 Live QA
+
+on:
+  push:
+    branches: [front-commerce-dev]
+    paths:
+      - ".github/workflows/employee-os-module3-live-qa.yml"
+      - "employee-os/**"
+  workflow_dispatch:
+
+jobs:
+  module3-live-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Live manager, memory, approval, and handoff QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://employee-os-api-production.up.railway.app"
+          SUFFIX="$(date +%s)-$RANDOM"
+          EMAIL="module3-$SUFFIX@example.test"
+          PASSWORD="Module3-QA-$SUFFIX!"
+
+          echo "Health check"
+          curl -fsS "$BASE/health" | jq -e '.ok == true' >/dev/null
+
+          echo "Register isolated QA company"
+          REGISTER="$(curl -fsS -X POST "$BASE/api/auth/register"             -H "content-type: application/json"             -d "$(jq -nc --arg e "$EMAIL" --arg p "$PASSWORD" '{email:$e,password:$p,companyName:"Module 3 Live QA"}')")"
+          TOKEN="$(jq -r '.token' <<<"$REGISTER")"
+          COMPANY="$(jq -r '.company.id' <<<"$REGISTER")"
+          test -n "$TOKEN" && test "$TOKEN" != "null"
+          test -n "$COMPANY" && test "$COMPANY" != "null"
+
+          auth=(-H "Authorization: Bearer $TOKEN")
+
+          echo "Create research objective"
+          CREATED="$(curl -fsS -X POST "$BASE/api/company/$COMPANY/objectives"             "${auth[@]}" -H "content-type: application/json"             -d '{"statement":"Find and verify car diffuser as an organic dropshipping product. Do not spend money or publish anything without owner approval.","constraints":["No spending without owner approval","No publishing without owner approval"],"query":"car diffuser"}')"
+          PROJECT="$(jq -r '.project.id' <<<"$CREATED")"
+          RESEARCH_WO="$(jq -r '.workOrder.id' <<<"$CREATED")"
+          RESEARCH_JOB="$(jq -r '.job.id' <<<"$CREATED")"
+          test "$(jq -r '.job.status' <<<"$CREATED")" = "QUEUED"
+
+          echo "Wait for Rowan result and Ava manager review"
+          APPROVAL=""
+          for i in $(seq 1 40); do
+            STATE="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            APPROVAL="$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="PRODUCT_GATE" and .status=="PENDING")] | .[0].id // empty' <<<"$STATE")"
+            CONSUMED="$(jq -r --arg p "$PROJECT" '[.messages[] | select(.project_id==$p and .type=="WORK_RESULT" and .from_employee_slug=="rowan" and .to_employee_slug=="ava")] | .[0].consumed_at // empty' <<<"$EXEC")"
+            if [[ -n "$APPROVAL" && -n "$CONSUMED" ]]; then break; fi
+            sleep 3
+          done
+          test -n "$APPROVAL"
+          test -n "$CONSUMED"
+
+          echo "Assert manager state is singular and evidence-backed"
+          STATE="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+          BRIEF="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/briefing")"
+          MEM="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/memories")"
+
+          test "$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="PRODUCT_GATE")] | length' <<<"$STATE")" = "1"
+          test "$(jq -r --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0].phase' <<<"$STATE")" = "PRODUCT_GATE"
+          test "$(jq -r --arg w "$RESEARCH_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE")" = "NEEDS_APPROVAL"
+          test "$(jq -r --arg a "$APPROVAL" '[.decisionsNeeded[] | select(.id==$a)] | length' <<<"$BRIEF")" = "1"
+          jq -e '[.memories[] | select(.type=="EMPLOYEE_INTERPRETATION" and (.subject|ascii_downcase|contains("car diffuser")) and (.source|startswith("product_candidate:")))] | length >= 1' <<<"$MEM" >/dev/null
+
+          echo "Approve QA-only product gate"
+          DECISION="$(curl -fsS -X POST "${auth[@]}" "$BASE/api/company/$COMPANY/approvals/$APPROVAL/approve")"
+          test "$(jq -r '.approval.status' <<<"$DECISION")" = "APPROVED"
+          LUCA_WO="$(jq -r '.handoff.workOrder.id' <<<"$DECISION")"
+          LUCA_JOB="$(jq -r '.handoff.job.id' <<<"$DECISION")"
+          test -n "$LUCA_WO" && test "$LUCA_WO" != "null"
+          test -n "$LUCA_JOB" && test "$LUCA_JOB" != "null"
+
+          echo "Assert approval is idempotent"
+          HTTP="$(curl -sS -o /tmp/reapprove.json -w '%{http_code}' -X POST "${auth[@]}" "$BASE/api/company/$COMPANY/approvals/$APPROVAL/approve")"
+          test "$HTTP" = "409"
+
+          STATE2="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC2="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          test "$(jq -r --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0].phase' <<<"$STATE2")" = "STORE_BUILD"
+          test "$(jq -r --arg w "$RESEARCH_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE2")" = "DONE"
+          test "$(jq -r --arg p "$PROJECT" '[.workOrders[] | select(.project_id==$p and .assigned_employee_slug=="luca")] | length' <<<"$STATE2")" = "1"
+          test "$(jq -r --arg p "$PROJECT" '[.jobs[] | select(.project_id==$p and .employee_slug=="luca" and .job_type=="STORE_BUILD")] | length' <<<"$EXEC2")" = "1"
+          test "$(jq -r --arg p "$PROJECT" '[.messages[] | select(.project_id==$p and .type=="WORK_ASSIGNMENT" and .from_employee_slug=="ava" and .to_employee_slug=="luca")] | length' <<<"$EXEC2")" = "1"
+
+          echo "MODULE 3 LIVE QA PASSED"
+          jq -nc             --arg company "$COMPANY"             --arg project "$PROJECT"             --arg approval "$APPROVAL"             --arg researchJob "$RESEARCH_JOB"             --arg lucaWorkOrder "$LUCA_WO"             --arg lucaJob "$LUCA_JOB"             '{result:"PASS",company:$company,project:$project,approval:$approval,researchJob:$researchJob,lucaWorkOrder:$lucaWorkOrder,lucaJob:$lucaJob}'
