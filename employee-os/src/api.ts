@@ -9,6 +9,7 @@ import { connectShopify,disconnectShopify,shopifyStatus } from './shopify-execut
 import { compileSkill,testSkill } from './skills-engine.js';
 import { connectCJ,disconnectCJ,cjStatus,searchCJ,mapCandidateToCJ } from './cj-executor.js';
 import { connectApify,disconnectApify,apifyStatus,connectOpenAI,disconnectOpenAI,openAIStatus } from './source-intel.js';
+import { connectRunway,disconnectRunway,runwayStatus } from './runway-executor.js';
 
 const app=Fastify({logger:true});
 await app.register(cors,{origin:true});
@@ -332,6 +333,31 @@ app.delete('/api/company/:companyId/integrations/openai',async(req,reply)=>{
   const membership=await requireCompany(userId,companyId);
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   return disconnectOpenAI(companyId);
+});
+
+app.get('/api/company/:companyId/integrations/runway',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  return runwayStatus(companyId);
+});
+app.post('/api/company/:companyId/integrations/runway/connect',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({
+    apiSecret:z.string().min(10).max(1000),
+    model:z.string().min(2).max(80).default('gen4.5')
+  }).parse(req.body);
+  const result=await connectRunway({companyId,apiSecret:body.apiSecret,model:body.model});
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
+    companyId,JSON.stringify({provider:'RUNWAY',purpose:'CREATIVE_VIDEO_RENDERING',model:body.model})
+  ]);
+  return reply.code(201).send(result);
+});
+app.delete('/api/company/:companyId/integrations/runway',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return disconnectRunway(companyId);
 });
 
 app.post('/api/company/:companyId/ventures/from-link',async(req,reply)=>{
