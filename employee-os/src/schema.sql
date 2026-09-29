@@ -523,3 +523,49 @@ CREATE TABLE IF NOT EXISTS fulfillment_orders (
 ALTER TABLE fulfillment_orders ADD COLUMN IF NOT EXISTS shopify_fulfillments jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE fulfillment_orders ADD COLUMN IF NOT EXISTS shopify_tracking_synced_at timestamptz;
 CREATE INDEX IF NOT EXISTS fulfillment_orders_company_idx ON fulfillment_orders(company_id,status,updated_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS reference_sources (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+  source_url text NOT NULL,
+  provider text NOT NULL,
+  source_kind text NOT NULL DEFAULT 'SOCIAL_VIDEO',
+  status text NOT NULL DEFAULT 'PENDING_CAPTURE',
+  capture_method text,
+  caption text,
+  author_handle text,
+  media_url text,
+  thumbnail_url text,
+  metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
+  raw_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  analysis jsonb NOT NULL DEFAULT '{}'::jsonb,
+  creative_reference jsonb NOT NULL DEFAULT '{}'::jsonb,
+  error text,
+  captured_at timestamptz,
+  analyzed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(company_id,source_url)
+);
+CREATE INDEX IF NOT EXISTS reference_sources_company_idx ON reference_sources(company_id,status,updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS link_launches (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_id uuid NOT NULL REFERENCES reference_sources(id) ON DELETE CASCADE,
+  objective_id uuid REFERENCES objectives(id) ON DELETE SET NULL,
+  status text NOT NULL DEFAULT 'SOURCE_CAPTURE',
+  identified_product text,
+  identified_product_confidence text,
+  supplier_selection jsonb NOT NULL DEFAULT '{}'::jsonb,
+  store_url text,
+  product_url text,
+  final_summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(project_id)
+);
+CREATE INDEX IF NOT EXISTS link_launches_company_idx ON link_launches(company_id,status,updated_at DESC);
