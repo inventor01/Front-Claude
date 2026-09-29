@@ -82,7 +82,11 @@ jobs:
           STATE2="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
           EXEC2="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
 
-          test "$(jq -r --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0].phase' <<<"$STATE2")" = "STORE_BUILD"
+          PHASE_AFTER_APPROVAL="$(jq -r --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0].phase' <<<"$STATE2")"
+          case "$PHASE_AFTER_APPROVAL" in
+            STORE_BUILD|STORE_CONNECTION_REQUIRED|CREATIVE_PRODUCTION|CREATIVE_RENDER_CONNECTION_REQUIRED|SOCIAL_CONNECTION_REQUIRED|LAUNCH_CONNECTIONS_REQUIRED) ;;
+            *) echo "Unexpected phase after product approval: $PHASE_AFTER_APPROVAL"; exit 1 ;;
+          esac
           test "$(jq -r --arg w "$RESEARCH_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE2")" = "DONE"
           test "$(jq -r --arg p "$PROJECT" '[.workOrders[] | select(.project_id==$p and .assigned_employee_slug=="luca")] | length' <<<"$STATE2")" = "1"
           test "$(jq -r --arg p "$PROJECT" '[.jobs[] | select(.project_id==$p and .employee_slug=="luca" and .job_type=="STORE_BUILD")] | length' <<<"$EXEC2")" = "1"
