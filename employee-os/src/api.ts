@@ -30,7 +30,11 @@ app.post('/api/auth/register',async(req,reply)=>{
       return {user:u.rows[0],company:company.rows[0]};
     });
     return reply.code(201).send({...result,token:await signSession(result.user.id)});
-  }catch(e:any){if(e?.code==='23505')return reply.code(409).send({error:'Account already exists'});throw e;}
+  }catch(e:unknown){
+    const code=typeof e==='object'&&e!==null&&'code' in e?String((e as {code?:unknown}).code||''):'';
+    if(code==='23505')return reply.code(409).send({error:'Account already exists'});
+    throw e;
+  }
 });
 app.post('/api/auth/login',async(req,reply)=>{
   const body=z.object({email:z.string().email(),password:z.string().min(1)}).parse(req.body);
@@ -44,7 +48,7 @@ app.get('/api/me',async req=>{
   return {memberships:r.rows};
 });
 app.get('/api/company/:companyId/state',async req=>{
-  const userId=await requireUser(req), {companyId}=req.params as any; await requireCompany(userId,companyId);
+  const userId=await requireUser(req), {companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
   const [employees,objectives,projects,work,approvals,events,candidates,storePackages,creativePackages,distributionPackages,supportCases,issuePatterns,toolConnections]=await Promise.all([
     pool.query('SELECT * FROM employees WHERE company_id=$1 ORDER BY created_at',[companyId]),
     pool.query('SELECT * FROM objectives WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
@@ -63,7 +67,7 @@ app.get('/api/company/:companyId/state',async req=>{
   return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows,storePackages:storePackages.rows,creativePackages:creativePackages.rows,distributionPackages:distributionPackages.rows,supportCases:supportCases.rows,issuePatterns:issuePatterns.rows,toolConnections:toolConnections.rows};
 });
 app.get('/api/company/:companyId/execution',async req=>{
-  const userId=await requireUser(req), {companyId}=req.params as any; await requireCompany(userId,companyId);
+  const userId=await requireUser(req), {companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
   const [jobs,steps,evidence,messages]=await Promise.all([
     pool.query('SELECT id,project_id,work_order_id,employee_slug,job_type,status,priority,scheduled_for,lease_expires_at,attempt_count,retry_count,max_attempts,last_error,created_at,updated_at FROM jobs WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT id,job_id,sequence,step_type,status,input,output,evidence_refs,last_error,attempt_history,created_at,updated_at FROM job_steps WHERE company_id=$1 ORDER BY created_at DESC,sequence ASC LIMIT 500',[companyId]),
@@ -74,7 +78,7 @@ app.get('/api/company/:companyId/execution',async req=>{
 });
 
 app.post('/api/company/:companyId/objectives',async(req,reply)=>{
-  const userId=await requireUser(req),{companyId}=req.params as any; await requireCompany(userId,companyId);
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
   const body=z.object({statement:z.string().min(10),constraints:z.array(z.string()).default([]),query:z.string().default('')}).parse(req.body);
   const result=await tx(async c=>{
     const o=await c.query('INSERT INTO objectives(company_id,created_by,statement,constraints) VALUES($1,$2,$3,$4) RETURNING *',[companyId,userId,body.statement,JSON.stringify(body.constraints)]);
@@ -94,7 +98,7 @@ app.post('/api/company/:companyId/objectives',async(req,reply)=>{
   return reply.code(202).send(result);
 });
 app.post('/api/company/:companyId/support/cases',async(req,reply)=>{
-  const userId=await requireUser(req),{companyId}=req.params as any; await requireCompany(userId,companyId);
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
   const body=z.object({
     channel:z.enum(['EMAIL','LIVE_CHAT']).default('EMAIL'),
     customerRef:z.string().min(2).max(200),
@@ -164,7 +168,7 @@ app.post('/api/company/:companyId/support/cases',async(req,reply)=>{
 });
 
 app.get('/api/company/:companyId/briefing',async req=>{
-  const userId=await requireUser(req),{companyId}=req.params as any; await requireCompany(userId,companyId);
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
   const [projects,approvals,blocked,events,candidates,messages]=await Promise.all([
     pool.query(`SELECT id,name,phase,status,updated_at FROM projects WHERE company_id=$1 AND status='ACTIVE' ORDER BY updated_at DESC LIMIT 20`,[companyId]),
     pool.query(`SELECT id,project_id,work_order_id,action_type,reason,risk,cost_cents,status,created_at FROM approvals WHERE company_id=$1 AND status='PENDING' ORDER BY created_at`,[companyId]),
@@ -185,13 +189,13 @@ app.get('/api/company/:companyId/briefing',async req=>{
 });
 
 app.get('/api/company/:companyId/memories',async req=>{
-  const userId=await requireUser(req),{companyId}=req.params as any; await requireCompany(userId,companyId);
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
   const r=await pool.query(`SELECT * FROM memories WHERE company_id=$1 AND status='ACTIVE' ORDER BY created_at DESC LIMIT 200`,[companyId]);
   return {memories:r.rows};
 });
 
 app.post('/api/company/:companyId/memories',async(req,reply)=>{
-  const userId=await requireUser(req),{companyId}=req.params as any;
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
   const membership=await requireCompany(userId,companyId);
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   const body=z.object({
@@ -212,7 +216,7 @@ app.post('/api/company/:companyId/memories',async(req,reply)=>{
 });
 
 app.post('/api/company/:companyId/approvals/:approvalId/:decision',async(req,reply)=>{
-  const userId=await requireUser(req),{companyId,approvalId,decision}=req.params as any;
+  const userId=await requireUser(req),{companyId,approvalId,decision}=req.params as {companyId:string;approvalId:string;decision:string};
   const membership=await requireCompany(userId,companyId);
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   if(!['approve','reject'].includes(decision))return reply.code(400).send({error:'Invalid decision'});
@@ -227,7 +231,7 @@ app.post('/api/company/:companyId/approvals/:approvalId/:decision',async(req,rep
     const updated=await c.query(`UPDATE approvals SET status=$3,resolved_at=now(),resolved_by=$4
       WHERE id=$1 AND company_id=$2 RETURNING *`,[approvalId,companyId,status,userId]);
 
-    let handoff:any=null;
+    let handoff:{workOrder:unknown;job:unknown;candidateId:string}|null=null;
     if(approval.action_type==='PRODUCT_GATE'){
       const payload=approval.action_payload||{};
       const candidateId=String(payload.candidateId||'');
@@ -315,5 +319,5 @@ app.post('/api/company/:companyId/approvals/:approvalId/:decision',async(req,rep
   });
   return result;
 });
-app.setErrorHandler((e:any,_req,reply)=>reply.code(e.statusCode||400).send({error:e.message||'Request failed'}));
+app.setErrorHandler((e,_req,reply)=>reply.code(e.statusCode||400).send({error:e.message||'Request failed'}));
 const port=Number(process.env.PORT||3000); await app.listen({host:'0.0.0.0',port});
