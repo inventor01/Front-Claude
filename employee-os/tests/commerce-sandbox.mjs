@@ -12,6 +12,8 @@ const mock={
   publishCalls:0,
   createOrderCalls:0,
   payCalls:0,
+  fulfillmentCreateCalls:0,
+  trackingUpdateCalls:0,
   pages:new Map(),
   cjOrder:null,
   cjPaid:false
@@ -27,7 +29,9 @@ function cjFail(res,message='Not found'){json(res,200,{code:1600100,result:false
 
 const shopifyScopes=[
   'read_products','write_products','read_orders','read_publications','write_publications',
-  'read_content','write_content','read_online_store_pages','write_online_store_pages'
+  'read_content','write_content','read_online_store_pages','write_online_store_pages',
+  'read_merchant_managed_fulfillment_orders','write_merchant_managed_fulfillment_orders',
+  'read_third_party_fulfillment_orders','write_third_party_fulfillment_orders'
 ];
 
 const server=http.createServer(async(req,res)=>{
@@ -68,6 +72,30 @@ const server=http.createServer(async(req,res)=>{
       const p={id:`gid://shopify/Page/${mock.pages.size+1}`,handle:page.handle,title:page.title};
       mock.pages.set(page.handle,p);
       return json(res,200,{data:{pageCreate:{page:p,userErrors:[]}}});
+    }
+    if(query.includes('FulfillmentOrdersForOrder')){
+      return json(res,200,{data:{order:{
+        id:'gid://shopify/Order/5001',
+        fulfillmentOrders:{nodes:[{
+          id:'gid://shopify/FulfillmentOrder/7001',status:'OPEN',requestStatus:'UNSUBMITTED',
+          supportedActions:[{action:'CREATE_FULFILLMENT'}],
+          lineItems:{nodes:[{id:'gid://shopify/FulfillmentOrderLineItem/7101',remainingQuantity:1,lineItem:{id:'gid://shopify/LineItem/1'}}]}
+        }]}
+      }}});
+    }
+    if(query.includes('CreateFulfillment')){
+      mock.fulfillmentCreateCalls++;
+      return json(res,200,{data:{fulfillmentCreate:{fulfillment:{
+        id:'gid://shopify/Fulfillment/8001',status:'SUCCESS',
+        trackingInfo:[{number:'TRACK-QA-123',url:'https://tracking.example.test/TRACK-QA-123',company:'QA Carrier'}]
+      },userErrors:[]}}});
+    }
+    if(query.includes('UpdateFulfillmentTracking')){
+      mock.trackingUpdateCalls++;
+      return json(res,200,{data:{fulfillmentTrackingInfoUpdate:{fulfillment:{
+        id:'gid://shopify/Fulfillment/8001',status:'SUCCESS',
+        trackingInfo:[{number:'TRACK-QA-123',url:'https://tracking.example.test/TRACK-QA-123',company:'QA Carrier'}]
+      },userErrors:[]}}});
     }
     if(query.includes('PaidUnfulfilledOrders')){
       const nodes=mock.productCreated&&mock.published?[{
@@ -275,11 +303,19 @@ await api(`/api/company/${company}/approvals/${paymentApproval.a.id}/approve`,{m
 
 const tracked=await waitFor(async()=>{
   const s=await api(`/api/company/${company}/state`,{headers:auth});
-  return s.fulfillmentOrders.find(x=>x.shopify_order_id==='gid://shopify/Order/5001'&&x.tracking_number==='TRACK-QA-123')||null;
-},'paid CJ order with tracking',30000);
+  return s.fulfillmentOrders.find(x=>
+    x.shopify_order_id==='gid://shopify/Order/5001'&&
+    x.tracking_number==='TRACK-QA-123'&&
+    x.shopify_tracking_synced_at&&
+    Array.isArray(x.shopify_fulfillments)&&x.shopify_fulfillments.length===1
+  )||null;
+},'paid CJ order with Shopify-visible tracking',30000);
 assert(mock.payCalls===1,'CJ payment should execute exactly once after approval');
+assert(mock.fulfillmentCreateCalls===1,'Shopify fulfillment should be created exactly once');
+assert(mock.trackingUpdateCalls===0,'Initial Shopify fulfillment should not require a duplicate tracking update');
 assert(tracked.supplier_order_id==='CJ-ORDER-1','CJ supplier order ID missing');
 assert(tracked.tracking_url==='https://tracking.example.test/TRACK-QA-123','tracking URL missing');
+assert(tracked.shopify_fulfillments[0].id==='gid://shopify/Fulfillment/8001','Shopify fulfillment ID missing');
 
 const finalState=await api(`/api/company/${company}/state`,{headers:auth});
 assert(finalState.fulfillmentOrders.filter(x=>x.shopify_order_id==='gid://shopify/Order/5001').length===1,
@@ -293,6 +329,7 @@ console.log(JSON.stringify({
   trackingNumber:tracked.tracking_number,
   createOrderCalls:mock.createOrderCalls,
   payCalls:mock.payCalls,
+  shopifyFulfillmentCalls:mock.fulfillmentCreateCalls,
   encryptedCredentialRows:creds.rowCount
 },null,2));
 
