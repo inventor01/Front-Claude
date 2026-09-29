@@ -50,10 +50,19 @@ export async function connectShopify(input:{companyId:string;storeDomain:string;
   const data=await graph<{
     shop:{name:string;myshopifyDomain:string;currencyCode:string;primaryDomain:{url:string;host:string}};
     publications:{nodes:Array<{id:string;catalog:{title:string;status:string}|null}>};
+    currentAppInstallation:{accessScopes:Array<{handle:string}>};
   }>(credential,`query EmployeeOSConnectionCheck {
     shop { name myshopifyDomain currencyCode primaryDomain { url host } }
     publications(first: 30) { nodes { id catalog { title status } } }
+    currentAppInstallation { accessScopes { handle } }
   }`);
+
+  const granted=new Set(data.currentAppInstallation.accessScopes.map((scope)=>scope.handle));
+  const required=['write_products','read_publications','write_publications','read_content','write_content'];
+  const missing=required.filter((scope)=>!granted.has(scope));
+  if(missing.length){
+    throw new Error(`Shopify connection is missing required scopes: ${missing.join(', ')}`);
+  }
 
   const online=data.publications.nodes.find((p)=>String(p.catalog?.title||'').toLowerCase().includes('online store'))||null;
   if(!online)throw new Error('Connected Shopify store does not expose an Online Store publication to this app token.');
@@ -69,6 +78,7 @@ export async function connectShopify(input:{companyId:string;storeDomain:string;
     publicationId:online.id,
     publicationTitle:online.catalog?.title||'Online Store',
     apiVersion:API_VERSION,
+    grantedScopes:[...granted].sort(),
     connectedAt:new Date().toISOString()
   };
   if(existing.rowCount){
@@ -209,12 +219,12 @@ export async function executeStorePackage(input:{
   const publicationId=String(connection.metadata?.publicationId||'');
   if(!publicationId)throw new Error('Shopify Online Store publication ID is missing from the connection.');
   const published=await graph<{publishablePublish:{publishable:{publishedOnPublication:boolean}|null;userErrors:Array<{field:string[];message:string}>}}>(credential,
-    `mutation PublishProduct($id:ID!,$input:[PublicationInput!]!){
+    `mutation PublishProduct($id:ID!,$input:[PublicationInput!]!,$publicationId:ID!){
       publishablePublish(id:$id,input:$input){
         publishable{publishedOnPublication(publicationId:$publicationId)}
         userErrors{field message}
       }
-    }`,{id:product.id,input:[{publicationId}]});
+    }`,{id:product.id,input:[{publicationId}],publicationId});
   if(published.publishablePublish.userErrors.length)throw new Error(`Shopify publish error: ${published.publishablePublish.userErrors.map((e)=>e.message).join('; ')}`);
 
   const faq=await ensurePage(credential,'FAQ','faq',
