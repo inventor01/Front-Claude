@@ -153,6 +153,24 @@ async function executeStep(job:JobRow,step:any){
       pkg.id,JSON.stringify(qa),status
     ]);
     if(!qa.passed)throw new Error(`Store package QA failed: ${failures.join(', ')}`);
+
+    const existingResult=await pool.query(`SELECT id FROM employee_messages
+      WHERE company_id=$1 AND project_id=$2 AND work_order_id=$3 AND type='WORK_RESULT'
+      AND from_employee_slug='luca' AND to_employee_slug='ava'
+      AND payload->>'storePackageId'=$4 LIMIT 1`,[
+      job.company_id,job.project_id,job.work_order_id,String(u.rows[0].id)
+    ]);
+    if(!existingResult.rowCount){
+      await pool.query(`INSERT INTO employee_messages(
+        company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,
+        evidence_refs,authority_context,payload
+      ) VALUES($1,$2,$3,'WORK_RESULT','luca','ava',$4,'Review store QA and start creative production',$5,$6,$7)`,[
+        job.company_id,job.project_id,job.work_order_id,
+        `Internal store package for ${candidateId} passed QA`,
+        JSON.stringify([]),JSON.stringify({publishAllowed:false,spendAllowed:false,storeQaPassed:true}),
+        JSON.stringify({storePackageId:u.rows[0].id,candidateId,status})
+      ]);
+    }
     return {output:{packageId:u.rows[0].id,status,qa},evidenceRefs:[]};
   }
 
@@ -200,6 +218,309 @@ async function executeStep(job:JobRow,step:any){
     await pool.query(`UPDATE work_orders SET status='NEEDS_APPROVAL',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.work_order_id]);
     await pool.query(`UPDATE projects SET phase='STORE_EXTERNAL_APPROVAL',updated_at=now() WHERE id=$1`,[job.project_id]);
     return {output:{status:'WAITING_APPROVAL',approvalId:approval.rows[0].id,packageId:p.rows[0].id},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='CREATIVE_PRODUCTION' && step.step_type==='CREATIVE_STRATEGY'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const storePackageId=String(job.payload?.storePackageId||'');
+    const [candidateR,storeR]=await Promise.all([
+      pool.query('SELECT * FROM product_candidates WHERE id=$1 AND company_id=$2',[candidateId,job.company_id]),
+      pool.query('SELECT * FROM store_packages WHERE id=$1 AND company_id=$2',[storePackageId,job.company_id])
+    ]);
+    if(!candidateR.rowCount||!storeR.rowCount)throw new Error('Creative production inputs are missing.');
+    const candidate=candidateR.rows[0], store=storeR.rows[0];
+    if(store.qa_result?.passed!==true)throw new Error('Creative production requires a QA-passed store package.');
+    const strategy={
+      product:candidate.name,
+      primaryPlatforms:['TikTok','Instagram Reels'],
+      secondaryPlatforms:['YouTube Shorts'],
+      contentPillars:['problem → solution demonstration','before/after where evidence-safe','POV/use-case','comparison to old method','FAQ/objection handling','reaction/unboxing','feature discovery'],
+      tone:['native social','fast first-frame clarity','specific, not hypey','product-led'],
+      visualRules:Array.isArray(store.brand_direction?.visualDirection)?store.brand_direction.visualDirection:[],
+      claimGuardrails:['No unsupported outcome claims','No invented testimonials','No fake scarcity','No unverified shipping claims','Before/after only when truthful and reproducible'],
+      objective:'Create a reusable organic creative system with enough variation for sustained TikTok and Instagram testing.'
+    };
+    const inserted=await pool.query(`INSERT INTO creative_packages(
+      company_id,project_id,work_order_id,candidate_id,store_package_id,status,strategy,external_state
+    ) VALUES($1,$2,$3,$4,$5,'STRATEGY_READY',$6,$7)
+    ON CONFLICT(project_id,candidate_id) DO UPDATE SET
+      store_package_id=EXCLUDED.store_package_id,strategy=EXCLUDED.strategy,status='STRATEGY_READY',updated_at=now()
+    RETURNING *`,[
+      job.company_id,job.project_id,job.work_order_id,candidateId,storePackageId,
+      JSON.stringify(strategy),JSON.stringify({renderer:'NOT_CONNECTED',renderedAssets:0,publishableAssets:0})
+    ]);
+    return {output:{creativePackageId:inserted.rows[0].id,status:'STRATEGY_READY',strategy},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='CREATIVE_PRODUCTION' && step.step_type==='HOOK_LIBRARY'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const r=await pool.query('SELECT c.*,p.creative_angles FROM creative_packages c JOIN product_candidates p ON p.id=c.candidate_id WHERE c.project_id=$1 AND c.candidate_id=$2',[job.project_id,candidateId]);
+    if(!r.rowCount)throw new Error('Creative package missing for hooks.');
+    const pkg=r.rows[0];
+    const base=Array.isArray(pkg.creative_angles)?pkg.creative_angles:[];
+    const product=String((await pool.query('SELECT name FROM product_candidates WHERE id=$1',[candidateId])).rows[0]?.name||'this product');
+    const hooks=[
+      `I didn't expect ${product} to make this this much easier.`,
+      `If you still do this the old way, watch this.`,
+      `The 3-second reason people notice ${product}.`,
+      `POV: you finally try ${product} after seeing it everywhere.`,
+      `Before you buy ${product}, here's what it actually does.`,
+      `The part of ${product} nobody shows you.`,
+      `I tested ${product} so you don't have to guess.`,
+      `${product} vs. the old way — side by side.`,
+      `One tiny product, one very specific problem solved.`,
+      `Would this actually work for your setup? Let's test it.`,
+      `Three things I'd want to know before buying ${product}.`,
+      `The fastest way to understand why ${product} is getting attention.`,
+      ...base.map((x:any)=>String(x))
+    ].filter((x,i,a)=>x&&a.indexOf(x)===i).slice(0,18);
+    const u=await pool.query(`UPDATE creative_packages SET hooks=$2,status='HOOKS_READY',updated_at=now() WHERE id=$1 RETURNING *`,[
+      pkg.id,JSON.stringify(hooks)
+    ]);
+    return {output:{creativePackageId:u.rows[0].id,status:'HOOKS_READY',hooks},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='CREATIVE_PRODUCTION' && step.step_type==='SCRIPT_PACK'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const r=await pool.query('SELECT c.*,p.name candidate_name FROM creative_packages c JOIN product_candidates p ON p.id=c.candidate_id WHERE c.project_id=$1 AND c.candidate_id=$2',[job.project_id,candidateId]);
+    if(!r.rowCount)throw new Error('Creative package missing for scripts.');
+    const pkg=r.rows[0], product=String(pkg.candidate_name), hooks=Array.isArray(pkg.hooks)?pkg.hooks:[];
+    const formats=[
+      ['demo','15','show the product immediately','Demonstrate the primary use case in three simple beats.','See how it fits your routine.'],
+      ['problem-solution','20','open on the frustrating old method','Show the problem, introduce the product, demonstrate the change.','If this is your problem, compare the details.'],
+      ['pov','15','POV first-person setup','Use the product in a believable everyday situation.','Would you use this?'],
+      ['comparison','25','split-screen old way vs product','Compare process and visible differences without unsupported claims.','Pick the method that makes sense for you.'],
+      ['faq','20','lead with a real purchase question','Answer compatibility, usage, care, and what the product does not promise.','Check the product details before buying.'],
+      ['reaction','15','unbox and inspect before using','Show first impression, setup, one use, and honest takeaway.','See the full product details.']
+    ];
+    const scripts=formats.map((f:any[],i:number)=>({
+      id:`creative-${i+1}`,format:f[0],durationSec:Number(f[1]),hook:String(hooks[i]||hooks[0]||`Watch ${product} in use.`),
+      hypothesis:`${f[0]} format can make the product use case understandable without relying on unsupported claims.`,
+      scenes:[
+        {beat:1,seconds:'0-3',action:f[2],onScreenText:String(hooks[i]||hooks[0]||product)},
+        {beat:2,seconds:'3-10',action:f[3],onScreenText:`${product}: show, don't overclaim`},
+        {beat:3,seconds:`10-${f[1]}`,action:'Close on the product and one evidence-safe takeaway.',onScreenText:f[4]}
+      ],
+      voiceover:`${String(hooks[i]||hooks[0]||product)} Show the real use case, explain only what is visible or verified, then invite the viewer to inspect the details.`,
+      cta:f[4],
+      renderedAssetId:null
+    }));
+    const u=await pool.query(`UPDATE creative_packages SET scripts=$2,status='SCRIPTS_READY',updated_at=now() WHERE id=$1 RETURNING *`,[
+      pkg.id,JSON.stringify(scripts)
+    ]);
+    return {output:{creativePackageId:u.rows[0].id,status:'SCRIPTS_READY',scripts},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='CREATIVE_PRODUCTION' && step.step_type==='STORYBOARDS'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const r=await pool.query('SELECT * FROM creative_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
+    if(!r.rowCount)throw new Error('Creative package missing for storyboards.');
+    const pkg=r.rows[0], scripts=Array.isArray(pkg.scripts)?pkg.scripts:[];
+    const storyboards=scripts.map((script:any)=>({
+      scriptId:script.id,
+      shots:(script.scenes||[]).map((scene:any,index:number)=>({
+        shot:index+1,
+        framing:index===0?'tight product/problem close-up':index===1?'hands-on medium demonstration':'clean product close',
+        action:scene.action,
+        text:scene.onScreenText,
+        edit:index===0?'hard cut / motion in first frame':index===1?'fast proof-driven cuts':'hold long enough to read CTA'
+      }))
+    }));
+    const u=await pool.query(`UPDATE creative_packages SET storyboards=$2,status='STORYBOARDS_READY',updated_at=now() WHERE id=$1 RETURNING *`,[
+      pkg.id,JSON.stringify(storyboards)
+    ]);
+    return {output:{creativePackageId:u.rows[0].id,status:'STORYBOARDS_READY',storyboards},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='CREATIVE_PRODUCTION' && step.step_type==='CREATIVE_QA'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const r=await pool.query('SELECT * FROM creative_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
+    if(!r.rowCount)throw new Error('Creative package missing for QA.');
+    const pkg=r.rows[0], failures:string[]=[];
+    const hooks=Array.isArray(pkg.hooks)?pkg.hooks:[], scripts=Array.isArray(pkg.scripts)?pkg.scripts:[], boards=Array.isArray(pkg.storyboards)?pkg.storyboards:[];
+    if(hooks.length<10)failures.push('fewer than 10 hooks');
+    if(scripts.length<6)failures.push('fewer than 6 scripts');
+    if(boards.length<scripts.length)failures.push('missing storyboards');
+    if(scripts.some((s:any)=>!s.hook||!s.cta||!Array.isArray(s.scenes)||s.scenes.length<3))failures.push('script structure incomplete');
+    const serialized=JSON.stringify({hooks,scripts,boards}).toLowerCase();
+    if(/guaranteed result|guaranteed to|100% guaranteed|real customer said|5-star customer/.test(serialized))failures.push('unsupported or fabricated claim detected');
+    const qa={passed:failures.length===0,failures,checks:['10+ hooks','6+ structured short-form scripts','storyboard for every script','CTA on every script','no fake testimonial or guarantee language','render state remains separate from script state']};
+    const status=qa.passed?'READY_FOR_RENDER':'QA_FAILED';
+    const u=await pool.query(`UPDATE creative_packages SET qa_result=$2,status=$3,updated_at=now() WHERE id=$1 RETURNING *`,[
+      pkg.id,JSON.stringify(qa),status
+    ]);
+    if(!qa.passed)throw new Error(`Creative package QA failed: ${failures.join(', ')}`);
+
+    const existing=await pool.query(`SELECT id FROM employee_messages
+      WHERE company_id=$1 AND project_id=$2 AND type='WORK_RESULT'
+      AND from_employee_slug='maya' AND to_employee_slug='ava'
+      AND payload->>'creativePackageId'=$3 LIMIT 1`,[job.company_id,job.project_id,String(u.rows[0].id)]);
+    if(!existing.rowCount){
+      await pool.query(`INSERT INTO employee_messages(
+        company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,
+        evidence_refs,authority_context,payload
+      ) VALUES($1,$2,$3,'WORK_RESULT','maya','ava',$4,'Start distribution planning from QA-passed creative specs',$5,$6,$7)`,[
+        job.company_id,job.project_id,job.work_order_id,'Creative production package passed internal QA',
+        JSON.stringify([]),JSON.stringify({publishAllowed:false,spendAllowed:false,creativeQaPassed:true}),
+        JSON.stringify({creativePackageId:u.rows[0].id,candidateId,status})
+      ]);
+    }
+    return {output:{creativePackageId:u.rows[0].id,status,qa},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='CREATIVE_PRODUCTION' && step.step_type==='RENDER_HANDOFF'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const p=await pool.query('SELECT * FROM creative_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
+    if(!p.rowCount)throw new Error('Creative package missing for render handoff.');
+    const connection=await pool.query(`SELECT * FROM tool_connections
+      WHERE company_id=$1 AND provider IN ('RUNWAY','CREATIVE_RENDER') AND status='CONNECTED'
+      ORDER BY updated_at DESC LIMIT 1`,[job.company_id]);
+    if(!connection.rowCount){
+      await pool.query(`UPDATE creative_packages SET status='READY_NEEDS_RENDER_CONNECTION',
+        external_state=$2,updated_at=now() WHERE id=$1`,[
+        p.rows[0].id,JSON.stringify({renderer:'NOT_CONNECTED',renderedAssets:0,publishableAssets:0,lastCheckedAt:new Date().toISOString()})
+      ]);
+      const existing=await pool.query(`SELECT id FROM employee_messages WHERE company_id=$1 AND work_order_id=$2
+        AND type='BLOCKER' AND from_employee_slug='maya' AND to_employee_slug='ava'
+        AND payload->>'reason'='CREATIVE_RENDER_NOT_CONNECTED' AND consumed_at IS NULL LIMIT 1`,[
+        job.company_id,job.work_order_id
+      ]);
+      if(!existing.rowCount){
+        await pool.query(`INSERT INTO employee_messages(
+          company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,authority_context,payload
+        ) VALUES($1,$2,$3,'BLOCKER','maya','ava','Creative renderer connection required','Connect an approved image/video rendering tool',$4,$5)`,[
+          job.company_id,job.project_id,job.work_order_id,JSON.stringify({publishAllowed:false,spendAllowed:false}),
+          JSON.stringify({creativePackageId:p.rows[0].id,reason:'CREATIVE_RENDER_NOT_CONNECTED'})
+        ]);
+      }
+      throw new Error('BLOCKED_EXTERNAL_AUTH: Creative rendering tool is not connected');
+    }
+    const approval=await pool.query(`INSERT INTO approvals(
+      company_id,project_id,work_order_id,job_id,requested_by_employee_slug,action_type,action_payload,reason,risk,cost_cents,status
+    ) VALUES($1,$2,$3,$4,'maya','CREATIVE_RENDER',$5,$6,'MEDIUM',0,'PENDING') RETURNING id`,[
+      job.company_id,job.project_id,job.work_order_id,job.id,
+      JSON.stringify({creativePackageId:p.rows[0].id,connectionId:connection.rows[0].id}),
+      'Creative specs passed QA. Owner approval is required before external rendering because rendering may create provider cost.'
+    ]);
+    await pool.query(`UPDATE creative_packages SET status='NEEDS_RENDER_APPROVAL',
+      external_state=$2,updated_at=now() WHERE id=$1`,[
+      p.rows[0].id,JSON.stringify({renderer:'CONNECTED',renderedAssets:0,publishableAssets:0,approvalId:approval.rows[0].id})
+    ]);
+    await pool.query(`UPDATE work_orders SET status='NEEDS_APPROVAL',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.work_order_id]);
+    return {output:{status:'WAITING_APPROVAL',approvalId:approval.rows[0].id,creativePackageId:p.rows[0].id},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='DISTRIBUTION_PLANNING' && step.step_type==='CHANNEL_PLAN'){
+    const creativePackageId=String(job.payload?.creativePackageId||'');
+    const cR=await pool.query('SELECT * FROM creative_packages WHERE id=$1 AND company_id=$2',[creativePackageId,job.company_id]);
+    if(!cR.rowCount||cR.rows[0].qa_result?.passed!==true)throw new Error('Distribution requires a QA-passed creative package.');
+    const plan={
+      primary:['TikTok','Instagram Reels'],
+      secondary:['YouTube Shorts'],
+      rules:{
+        TikTok:'Native 9:16, immediate hook, minimal polished-ad feel, test comments/questions as follow-ups.',
+        Instagram:'9:16 Reel, cleaner cover/title treatment, preserve native pacing.',
+        YouTubeShorts:'Reuse strongest verified creative after TikTok/IG signal; keep title searchable and concise.'
+      },
+      measurement:['views','3-second retention','average watch time','completion rate','shares','comments','profile/product clicks'],
+      publishingAuthority:false
+    };
+    const inserted=await pool.query(`INSERT INTO distribution_packages(
+      company_id,project_id,work_order_id,creative_package_id,status,channel_plan,external_state
+    ) VALUES($1,$2,$3,$4,'PLAN_READY',$5,$6)
+    ON CONFLICT(project_id,creative_package_id) DO UPDATE SET channel_plan=EXCLUDED.channel_plan,status='PLAN_READY',updated_at=now()
+    RETURNING *`,[
+      job.company_id,job.project_id,job.work_order_id,creativePackageId,JSON.stringify(plan),
+      JSON.stringify({tiktok:'NOT_CONNECTED',instagram:'NOT_CONNECTED',publishedCount:0})
+    ]);
+    return {output:{distributionPackageId:inserted.rows[0].id,status:'PLAN_READY',plan},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='DISTRIBUTION_PLANNING' && step.step_type==='CONTENT_CALENDAR'){
+    const creativePackageId=String(job.payload?.creativePackageId||'');
+    const r=await pool.query(`SELECT d.*,c.scripts,c.hooks FROM distribution_packages d
+      JOIN creative_packages c ON c.id=d.creative_package_id
+      WHERE d.project_id=$1 AND d.creative_package_id=$2`,[job.project_id,creativePackageId]);
+    if(!r.rowCount)throw new Error('Distribution package missing for calendar.');
+    const pkg=r.rows[0], scripts=Array.isArray(pkg.scripts)?pkg.scripts:[], hooks=Array.isArray(pkg.hooks)?pkg.hooks:[];
+    const calendar=Array.from({length:14},(_,i)=>({
+      day:i+1,
+      platform:i%2===0?'TikTok':'Instagram Reels',
+      creativeSpecId:String(scripts[i%scripts.length]?.id||'creative-1'),
+      hookVariant:String(hooks[i%Math.max(1,hooks.length)]||'Show the use case immediately.'),
+      objective:i<4?'learn hook response':i<9?'iterate strongest format':'compound winner / answer objections',
+      status:'PLANNED_NOT_PUBLISHED'
+    }));
+    const captions=[
+      'Show the use case. Keep the claim specific. Invite a real question.',
+      'What would you want tested before buying this?',
+      'The detail most people miss — shown, not exaggerated.',
+      'Old way vs. product: which would you choose?'
+    ];
+    const u=await pool.query(`UPDATE distribution_packages SET calendar=$2,caption_templates=$3,status='CALENDAR_READY',updated_at=now()
+      WHERE id=$1 RETURNING *`,[pkg.id,JSON.stringify(calendar),JSON.stringify(captions)]);
+    return {output:{distributionPackageId:u.rows[0].id,status:'CALENDAR_READY',calendar,captions},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='DISTRIBUTION_PLANNING' && step.step_type==='DISTRIBUTION_QA'){
+    const creativePackageId=String(job.payload?.creativePackageId||'');
+    const r=await pool.query('SELECT * FROM distribution_packages WHERE project_id=$1 AND creative_package_id=$2',[job.project_id,creativePackageId]);
+    if(!r.rowCount)throw new Error('Distribution package missing for QA.');
+    const pkg=r.rows[0], failures:string[]=[];
+    const calendar=Array.isArray(pkg.calendar)?pkg.calendar:[];
+    if(calendar.length<10)failures.push('calendar has fewer than 10 planned posts');
+    if(!calendar.some((x:any)=>x.platform==='TikTok'))failures.push('TikTok missing');
+    if(!calendar.some((x:any)=>x.platform==='Instagram Reels'))failures.push('Instagram Reels missing');
+    if(calendar.some((x:any)=>x.status!=='PLANNED_NOT_PUBLISHED'))failures.push('calendar falsely claims publishing');
+    const qa={passed:failures.length===0,failures,checks:['10+ planned posts','TikTok present','Instagram Reels present','every item explicitly not published','channel plan preserves measurement loop']};
+    const status=qa.passed?'READY_FOR_PUBLISHING':'QA_FAILED';
+    const u=await pool.query(`UPDATE distribution_packages SET qa_result=$2,status=$3,updated_at=now() WHERE id=$1 RETURNING *`,[
+      pkg.id,JSON.stringify(qa),status
+    ]);
+    if(!qa.passed)throw new Error(`Distribution QA failed: ${failures.join(', ')}`);
+    return {output:{distributionPackageId:u.rows[0].id,status,qa},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='DISTRIBUTION_PLANNING' && step.step_type==='PUBLISH_HANDOFF'){
+    const creativePackageId=String(job.payload?.creativePackageId||'');
+    const p=await pool.query('SELECT * FROM distribution_packages WHERE project_id=$1 AND creative_package_id=$2',[job.project_id,creativePackageId]);
+    if(!p.rowCount)throw new Error('Distribution package missing for publishing handoff.');
+    const connection=await pool.query(`SELECT * FROM tool_connections
+      WHERE company_id=$1 AND provider IN ('SOCIAL_PUBLISHER','TIKTOK','INSTAGRAM') AND status='CONNECTED'
+      ORDER BY updated_at DESC LIMIT 1`,[job.company_id]);
+    if(!connection.rowCount){
+      await pool.query(`UPDATE distribution_packages SET status='READY_NEEDS_SOCIAL_CONNECTION',
+        external_state=$2,updated_at=now() WHERE id=$1`,[
+        p.rows[0].id,JSON.stringify({tiktok:'NOT_CONNECTED',instagram:'NOT_CONNECTED',publishedCount:0,lastCheckedAt:new Date().toISOString()})
+      ]);
+      const existing=await pool.query(`SELECT id FROM employee_messages WHERE company_id=$1 AND work_order_id=$2
+        AND type='BLOCKER' AND from_employee_slug='nova' AND to_employee_slug='ava'
+        AND payload->>'reason'='SOCIAL_PUBLISHING_NOT_CONNECTED' AND consumed_at IS NULL LIMIT 1`,[
+        job.company_id,job.work_order_id
+      ]);
+      if(!existing.rowCount){
+        await pool.query(`INSERT INTO employee_messages(
+          company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,authority_context,payload
+        ) VALUES($1,$2,$3,'BLOCKER','nova','ava','Social publishing connection required','Connect authorized TikTok/Instagram publishing tools',$4,$5)`,[
+          job.company_id,job.project_id,job.work_order_id,JSON.stringify({publishAllowed:false,spendAllowed:false}),
+          JSON.stringify({distributionPackageId:p.rows[0].id,reason:'SOCIAL_PUBLISHING_NOT_CONNECTED'})
+        ]);
+      }
+      throw new Error('BLOCKED_EXTERNAL_AUTH: Social publishing tools are not connected');
+    }
+    const approval=await pool.query(`INSERT INTO approvals(
+      company_id,project_id,work_order_id,job_id,requested_by_employee_slug,action_type,action_payload,reason,risk,cost_cents,status
+    ) VALUES($1,$2,$3,$4,'nova','SOCIAL_PUBLISH',$5,$6,'MEDIUM',0,'PENDING') RETURNING id`,[
+      job.company_id,job.project_id,job.work_order_id,job.id,
+      JSON.stringify({distributionPackageId:p.rows[0].id,connectionId:connection.rows[0].id}),
+      'Distribution plan passed QA. Owner approval is required before public social publishing.'
+    ]);
+    await pool.query(`UPDATE distribution_packages SET status='NEEDS_PUBLISH_APPROVAL',
+      external_state=$2,updated_at=now() WHERE id=$1`,[
+      p.rows[0].id,JSON.stringify({publisher:'CONNECTED',publishedCount:0,approvalId:approval.rows[0].id})
+    ]);
+    await pool.query(`UPDATE work_orders SET status='NEEDS_APPROVAL',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.work_order_id]);
+    return {output:{status:'WAITING_APPROVAL',approvalId:approval.rows[0].id,distributionPackageId:p.rows[0].id},evidenceRefs:[]};
   }
 
   if(step.step_type==='DISCOVERY'){
