@@ -202,8 +202,21 @@ export async function ingestTrainingSource(input:{
     if(!employee.rowCount)throw new Error('Employee not found.');
   }
   const sourceUrl=input.url?.trim()||null;
-  const fetched=sourceUrl?await fetchPublicSource(sourceUrl):'';
-  const raw=(input.text?.trim()||fetched).slice(0,180_000);
+  const suppliedText=input.text?.trim()||'';
+  let fetched='';
+  if(sourceUrl&&!suppliedText){
+    try{
+      fetched=await fetchPublicSource(sourceUrl);
+    }catch(error){
+      const host=new URL(sourceUrl).hostname.toLowerCase();
+      if(host==='x.com'||host.endsWith('.x.com')||host==='twitter.com'||host.endsWith('.twitter.com')){
+        const message=error instanceof Error?error.message:'X source could not be read';
+        throw new Error(`${message} X may block automated readers; paste the thread/article text with the original X URL and Employee OS will preserve the X source as provenance.`);
+      }
+      throw error;
+    }
+  }
+  const raw=(suppliedText||fetched).slice(0,180_000);
   if(raw.length<20)throw new Error('Training source did not contain enough readable content.');
   const type=inferSourceType(sourceUrl);
   const quality=inferSourceQuality(sourceUrl,raw);
