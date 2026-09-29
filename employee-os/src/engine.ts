@@ -6,7 +6,7 @@ import {
   type DemandResult,type SupplierResult
 } from './research.js';
 
-type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:any;status:string;attempt_count:number;max_attempts:number;lease_id:string|null};
+type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:any;status:string;attempt_count:number;retry_count:number;max_attempts:number;lease_id:string|null};
 const retryable=(m:string)=>/timeout|rate|temporar|connection|502|503|504/i.test(m);
 
 export async function emitEvent(companyId:string,type:string,payload:unknown){
@@ -368,7 +368,7 @@ export async function runOne(){
   }catch(e){
     const message=e instanceof Error?e.message:'Unknown worker error';
     const blockedExternalAuth=message.startsWith('BLOCKED_EXTERNAL_AUTH:');
-    const terminal=blockedExternalAuth || job.attempt_count>=job.max_attempts || !retryable(message);
+    const terminal=blockedExternalAuth || job.retry_count>=job.max_attempts || !retryable(message);
     const jobStatus=blockedExternalAuth ? 'BLOCKED' : terminal ? 'FAILED' : 'RETRY_SCHEDULED';
     const stepStatus=blockedExternalAuth ? 'BLOCKED' : terminal ? 'FAILED' : 'WAITING';
 
@@ -379,6 +379,7 @@ export async function runOne(){
 
     await pool.query(`UPDATE jobs SET status=$2,last_error=$3,
       scheduled_for=CASE WHEN $2='RETRY_SCHEDULED' THEN now()+interval '2 minutes' ELSE scheduled_for END,
+      retry_count=CASE WHEN $2='RETRY_SCHEDULED' THEN retry_count+1 ELSE retry_count END,
       lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,
       [job.id,jobStatus,message]);
 
