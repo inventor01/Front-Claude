@@ -5,7 +5,6 @@ import {
   evaluateContentability,reviewRisk,scoreCandidate,type SourceEvidence,type DiscoveryResult,
   type DemandResult,type SupplierResult
 } from './research.js';
-import { classifySupportCase,supportPatternKey,draftSupportResponse,qaSupportDraft } from './support.js';
 
 type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:any;status:string;attempt_count:number;retry_count:number;max_attempts:number;lease_id:string|null};
 const retryable=(m:string)=>/timeout|rate|temporar|connection|502|503|504/i.test(m);
