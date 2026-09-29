@@ -7,6 +7,7 @@ import { commandCenterHtml } from './ui.js';
 import { ensureAcademyDefaults,ingestTrainingSource,discoverTools,recommendVerificationTools,getEmployeeIntelligenceContext } from './academy.js';
 import { connectShopify,disconnectShopify,shopifyStatus } from './shopify-executor.js';
 import { compileSkill,testSkill } from './skills-engine.js';
+import { connectCJ,disconnectCJ,cjStatus,searchCJ,mapCandidateToCJ } from './cj-executor.js';
 
 const app=Fastify({logger:true});
 await app.register(cors,{origin:true});
@@ -52,7 +53,7 @@ app.get('/api/me',async req=>{
 });
 app.get('/api/company/:companyId/state',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
-  const [employees,objectives,projects,work,approvals,events,candidates,storePackages,creativePackages,distributionPackages,supportCases,issuePatterns,toolConnections]=await Promise.all([
+  const [employees,objectives,projects,work,approvals,events,candidates,storePackages,creativePackages,distributionPackages,supportCases,issuePatterns,toolConnections,supplierMappings,fulfillmentOrders]=await Promise.all([
     pool.query('SELECT * FROM employees WHERE company_id=$1 ORDER BY created_at',[companyId]),
     pool.query('SELECT * FROM objectives WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
     pool.query('SELECT * FROM projects WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
@@ -65,9 +66,11 @@ app.get('/api/company/:companyId/state',async req=>{
     pool.query('SELECT * FROM distribution_packages WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT * FROM support_cases WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT * FROM issue_patterns WHERE company_id=$1 ORDER BY last_seen_at DESC LIMIT 100',[companyId]),
-    pool.query('SELECT id,tool_id,provider,risk_class,status,metadata,updated_at FROM tool_connections WHERE company_id=$1 ORDER BY provider',[companyId])
+    pool.query('SELECT id,tool_id,provider,risk_class,status,metadata,updated_at FROM tool_connections WHERE company_id=$1 ORDER BY provider',[companyId]),
+    pool.query('SELECT * FROM supplier_product_mappings WHERE company_id=$1 ORDER BY updated_at DESC LIMIT 100',[companyId]),
+    pool.query('SELECT * FROM fulfillment_orders WHERE company_id=$1 ORDER BY updated_at DESC LIMIT 100',[companyId])
   ]);
-  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows,storePackages:storePackages.rows,creativePackages:creativePackages.rows,distributionPackages:distributionPackages.rows,supportCases:supportCases.rows,issuePatterns:issuePatterns.rows,toolConnections:toolConnections.rows};
+  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows,storePackages:storePackages.rows,creativePackages:creativePackages.rows,distributionPackages:distributionPackages.rows,supportCases:supportCases.rows,issuePatterns:issuePatterns.rows,toolConnections:toolConnections.rows,supplierMappings:supplierMappings.rows,fulfillmentOrders:fulfillmentOrders.rows};
 });
 app.get('/api/company/:companyId/execution',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
@@ -244,6 +247,44 @@ app.delete('/api/company/:companyId/integrations/shopify',async(req,reply)=>{
   const membership=await requireCompany(userId,companyId);
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   return disconnectShopify(companyId);
+});
+
+app.get('/api/company/:companyId/integrations/cj',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  return cjStatus(companyId);
+});
+
+app.post('/api/company/:companyId/integrations/cj/connect',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({apiKey:z.string().min(10).max(500)}).parse(req.body);
+  const result=await connectCJ({companyId,apiKey:body.apiKey});
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
+    companyId,JSON.stringify({provider:'CJ',openId:result.openId})
+  ]);
+  return reply.code(201).send({connected:true,connection:result.connection});
+});
+
+app.delete('/api/company/:companyId/integrations/cj',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  return disconnectCJ(companyId);
+});
+
+app.get('/api/company/:companyId/integrations/cj/search',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  const query=z.object({q:z.string().min(2).max(200)}).parse(req.query);
+  return {products:await searchCJ(companyId,query.q)};
+});
+
+app.post('/api/company/:companyId/candidates/:candidateId/supplier-map',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId,candidateId}=req.params as {companyId:string;candidateId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const result=await mapCandidateToCJ(companyId,candidateId);
+  return reply.code(result.status==='NEEDS_REVIEW'?202:201).send(result);
 });
 
 app.post('/api/company/:companyId/objectives',async(req,reply)=>{
