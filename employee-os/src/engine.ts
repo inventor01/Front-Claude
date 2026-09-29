@@ -5,6 +5,7 @@ import {
   evaluateContentability,reviewRisk,scoreCandidate,type SourceEvidence,type DiscoveryResult,
   type DemandResult,type SupplierResult
 } from './research.js';
+import { getEmployeeIntelligenceContext,type EmployeeIntelligenceContext } from './academy.js';
 
 type JsonRecord=Record<string,unknown>;
 type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:JsonRecord;status:string;attempt_count:number;retry_count:number;max_attempts:number;lease_id:string|null};
@@ -74,7 +75,7 @@ async function candidateName(job:JobRow){
   return discovery?.candidate||String(job.payload?.query||'').trim();
 }
 
-async function executeStep(job:JobRow,step:StepRow){
+async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntelligenceContext){
   if(job.job_type==='STORE_BUILD' && step.step_type==='BRAND_STRATEGY'){
     const candidateId=String(job.payload?.candidateId||'');
     const r=await pool.query('SELECT * FROM product_candidates WHERE id=$1 AND company_id=$2',[candidateId,job.company_id]);
@@ -368,7 +369,17 @@ async function executeStep(job:JobRow,step:StepRow){
       tone:['native social','fast first-frame clarity','specific, not hypey','product-led'],
       visualRules:Array.isArray(store.brand_direction?.visualDirection)?store.brand_direction.visualDirection:[],
       claimGuardrails:['No unsupported outcome claims','No invented testimonials','No fake scarcity','No unverified shipping claims','Before/after only when truthful and reproducible'],
-      objective:'Create a reusable organic creative system with enough variation for sustained TikTok and Instagram testing.'
+      objective:'Create a reusable organic creative system with enough variation for sustained TikTok and Instagram testing.',
+      reasoningContract:{
+        firstPrinciples:intelligence.profile.firstPrinciples,
+        forwardHorizonSteps:intelligence.profile.forwardHorizonSteps,
+        uncertaintyPolicy:intelligence.profile.uncertaintyPolicy,
+        learningPolicy:intelligence.profile.learningPolicy
+      },
+      trainingContext:intelligence.lessons.slice(0,12).map((lesson)=>({
+        lessonId:lesson.id,sourceId:lesson.sourceId,sourceTitle:lesson.title,sourceQuality:lesson.sourceQuality,
+        lessonType:lesson.lessonType,principle:lesson.principle,confidence:lesson.confidence
+      }))
     };
     const inserted=await pool.query(`INSERT INTO creative_packages(
       company_id,project_id,work_order_id,candidate_id,store_package_id,status,strategy,external_state
@@ -803,10 +814,25 @@ export async function runOne(){
     await pool.query(`UPDATE job_steps SET status='RUNNING',attempt_history=attempt_history || $2::jsonb,updated_at=now() WHERE id=$1`,
       [step.id,JSON.stringify([{at:new Date().toISOString(),result:'RUNNING'}])]);
 
-    const result=await executeStep(job,step);
-    await stepSuccess(step.id,result.output,result.evidenceRefs);
+    const intelligence=await getEmployeeIntelligenceContext(job.company_id,job.employee_slug);
+    const result=await executeStep(job,step,intelligence);
+    const appliedIntelligence={
+      employee:job.employee_slug,
+      reasoning:{
+        firstPrinciples:intelligence.profile.firstPrinciples,
+        forwardHorizonSteps:intelligence.profile.forwardHorizonSteps,
+        uncertaintyPolicy:intelligence.profile.uncertaintyPolicy,
+        learningPolicy:intelligence.profile.learningPolicy
+      },
+      trainingLessonIds:intelligence.lessons.map((lesson)=>lesson.id),
+      trainingSourceIds:[...new Set(intelligence.lessons.map((lesson)=>lesson.sourceId))]
+    };
+    const output=(typeof result.output==='object'&&result.output!==null)
+      ?{...(result.output as Record<string,unknown>),appliedIntelligence}
+      :{value:result.output,appliedIntelligence};
+    await stepSuccess(step.id,output,result.evidenceRefs);
 
-    const outputStatus=resultStatus(result.output);
+    const outputStatus=resultStatus(output);
     if(outputStatus.startsWith('BLOCKED') || outputStatus.startsWith('WAITING_')){
       await pool.query(`UPDATE jobs SET status='BLOCKED',last_error=$2,lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,[job.id,outputStatus]);
       await pool.query(`UPDATE work_orders SET status='BLOCKED',blockers=$2,updated_at=now() WHERE id=$1`,[job.work_order_id,JSON.stringify([outputStatus])]);
