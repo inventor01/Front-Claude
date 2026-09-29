@@ -520,4 +520,6 @@ CREATE TABLE IF NOT EXISTS fulfillment_orders (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(company_id,idempotency_key)
 );
+ALTER TABLE fulfillment_orders ADD COLUMN IF NOT EXISTS shopify_fulfillments jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE fulfillment_orders ADD COLUMN IF NOT EXISTS shopify_tracking_synced_at timestamptz;
 CREATE INDEX IF NOT EXISTS fulfillment_orders_company_idx ON fulfillment_orders(company_id,status,updated_at DESC);
