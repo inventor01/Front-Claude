@@ -1,5 +1,5 @@
 export function commandCenterHtml(){
-  return \`<!doctype html>
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
@@ -178,5 +178,5 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
   load();
 })();
 </script>
-</body></html>\`;
+</body></html>`;
 }
