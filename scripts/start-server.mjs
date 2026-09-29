@@ -1,15 +1,31 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statfsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { projectRoot } from "./sites-env.mjs";
 
 const port = String(process.env.PORT || "8787");
 const host = process.env.HOST || "0.0.0.0";
-const persistDir = process.env.RAILWAY_VOLUME_MOUNT_PATH
+function hasUsableSpace(directory) {
+  try {
+    const stats = statfsSync(directory);
+    const freeBytes = Number(stats.bavail) * Number(stats.bsize);
+    return Number.isFinite(freeBytes) && freeBytes >= 64 * 1024 * 1024;
+  } catch {
+    return false;
+  }
+}
+const requestedPersistDir = process.env.RAILWAY_VOLUME_MOUNT_PATH
   ? path.resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH)
   : process.env.FRONT_PERSIST_DIR
     ? path.resolve(process.env.FRONT_PERSIST_DIR)
     : path.join(projectRoot, ".wrangler/state");
+const persistDir = hasUsableSpace(requestedPersistDir)
+  ? requestedPersistDir
+  : path.join(tmpdir(), "front-wrangler-runtime");
+if (persistDir !== requestedPersistDir) {
+  console.warn("[front] persistence degraded: configured volume has insufficient free space; using ephemeral runtime storage");
+}
 mkdirSync(persistDir, { recursive: true });
 
 const migrate = spawnSync(
