@@ -63,7 +63,7 @@ export async function connectShopify(input:{companyId:string;storeDomain:string;
   }`);
 
   const granted=new Set(data.currentAppInstallation.accessScopes.map((scope)=>scope.handle));
-  const required=['read_products','write_products','read_orders','read_publications','write_publications','read_content','write_content','read_themes','write_themes','read_online_store_pages','write_online_store_pages','read_merchant_managed_fulfillment_orders','write_merchant_managed_fulfillment_orders','read_third_party_fulfillment_orders','write_third_party_fulfillment_orders'];
+  const required=['read_products','write_products','read_orders','read_publications','write_publications','read_content','write_content','read_themes','write_themes','read_files','write_files','read_online_store_pages','write_online_store_pages','read_merchant_managed_fulfillment_orders','write_merchant_managed_fulfillment_orders','read_third_party_fulfillment_orders','write_third_party_fulfillment_orders'];
   const missing=required.filter((scope)=>!granted.has(scope));
   if(missing.length){
     throw new Error(`Shopify connection is missing required scopes: ${missing.join(', ')}`);
@@ -315,6 +315,111 @@ export async function executeStorePackage(input:{
   return result;
 }
 
+
+
+export type DurableVideoAsset={
+  shopifyFileId:string;
+  filename:string;
+  url:string;
+  fileStatus:string;
+  mediaStatus:string;
+  sourceTaskId:string;
+  promptText:string;
+};
+
+async function latestShopifyConnection(companyId:string){
+  const r=await pool.query(`SELECT * FROM tool_connections
+    WHERE company_id=$1 AND provider='SHOPIFY' AND status='CONNECTED'
+    ORDER BY updated_at DESC LIMIT 1`,[companyId]);
+  if(!r.rowCount)throw new Error('BLOCKED_EXTERNAL_AUTH: Shopify is not connected for durable video storage.');
+  const connection=r.rows[0];
+  const credential=await readCredential<ShopifyCredential>(companyId,'SHOPIFY',String(connection.id));
+  return {connection,credential};
+}
+
+async function waitVideoReady(credential:ShopifyCredential,id:string){
+  for(let i=0;i<60;i++){
+    const data=await graph<{node:{
+      id:string;filename:string;fileStatus:string;status:string;
+      sources:Array<{url:string;mimeType:string;format:string;width:number;height:number}>
+    }|null}>(credential,`query VideoReady($id:ID!){
+      node(id:$id){... on Video{id filename fileStatus status sources{url mimeType format width height}}}
+    }`,{id});
+    const node=data.node;
+    if(node?.fileStatus==='FAILED'||node?.status==='FAILED')throw new Error(`Shopify video processing failed for ${node.filename}.`);
+    if(node?.fileStatus==='READY'&&node?.status==='READY'&&node.sources?.length)return node;
+    await new Promise((resolve)=>setTimeout(resolve,1500));
+  }
+  throw new Error('Shopify video did not become READY before timeout.');
+}
+
+export async function persistVideosToShopify(input:{
+  companyId:string;
+  projectId:string;
+  creativePackageId:string;
+  assets:Array<{taskId:string;temporaryUrl:string;promptText:string;specId:string}>;
+}):Promise<DurableVideoAsset[]>{
+  const {credential}=await latestShopifyConnection(input.companyId);
+  const output:DurableVideoAsset[]=[];
+  let index=0;
+  for(const asset of input.assets){
+    index++;
+    const mediaResponse=await fetch(asset.temporaryUrl,{redirect:'follow',headers:{'user-agent':'AI-Employee-OS-Renderer/0.6'}});
+    if(!mediaResponse.ok)throw new Error(`Runway output download failed (HTTP ${mediaResponse.status}).`);
+    const bytes=Buffer.from(await mediaResponse.arrayBuffer());
+    if(!bytes.length)throw new Error('Runway output video was empty.');
+    if(bytes.length>250*1024*1024)throw new Error('Rendered video exceeds the 250 MB persistence limit.');
+    const filename=`employee-os-${input.projectId.slice(0,8)}-${String(index).padStart(2,'0')}.mp4`;
+
+    const staged=await graph<{stagedUploadsCreate:{
+      stagedTargets:Array<{url:string;resourceUrl:string;parameters:Array<{name:string;value:string}>}>,
+      userErrors:Array<{field:string[];message:string}>
+    }}>(credential,`mutation StageVideo($input:[StagedUploadInput!]!){
+      stagedUploadsCreate(input:$input){stagedTargets{url resourceUrl parameters{name value}} userErrors{field message}}
+    }`,{input:[{resource:'VIDEO',filename,mimeType:'video/mp4',httpMethod:'POST',fileSize:String(bytes.length)}]});
+    if(staged.stagedUploadsCreate.userErrors.length)throw new Error(
+      'Shopify staged upload error: '+staged.stagedUploadsCreate.userErrors.map((e)=>e.message).join('; ')
+    );
+    const target=staged.stagedUploadsCreate.stagedTargets[0];
+    if(!target)throw new Error('Shopify did not return a staged video upload target.');
+
+    const form=new FormData();
+    for(const p of target.parameters)form.append(p.name,p.value);
+    form.append('file',new Blob([bytes],{type:'video/mp4'}),filename);
+    const upload=await fetch(target.url,{method:'POST',body:form});
+    if(!upload.ok)throw new Error(`Shopify staged video upload failed (HTTP ${upload.status}).`);
+
+    const created=await graph<{fileCreate:{
+      files:Array<{id:string;filename:string;fileStatus:string;status:string;sources:Array<{url:string;mimeType:string;format:string;width:number;height:number}>}>,
+      userErrors:Array<{field:string[];message:string}>
+    }}>(credential,`mutation PersistVideo($files:[FileCreateInput!]!){
+      fileCreate(files:$files){files{... on Video{id filename fileStatus status sources{url mimeType format width height}}} userErrors{field message}}
+    }`,{files:[{
+      originalSource:target.resourceUrl,contentType:'VIDEO',filename,
+      alt:'Original product video generated by Employee OS',duplicateResolutionMode:'APPEND_UUID'
+    }]});
+    if(created.fileCreate.userErrors.length)throw new Error(
+      'Shopify file create error: '+created.fileCreate.userErrors.map((e)=>e.message).join('; ')
+    );
+    const file=created.fileCreate.files[0];
+    if(!file?.id)throw new Error('Shopify did not return a Video file ID.');
+    const ready=await waitVideoReady(credential,file.id);
+    const url=String(ready.sources?.[0]?.url||'');
+    if(!url)throw new Error('Shopify video became READY without a public source URL.');
+    output.push({
+      shopifyFileId:ready.id,filename:ready.filename,url,fileStatus:ready.fileStatus,mediaStatus:ready.status,
+      sourceTaskId:asset.taskId,promptText:asset.promptText
+    });
+  }
+
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'CREATIVE_ASSETS_PERSISTED',$2)`,[
+    input.companyId,JSON.stringify({
+      projectId:input.projectId,creativePackageId:input.creativePackageId,
+      assetCount:output.length,assetIds:output.map((x)=>x.shopifyFileId)
+    })
+  ]);
+  return output;
+}
 
 export type ShopifyPaidOrder={
   id:string;
