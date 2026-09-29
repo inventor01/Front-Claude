@@ -71,3 +71,7 @@ jobs:
       - name: Run Link-to-Launch lifecycle
         working-directory: employee-os
         run: node tests/link-launch-sandbox.mjs
+
+      - name: Run social and support external-action sandbox
+        working-directory: employee-os
+        run: node tests/external-actions-sandbox.mjs
