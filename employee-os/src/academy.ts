@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { pool } from './db.js';
+import { searchCredential } from './external-connections.js';
 
 export type VerificationGrade='VERIFIED_FIRST_PARTY'|'VERIFIED_PUBLIC_RECORD'|'CORROBORATED'|'ESTIMATE'|'SIGNAL'|'UNKNOWN';
 export type SourceQuality='PLATFORM_DOCS'|'PROVEN_CASE'|'EXPERT_REFERENCE'|'COMMUNITY_TUTORIAL'|'USER_CURATED'|'UNVERIFIED';
@@ -304,7 +305,8 @@ export async function recommendVerificationTools(companyId:string,claimType:stri
 export async function discoverTools(companyId:string,claimType:string,claimDescription:string){
   await ensureAcademyDefaults(companyId);
   const existing=await recommendVerificationTools(companyId,claimType);
-  const key=process.env.JINA_API_KEY||'';
+  const connectedSearch=await searchCredential(companyId);
+  const key=connectedSearch?.apiKey||process.env.JINA_API_KEY||'';
   const run=await pool.query(`INSERT INTO tool_discovery_runs(company_id,claim_type,query,status,results)
     VALUES($1,$2,$3,$4,'[]'::jsonb) RETURNING *`,[
     companyId,claimType,`${claimDescription} verification tools`,key?'RUNNING':'AUTH_REQUIRED'
