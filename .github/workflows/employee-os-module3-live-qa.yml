@@ -98,6 +98,16 @@ jobs:
             sleep 2
           done
 
+          echo "Luca diagnostic state"
+          echo "LUCA_JOB_STATUS=$LUCA_JOB_STATUS"
+          jq -c --arg j "$LUCA_JOB" '[.jobs[] | select(.id==$j)] | .[0] | {status,last_error,attempt_count}' <<<"$EXEC3"
+          jq -c --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j)] | map({sequence,step_type,status,last_error})' <<<"$EXEC3"
+          jq -c --arg w "$LUCA_WO" '[.workOrders[] | select(.id==$w)] | .[0] | {status,blockers}' <<<"$STATE3"
+          jq -c --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0] | {phase,status}' <<<"$STATE3"
+          jq -c --arg p "$PROJECT" '[.storePackages[] | select(.project_id==$p)] | map({status,qa_result,external_state,brand_direction,offer,page_architecture,copy_draft})' <<<"$STATE3"
+          jq -c --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p)] | map({action_type,status})' <<<"$STATE3"
+          jq -c --arg p "$PROJECT" '[.messages[] | select(.project_id==$p and .from_employee_slug=="luca")] | map({type,to_employee_slug,payload,consumed_at})' <<<"$EXEC3"
+
           test "$LUCA_JOB_STATUS" = "BLOCKED"
           STATE3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
           EXEC3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
