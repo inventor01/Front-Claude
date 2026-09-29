@@ -54,6 +54,18 @@ const server=http.createServer(async(req,res)=>{
         currentAppInstallation:{accessScopes:shopifyScopes.map(handle=>({handle}))}
       }});
     }
+    if(query.includes('EmployeeOSReleaseGateRead')){
+      return json(res,200,{data:{
+        shop:{name:'Employee OS QA Store',myshopifyDomain:'employee-os-qa.myshopify.com'},
+        products:{nodes:[{id:'gid://shopify/Product/999',title:'Existing QA Product',status:'DRAFT'}]}
+      }});
+    }
+    if(query.includes('EmployeeOSReleaseGateDraft')){
+      return json(res,200,{data:{productSet:{product:{
+        id:'gid://shopify/Product/QA-GATE',handle:String(body.variables?.input?.handle||'employee-os-release-gate'),
+        title:'Employee OS Release Gate QA — Safe Draft',status:'DRAFT'
+      },userErrors:[]}}});
+    }
     if(query.includes('BuildProduct')){
       mock.productSetCalls++; mock.productCreated=true;
       return json(res,200,{data:{productSet:{product:{
@@ -254,6 +266,10 @@ await api(`/api/company/${company}/integrations/shopify/connect`,{method:'POST',
   body:JSON.stringify({storeDomain:'employee-os-qa.myshopify.com',accessToken:'shpat_qa_test_123456789'})});
 await api(`/api/company/${company}/integrations/cj/connect`,{method:'POST',headers:auth,
   body:JSON.stringify({apiKey:'cj-api-key-qa-123456789'})});
+
+const gate=await api(`/api/company/${company}/integrations/shopify/verify`,{method:'POST',headers:auth});
+assert(gate.productReadSucceeded===true,'Shopify release gate should prove product read access');
+assert(gate.draftProduct?.status==='DRAFT','Shopify release gate must create only a DRAFT test product');
 
 const db=new Pool({connectionString:process.env.DATABASE_URL,ssl:false});
 const creds=await db.query('SELECT provider,ciphertext FROM integration_credentials WHERE company_id=$1 ORDER BY provider',[company]);

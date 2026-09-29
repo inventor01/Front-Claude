@@ -156,8 +156,8 @@ async function waitTask(secret:string,taskId:string,timeoutMs=6*60*1000){
 
 export async function renderOriginalProductClips(input:{
   companyId:string;
-  jobId:string;
-  workOrderId:string;
+  jobId:string|null;
+  workOrderId:string|null;
   employeeSlug:string;
   idempotencyKey:string;
   promptImage:string;
