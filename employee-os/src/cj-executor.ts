@@ -177,8 +177,9 @@ export async function mapCandidateToCJ(companyId:string,candidateId:string){
   if(!c.rowCount)throw new Error('Product candidate not found for CJ mapping.');
   const candidate=c.rows[0];
   const products=await searchCJ(companyId,String(candidate.name));
-  if(!products.length)throw new Error('BLOCKED_SUPPLIER_MAPPING: CJ returned no matching products.');
-  const best=products[0],second=products[1];
+  const best=products[0];
+  if(!best)throw new Error('BLOCKED_SUPPLIER_MAPPING: CJ returned no matching products.');
+  const second=products[1];
   if(best.matchScore<60)throw new Error(`BLOCKED_SUPPLIER_MAPPING: Best CJ match is too weak (${best.matchScore}/100).`);
   if(second&&best.matchScore-second.matchScore<8&&second.matchScore>=60){
     return {status:'NEEDS_REVIEW',candidateId,options:products.slice(0,5)};
@@ -209,7 +210,7 @@ export async function mapCandidateToCJ(companyId:string,candidateId:string){
   });
   const options=Array.isArray(freight)?freight:Array.isArray(freight?.list)?freight.list:Array.isArray(freight?.logistics)?freight.logistics:[];
   if(!options.length)throw new Error('BLOCKED_SUPPLIER_FREIGHT: CJ returned no U.S. freight option for this variant.');
-  const costs=options.map(freightCost).filter((x): x is number => x!==null&&Number.isFinite(x));
+  const costs=options.map(freightCost).filter((x:number|null): x is number => x!==null&&Number.isFinite(x));
   const minFreight=costs.length?Math.min(...costs):null;
   if(minFreight===null)throw new Error('BLOCKED_SUPPLIER_FREIGHT: CJ freight options did not include a usable price.');
 
