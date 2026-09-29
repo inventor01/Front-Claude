@@ -392,6 +392,44 @@ app.delete('/api/company/:companyId/integrations/runway',async(req,reply)=>{
   return disconnectRunway(companyId);
 });
 
+app.post('/api/company/:companyId/link-launches/:projectId/retry-source',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId,projectId}=req.params as {companyId:string;projectId:string};
+  await requireCompany(userId,companyId);
+  const source=await pool.query(`SELECT * FROM reference_sources WHERE company_id=$1 AND project_id=$2 ORDER BY updated_at DESC LIMIT 1`,[
+    companyId,projectId
+  ]);
+  if(!source.rowCount)return reply.code(404).send({error:'Reference source not found'});
+  const status=String(source.rows[0].status||'');
+  const stage=status==='BLOCKED_ANALYSIS'?'SOURCE_ANALYSIS':'SOURCE_CAPTURE';
+  if(stage==='SOURCE_CAPTURE'&&String(source.rows[0].provider)==='INSTAGRAM'){
+    const apify=await pool.query(`SELECT 1 FROM tool_connections WHERE company_id=$1 AND provider='APIFY' AND status='CONNECTED' LIMIT 1`,[companyId]);
+    if(!apify.rowCount)return reply.code(409).send({error:'Connect Social reference capture in Connections first.'});
+  }
+  if(stage==='SOURCE_ANALYSIS'){
+    const openai=await pool.query(`SELECT 1 FROM tool_connections WHERE company_id=$1 AND provider='OPENAI' AND status='CONNECTED' LIMIT 1`,[companyId]);
+    if(!openai.rowCount)return reply.code(409).send({error:'Connect Multimodal reference analysis in Connections first.'});
+  }
+  const job=await pool.query(`SELECT j.id,j.work_order_id,js.id step_id
+    FROM jobs j JOIN job_steps js ON js.job_id=j.id AND js.step_type=$3
+    WHERE j.company_id=$1 AND j.project_id=$2 AND j.job_type='LINK_PRODUCT_RESEARCH'
+    ORDER BY j.created_at DESC LIMIT 1`,[companyId,projectId,stage]);
+  if(!job.rowCount)return reply.code(404).send({error:'Link-to-Launch source job not found'});
+  await pool.query(`UPDATE job_steps SET status='PENDING',last_error=NULL,updated_at=now() WHERE id=$1`,[job.rows[0].step_id]);
+  await pool.query(`UPDATE jobs SET status='QUEUED',last_error=NULL,scheduled_for=now(),retry_count=0,
+    lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,[job.rows[0].id]);
+  await pool.query(`UPDATE work_orders SET status='READY',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.rows[0].work_order_id]);
+  await pool.query(`UPDATE reference_sources SET status=$3,error=NULL,updated_at=now() WHERE company_id=$1 AND project_id=$2`,[
+    companyId,projectId,stage==='SOURCE_CAPTURE'?'PENDING_CAPTURE':'CAPTURED'
+  ]);
+  await pool.query(`UPDATE link_launches SET status=$3,updated_at=now() WHERE company_id=$1 AND project_id=$2`,[
+    companyId,projectId,stage
+  ]);
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'LINK_LAUNCH_MANUAL_RETRY',$2)`,[
+    companyId,JSON.stringify({projectId,jobId:job.rows[0].id,stage})
+  ]);
+  return reply.code(202).send({requeued:true,stage,jobId:job.rows[0].id});
+});
+
 app.post('/api/company/:companyId/ventures/from-link',async(req,reply)=>{
   const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
   const body=z.object({
