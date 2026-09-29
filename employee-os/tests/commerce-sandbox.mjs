@@ -33,7 +33,7 @@ function cjFail(res,message='Not found'){json(res,200,{code:1600100,result:false
 
 const shopifyScopes=[
   'read_products','write_products','read_orders','read_publications','write_publications',
-  'read_content','write_content','read_themes','write_themes','read_online_store_pages','write_online_store_pages',
+  'read_content','write_content','read_themes','write_themes','read_files','write_files','read_online_store_pages','write_online_store_pages',
   'read_merchant_managed_fulfillment_orders','write_merchant_managed_fulfillment_orders',
   'read_third_party_fulfillment_orders','write_third_party_fulfillment_orders'
 ];
