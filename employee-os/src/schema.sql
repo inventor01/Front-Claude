@@ -282,3 +282,38 @@ CREATE TABLE IF NOT EXISTS distribution_packages (
   UNIQUE(project_id,creative_package_id)
 );
 CREATE INDEX IF NOT EXISTS distribution_packages_company_idx ON distribution_packages(company_id,created_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS support_cases (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_id uuid REFERENCES projects(id) ON DELETE SET NULL,
+  work_order_id uuid REFERENCES work_orders(id) ON DELETE SET NULL,
+  channel text NOT NULL,
+  customer_ref text NOT NULL,
+  subject text NOT NULL,
+  customer_message text NOT NULL,
+  status text NOT NULL DEFAULT 'NEW',
+  category text,
+  severity text,
+  draft_response text,
+  resolution text,
+  external_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS support_cases_company_idx ON support_cases(company_id,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS issue_patterns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  pattern_key text NOT NULL,
+  category text NOT NULL,
+  occurrences integer NOT NULL DEFAULT 1,
+  latest_example text NOT NULL,
+  status text NOT NULL DEFAULT 'ACTIVE',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(company_id,pattern_key)
+);
+CREATE INDEX IF NOT EXISTS issue_patterns_company_idx ON issue_patterns(company_id,last_seen_at DESC);
