@@ -11,8 +11,16 @@ type SnapshotRow={topic_key:string;topic_title:string;observed:number;aliases:st
 type EvidenceRow={id:string;platform:string;author:string;url:string;content:string;published:number|null;first_seen:number;last_seen:number;views:number|null;likes:number|null};
 
 export async function GET(request:Request){
-  const user=await getChatGPTUser();
-  if(!user)return json({error:'Please sign in.'},401);
+  const interactiveUser=await getChatGPTUser();
+  const serviceKey=request.headers.get('x-front-commerce-key')||'';
+  const serviceAuthorized=Boolean(
+    env.FRONT_COMMERCE_API_KEY &&
+    env.FRONT_COMMERCE_OWNER_ID &&
+    serviceKey &&
+    serviceKey===env.FRONT_COMMERCE_API_KEY
+  );
+  const ownerId=interactiveUser?.userId || (serviceAuthorized ? env.FRONT_COMMERCE_OWNER_ID : '');
+  if(!ownerId)return json({error:'Authentication required.'},401);
   try{
     const params=new URL(request.url).searchParams;
     const q=clean(params.get('q')||'').toLowerCase();
@@ -33,7 +41,7 @@ export async function GET(request:Request){
        WHERE s.owner=?
        ORDER BY s.observed DESC
        LIMIT 160`
-    ).bind(user.userId,since,user.userId).all<SnapshotRow>();
+    ).bind(ownerId,since,ownerId).all<SnapshotRow>();
 
     const evidence=await db().prepare(
       `SELECT e.id,e.platform,e.author,e.url,e.content,e.published,e.first_seen,e.last_seen,
@@ -43,7 +51,7 @@ export async function GET(request:Request){
        WHERE e.owner=? AND e.last_seen>?
        ORDER BY e.last_seen DESC
        LIMIT 4000`
-    ).bind(user.userId,since).all<EvidenceRow>();
+    ).bind(ownerId,since).all<EvidenceRow>();
 
     const rows:CommerceEvidence[]=evidence.results.map((row)=>({
       id:row.id,platform:row.platform,author:row.author,url:row.url,content:row.content,
@@ -94,6 +102,7 @@ export async function GET(request:Request){
           'regulatory risk'
         ]
       },
+      authMode:interactiveUser?'user':'service',
       at:now,
     });
   }catch(error){
