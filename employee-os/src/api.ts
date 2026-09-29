@@ -3,10 +3,12 @@ import cors from '@fastify/cors';
 import { z } from 'zod';
 import { pool,tx } from './db.js';
 import { hashPassword,verifyPassword,signSession,requireUser,requireCompany } from './auth.js';
+import { commandCenterHtml } from './ui.js';
 
 const app=Fastify({logger:true});
 await app.register(cors,{origin:true});
 app.get('/health',async()=>({ok:true,service:'employee-os-api',time:new Date().toISOString()}));
+app.get('/',async(_req,reply)=>reply.type('text/html; charset=utf-8').send(commandCenterHtml()));
 
 app.post('/api/auth/register',async(req,reply)=>{
   const body=z.object({email:z.string().email(),password:z.string().min(12),companyName:z.string().min(2).max(100)}).parse(req.body);
