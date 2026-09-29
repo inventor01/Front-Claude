@@ -54,7 +54,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     <button data-view="today" class="active">Today</button>
     <button data-view="work">Work</button>
     <button data-view="team">Employees</button>
-    <button data-view="venture">Venture</button>
+    <button data-view="venture">Venture</button>\n    <button data-view="link">Link-to-Launch</button>
     <button data-view="approvals">Approvals</button>
     <button data-view="support">Customer Ops</button>
     <button data-view="brain">Company Brain</button>\n    <button data-view="academy">Academy</button>\n    <button data-view="connections">Connections</button>\n    <button data-view="activity">Activity</button>
@@ -71,7 +71,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
 (function(){
   var token=localStorage.getItem('employee_os_token')||'';
   var companyId=localStorage.getItem('employee_os_company')||'';
-  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null, cj=null;
+  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null, cj=null, apify=null, openai=null;
 
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
   function badge(v){var x=String(v||'');var cls=/DONE|SUCCEEDED|APPROVED|READY_FOR/.test(x)?'good':/BLOCK|FAILED|REJECT/.test(x)?'bad':'warn';return '<span class="badge '+cls+'">'+esc(x)+'</span>';}
@@ -99,9 +99,11 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
         request('/api/company/'+companyId+'/memories'),
         request('/api/company/'+companyId+'/academy'),
         request('/api/company/'+companyId+'/integrations/shopify'),
-        request('/api/company/'+companyId+'/integrations/cj')
+        request('/api/company/'+companyId+'/integrations/cj'),
+        request('/api/company/'+companyId+'/integrations/apify'),
+        request('/api/company/'+companyId+'/integrations/openai')
       ]);
-      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];cj=all[6];
+      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];cj=all[6];apify=all[7];openai=all[8];
       document.getElementById('auth').classList.add('hidden');document.getElementById('app').classList.remove('hidden');render();
     }catch(e){if(e.status===401){localStorage.clear();token='';companyId='';showAuth();}else notice(e.message,'error');}
   }
@@ -133,7 +135,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     if(view==='today')h=renderToday();
     if(view==='work')h=renderWork();
     if(view==='team')h=renderTeam();
-    if(view==='venture')h=renderVenture();
+    if(view==='venture')h=renderVenture();\n    if(view==='link')h=renderLinkLaunch();
     if(view==='approvals')h=renderApprovals();
     if(view==='support')h=renderSupport();
     if(view==='brain')h=renderBrain();
@@ -148,7 +150,8 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var urgent=decisions.length?decisions.length+' decision'+(decisions.length===1?'':'s')+' need you.':attention.length?attention.length+' blocker'+(attention.length===1?'':'s')+' visible.':'Nothing urgent needs you.';
     return '<div class="hero"><h2>'+esc(urgent)+'</h2><p>Give Ava an outcome. The company persists the work, delegates it, and surfaces only evidence-backed results and real blockers.</p></div>'+
     '<div class="grid"><div class="card"><span class="metric">'+projects.length+'</span><span class="label">Active projects</span></div><div class="card"><span class="metric">'+decisions.length+'</span><span class="label">Decisions</span></div><div class="card"><span class="metric">'+attention.length+'</span><span class="label">Attention items</span></div></div>'+
-    '<h3 class="section-title">Give Ava an objective</h3><div class="card"><form id="objectiveForm" class="form"><textarea id="objectiveText">Find a product that is demonstrably selling now and build the business from start to finish. Verify demand, supplier viability, stock, U.S. freight, landed economics, contentability, and risk. Build the brand and Shopify storefront, connect fulfillment, create the creative and distribution system, and continue until the business is launch-ready. Only bring me decisions or external actions that genuinely require owner approval. Never assume unknown facts and never call work complete without evidence.</textarea><input id="objectiveQuery" placeholder="Optional focus — leave blank and Rowan chooses the product from current evidence"/><button class="action">Start durable work</button></form></div>'+
+    '<h3 class="section-title">Launch from a reference link</h3><div class="card"><form id="linkLaunchQuickForm" class="form"><input id="linkLaunchQuickUrl" placeholder="Paste Instagram Reel, TikTok, X, YouTube, or product-demo URL"/><button class="action">Reverse-engineer and build venture</button></form><p>Employee OS preserves the source, identifies the product, reverse-sources it, and sends the creative structure to Maya without copying the creator\'s exact assets.</p></div>'+
+    '<h3 class="section-title">Or give Ava an objective</h3><div class="card"><form id="objectiveForm" class="form"><textarea id="objectiveText">Find a product that is demonstrably selling now and build the business from start to finish. Verify demand, supplier viability, stock, U.S. freight, landed economics, contentability, and risk. Build the brand and Shopify storefront, connect fulfillment, create the creative and distribution system, and continue until the business is launch-ready. Only bring me decisions or external actions that genuinely require owner approval. Never assume unknown facts and never call work complete without evidence.</textarea><input id="objectiveQuery" placeholder="Optional focus — leave blank and Rowan chooses the product from current evidence"/><button class="action">Start durable work</button></form></div>'+
     '<h3 class="section-title">What needs me</h3><div class="stack">'+(decisions.concat(attention).slice(0,8).map(renderAttention).join('')||'<div class="empty">No owner decision is waiting.</div>')+'</div>';
   }
   function renderAttention(x){return '<div class="item attention"><div class="row"><b>'+esc(x.action_type||x.objective||'Attention')+'</b>'+badge(x.status||x.risk)+'</div><p>'+esc(x.reason||((x.blockers||[]).join(' · ')))+'</p></div>';}
@@ -162,6 +165,23 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var candidate=(state.productCandidates||[])[0], store=(state.storePackages||[])[0], creative=(state.creativePackages||[])[0], dist=(state.distributionPackages||[])[0];
     return '<div class="grid two">'+packageCard('Product Research',candidate,candidate?candidate.name+' · score '+candidate.score+'/100':'')+packageCard('Store Builder',store)+packageCard('Creative Studio',creative,creative?'Scripts: '+(creative.scripts||[]).length+' · rendered assets: '+((creative.external_state||{}).renderedAssets||0):'')+packageCard('Distribution',dist,dist?'Planned posts: '+(dist.calendar||[]).length+' · published: '+((dist.external_state||{}).publishedCount||0):'')+'</div>';
   }
+  function renderLinkLaunch(){
+    var launches=(state.linkLaunches||[]),sources=(state.referenceSources||[]);
+    var rows=launches.map(function(l){
+      var source=sources.find(function(s){return s.id===l.source_id;})||{};
+      var product=l.identified_product||((source.analysis||{}).product||{}).searchQuery||'Identifying product…';
+      return '<div class="item"><div class="row"><b>'+esc(product)+'</b>'+badge(l.status)+'</div><p>'+esc(source.source_url||'')+'</p><span class="muted">Source: '+esc(source.provider||'')+' · confidence '+esc(l.identified_product_confidence||'pending')+(l.product_url?' · '+esc(l.product_url):'')+'</span></div>';
+    }).join('');
+    var blockers=[];
+    if(!(apify&&apify.connected))blockers.push('Apify/social capture');
+    if(!(openai&&openai.connected))blockers.push('multimodal analyzer');
+    var status=blockers.length?'<div class="error">Connect '+esc(blockers.join(' + '))+' in Connections before a blocked Instagram source can be visually analyzed.</div>':'<div class="success">Social capture and multimodal analysis are connected.</div>';
+    return '<div class="hero"><h2>Link-to-Launch</h2><p>Paste one social-commerce reference. Rowan identifies and sources the product; Luca builds the storefront; Maya models the creative structure into original variants; Nova plans distribution; Ellis owns customer operations.</p></div>'+
+      status+
+      '<div class="card"><form id="linkLaunchForm" class="form"><input id="linkLaunchUrl" placeholder="https://www.instagram.com/reel/..."/><textarea id="linkLaunchConstraints" placeholder="Optional constraints, one per line">Prefer lowest verified landed cost without sacrificing reasonable U.S. delivery\nAvoid regulated, high-return, IP-sensitive, or unsafe products\nNo publishing or spending without owner approval</textarea><button class="action">Start Link-to-Launch</button></form></div>'+
+      '<h3 class="section-title">Reference ventures</h3><div class="stack">'+(rows||'<div class="empty">No link-based ventures yet.</div>')+'</div>';
+  }
+
   function renderApprovals(){
     var rows=(state.approvals||[]).filter(function(a){return a.status==='PENDING';});
     return '<div class="stack">'+(rows.map(function(a){return '<div class="item"><div class="row"><b>'+esc(a.action_type)+'</b>'+badge(a.risk)+'</div><p>'+esc(a.reason)+'</p><div class="row"><span class="muted">Cost: $'+((a.cost_cents||0)/100).toFixed(2)+'</span><div><button class="secondary approval" data-id="'+esc(a.id)+'" data-decision="approve">Approve</button> <button class="danger approval" data-id="'+esc(a.id)+'" data-decision="reject">Reject</button></div></div></div>';}).join('')||'<div class="empty">No approvals waiting.</div>')+'</div>';
@@ -206,23 +226,45 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
   }
   function renderConnections(){
     var connected=shopify&&shopify.connected, meta=(shopify&&shopify.metadata)||{};
-    var shopifyStatus=connected?'<div class="success"><b>Shopify connected</b><br>'+esc(meta.storeName||meta.storeDomain||'Store')+' · '+esc((meta.primaryDomain||{}).url||meta.storeDomain||'')+'</div>':'<div class="error"><b>Shopify not connected</b><br>Luca can build the internal store package, but cannot create a live storefront until a dedicated venture store is authorized once.</div>';
-    var scopes='read_products, write_products, read_orders, read_publications, write_publications, read_content, write_content, read_online_store_pages, write_online_store_pages, read_merchant_managed_fulfillment_orders, write_merchant_managed_fulfillment_orders, read_third_party_fulfillment_orders, write_third_party_fulfillment_orders';
+    var shopifyStatus=connected?'<div class="success"><b>Shopify connected</b><br>'+esc(meta.storeName||meta.storeDomain||'Store')+' · '+esc((meta.primaryDomain||{}).url||meta.storeDomain||'')+'</div>':'<div class="error"><b>Shopify not connected</b><br>Luca cannot publish a live designed storefront until a dedicated venture store is authorized once.</div>';
+    var scopes='read_products, write_products, read_orders, read_publications, write_publications, read_content, write_content, read_themes, write_themes, read_online_store_pages, write_online_store_pages, read_merchant_managed_fulfillment_orders, write_merchant_managed_fulfillment_orders, read_third_party_fulfillment_orders, write_third_party_fulfillment_orders';
     var cjConnected=cj&&cj.connected, cjMeta=(cj&&cj.metadata)||{};
     var cjStatusHtml=cjConnected?'<div class="success"><b>CJdropshipping connected</b><br>Fulfillment account '+esc(cjMeta.openId||'connected')+' · API 2.0</div>':'<div class="error"><b>CJdropshipping not connected</b><br>No venture product can publish until a supplier variant, stock, U.S. freight, and landed cost are verified.</div>';
+    var apifyConnected=apify&&apify.connected;
+    var apifyHtml=apifyConnected?'<div class="success"><b>Social reference capture connected</b><br>Instagram Reels can be captured from public URLs.</div>':'<div class="error"><b>Social reference capture not connected</b><br>Instagram can block ordinary fetchers. Connect Apify once so public Reels can be captured reliably.</div>';
+    var openaiConnected=openai&&openai.connected, openaiMeta=(openai&&openai.metadata)||{};
+    var openaiHtml=openaiConnected?'<div class="success"><b>Multimodal analyzer connected</b><br>'+esc(openaiMeta.model||'Vision model')+' · sampled Reel frames can be analyzed.</div>':'<div class="error"><b>Multimodal analyzer not connected</b><br>Link-to-Launch needs image understanding to identify products and deconstruct creative from sampled video frames.</div>';
     return '<div class="hero"><h2>Connections</h2><p>Authorize external tools once. Employees can then use them through audited backend adapters without exposing credentials to the browser again.</p></div>'+
-      '<div class="grid two"><div class="card"><h3>Shopify execution</h3>'+shopifyStatus+
+      '<div class="grid two"><div class="card"><h3>Social reference capture</h3>'+apifyHtml+
+      (apifyConnected?'<button id="disconnectApify" class="danger">Disconnect capture</button>':'<form id="apifyConnectForm" class="form"><input id="apifyToken" type="password" placeholder="Apify API token" autocomplete="new-password"/><button class="action">Connect Reel capture</button></form><p class="muted">Used for public Instagram reference capture. Token stays encrypted server-side.</p>')+
+      '</div><div class="card"><h3>Multimodal reference analysis</h3>'+openaiHtml+
+      (openaiConnected?'<button id="disconnectOpenAI" class="danger">Disconnect analyzer</button>':'<form id="openaiConnectForm" class="form"><input id="openaiApiKey" type="password" placeholder="OpenAI API key" autocomplete="new-password"/><button class="action">Connect visual analyzer</button></form><p class="muted">Employee OS samples frames and sends only the required reference context for product/creative analysis.</p>')+
+      '</div></div>'+
+      '<div class="grid two" style="margin-top:10px"><div class="card"><h3>Shopify execution</h3>'+shopifyStatus+
       (connected?'<p>API version: '+esc(meta.apiVersion||'2026-07')+' · Online Store: '+esc(meta.publicationTitle||'Online Store')+'</p><button id="disconnectShopify" class="danger">Disconnect Shopify</button>':
-      '<form id="shopifyConnectForm" class="form"><input id="shopifyDomain" placeholder="venture-store.myshopify.com" autocomplete="off"/><input id="shopifyToken" type="password" placeholder="Admin API access token" autocomplete="new-password"/><button class="action">Connect dedicated venture store</button></form><p class="muted">Required custom-app scopes: '+esc(scopes)+'. The token is encrypted server-side with AES-256-GCM and is never returned by this API.</p>')+
+      '<form id="shopifyConnectForm" class="form"><input id="shopifyDomain" placeholder="venture-store.myshopify.com" autocomplete="off"/><input id="shopifyToken" type="password" placeholder="Admin API access token" autocomplete="new-password"/><button class="action">Connect dedicated venture store</button></form><p class="muted">Required custom-app scopes: '+esc(scopes)+'. The token is encrypted server-side and never returned by this API.</p>')+
       '</div><div class="card"><h3>CJdropshipping fulfillment</h3>'+cjStatusHtml+
       (cjConnected?'<p>Access tokens stay backend-only and are refreshed automatically before expiry.</p><button id="disconnectCJ" class="danger">Disconnect CJ</button>':
-      '<form id="cjConnectForm" class="form"><input id="cjApiKey" type="password" placeholder="CJ API key" autocomplete="new-password"/><button class="action">Connect CJdropshipping</button></form><p class="muted">Get the API key from your CJ account API authorization page. Employee OS exchanges it for backend-only CJ access/refresh tokens.</p>')+
+      '<form id="cjConnectForm" class="form"><input id="cjApiKey" type="password" placeholder="CJ API key" autocomplete="new-password"/><button class="action">Connect CJdropshipping</button></form><p class="muted">Employee OS exchanges the API key for backend-only CJ access/refresh tokens.</p>')+
       '</div></div>'+
-      '<div class="card" style="margin-top:10px"><h3>Finish-line rule</h3><p>A store is not DONE because a brief exists. DONE requires a verified supplier mapping with stock + U.S. freight + landed cost, Shopify execution, Online Store publication, and a reachable product URL persisted in the project.</p></div>';
+      '<div class="card" style="margin-top:10px"><h3>Finish-line rule</h3><p>Link-to-Launch is DONE only after source provenance, product identity, verified supplier mapping, stock + freight + landed cost, designed Shopify theme, product publication, reachable URL, creative package, and fulfillment path are all persisted.</p></div>';
   }
   function renderActivity(){return '<div class="stack">'+((state.events||[]).map(function(e){return '<div class="item"><div class="row"><b>'+esc(e.type)+'</b><span class="muted">'+esc(fmt(e.created_at))+'</span></div><p>'+esc(JSON.stringify(e.payload))+'</p></div>';}).join('')||'<div class="empty">No events yet.</div>')+'</div>';}
 
   function bindView(){
+    async function submitLinkLaunch(url,constraints){
+      if(!url)throw new Error('Paste a reference URL first.');
+      notice('Ava accepted the reference. Rowan is capturing and identifying the product…');
+      await request('/api/company/'+companyId+'/ventures/from-link',{method:'POST',body:JSON.stringify({url:url,constraints:constraints||[],budgetCents:null})});
+      notice('Link-to-Launch started. Work will continue in the background.');setTimeout(load,1400);
+    }
+    var quick=document.getElementById('linkLaunchQuickForm');
+    if(quick)quick.onsubmit=async function(e){e.preventDefault();try{await submitLinkLaunch(document.getElementById('linkLaunchQuickUrl').value,[]);}catch(err){notice(err.message,'error');}};
+    var linkForm=document.getElementById('linkLaunchForm');
+    if(linkForm)linkForm.onsubmit=async function(e){e.preventDefault();try{
+      var constraints=document.getElementById('linkLaunchConstraints').value.split('\n').map(function(x){return x.trim();}).filter(Boolean);
+      await submitLinkLaunch(document.getElementById('linkLaunchUrl').value,constraints);
+    }catch(err){notice(err.message,'error');}};
     var objective=document.getElementById('objectiveForm');
     if(objective)objective.onsubmit=async function(e){e.preventDefault();try{notice('Ava is creating durable work…');await request('/api/company/'+companyId+'/objectives',{method:'POST',body:JSON.stringify({statement:document.getElementById('objectiveText').value,constraints:['No spending without owner approval','No publishing without owner approval'],query:document.getElementById('objectiveQuery').value})});notice('Objective accepted. The worker will continue after this request.');setTimeout(load,1200);}catch(err){notice(err.message,'error');}};
     document.querySelectorAll('.approval').forEach(function(b){b.onclick=async function(){try{await request('/api/company/'+companyId+'/approvals/'+b.dataset.id+'/'+b.dataset.decision,{method:'POST'});notice('Decision recorded.');await load();}catch(err){notice(err.message,'error');}};});
@@ -277,6 +319,26 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var disconnectCJ=document.getElementById('disconnectCJ');
     if(disconnectCJ)disconnectCJ.onclick=async function(){try{
       await request('/api/company/'+companyId+'/integrations/cj',{method:'DELETE'});notice('CJdropshipping disconnected.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var apifyForm=document.getElementById('apifyConnectForm');
+    if(apifyForm)apifyForm.onsubmit=async function(e){e.preventDefault();try{
+      notice('Validating social capture provider…');
+      await request('/api/company/'+companyId+'/integrations/apify/connect',{method:'POST',body:JSON.stringify({token:document.getElementById('apifyToken').value})});
+      document.getElementById('apifyToken').value='';notice('Social reference capture connected.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var disconnectApify=document.getElementById('disconnectApify');
+    if(disconnectApify)disconnectApify.onclick=async function(){try{
+      await request('/api/company/'+companyId+'/integrations/apify',{method:'DELETE'});notice('Social reference capture disconnected.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var openaiForm=document.getElementById('openaiConnectForm');
+    if(openaiForm)openaiForm.onsubmit=async function(e){e.preventDefault();try{
+      notice('Validating multimodal model access…');
+      await request('/api/company/'+companyId+'/integrations/openai/connect',{method:'POST',body:JSON.stringify({apiKey:document.getElementById('openaiApiKey').value})});
+      document.getElementById('openaiApiKey').value='';notice('Multimodal reference analyzer connected.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var disconnectOpenAI=document.getElementById('disconnectOpenAI');
+    if(disconnectOpenAI)disconnectOpenAI.onclick=async function(){try{
+      await request('/api/company/'+companyId+'/integrations/openai',{method:'DELETE'});notice('Multimodal analyzer disconnected.');await load();
     }catch(err){notice(err.message,'error');}};
   }
   load();
