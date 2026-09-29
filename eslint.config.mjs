@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "dist/**",
+    // Employee OS is an isolated Node/Railway package with its own strict TypeScript build.
+    "employee-os/**",
     "next-env.d.ts",
   ]),
   {
