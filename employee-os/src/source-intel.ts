@@ -43,6 +43,9 @@ export type SourceAnalysis={
     audioRole:string;
     cta:string;
     visualStyle:string[];
+    palette:string[];
+    typographyMood:string;
+    layoutMood:string;
     doNotCopy:string[];
     originalVariationDirections:string[];
   };
@@ -314,9 +317,10 @@ export async function analyzeReferenceSource(companyId:string,capture:SocialCapt
       audience:{type:'object',additionalProperties:false,required:['signals','likelyUseCases'],properties:{
         signals:{type:'array',items:{type:'string'}},likelyUseCases:{type:'array',items:{type:'string'}}
       }},
-      creative:{type:'object',additionalProperties:false,required:['hook','shotPattern','pacing','cameraStyle','textOverlayStyle','audioRole','cta','visualStyle','doNotCopy','originalVariationDirections'],properties:{
+      creative:{type:'object',additionalProperties:false,required:['hook','shotPattern','pacing','cameraStyle','textOverlayStyle','audioRole','cta','visualStyle','palette','typographyMood','layoutMood','doNotCopy','originalVariationDirections'],properties:{
         hook:{type:'string'},shotPattern:{type:'array',items:{type:'string'}},pacing:{type:'string'},cameraStyle:{type:'array',items:{type:'string'}},
         textOverlayStyle:{type:'string'},audioRole:{type:'string'},cta:{type:'string'},visualStyle:{type:'array',items:{type:'string'}},
+        palette:{type:'array',items:{type:'string'},minItems:2,maxItems:6},typographyMood:{type:'string'},layoutMood:{type:'string'},
         doNotCopy:{type:'array',items:{type:'string'}},originalVariationDirections:{type:'array',items:{type:'string'}}
       }},
       source:{type:'object',additionalProperties:false,required:['captionSignals','engagementSignal'],properties:{
