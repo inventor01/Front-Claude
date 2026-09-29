@@ -62,7 +62,7 @@ export async function connectShopify(input:{companyId:string;storeDomain:string;
   }`);
 
   const granted=new Set(data.currentAppInstallation.accessScopes.map((scope)=>scope.handle));
-  const required=['read_products','write_products','read_orders','read_publications','write_publications','read_content','write_content','read_online_store_pages','write_online_store_pages'];
+  const required=['read_products','write_products','read_orders','read_publications','write_publications','read_content','write_content','read_online_store_pages','write_online_store_pages','read_merchant_managed_fulfillment_orders','write_merchant_managed_fulfillment_orders','read_third_party_fulfillment_orders','write_third_party_fulfillment_orders'];
   const missing=required.filter((scope)=>!granted.has(scope));
   if(missing.length){
     throw new Error(`Shopify connection is missing required scopes: ${missing.join(', ')}`);
@@ -349,4 +349,116 @@ export async function listPaidUnfulfilledOrders(companyId:string):Promise<Shopif
     }
   }`,{query:'financial_status:paid fulfillment_status:unfulfilled'});
   return data.orders.nodes.filter((o)=>o.displayFinancialStatus==='PAID');
+}
+
+
+type FulfillmentOrderNode={
+  id:string;
+  status:string;
+  requestStatus:string;
+  supportedActions:Array<{action:string}>;
+  lineItems:{nodes:Array<{id:string;remainingQuantity:number;lineItem:{id:string}}>} ;
+};
+
+export async function syncShopifyFulfillmentTracking(input:{
+  companyId:string;
+  shopifyOrderId:string;
+  trackingNumber:string;
+  trackingUrl?:string|null;
+  trackingCompany?:string|null;
+  existingFulfillments?:Array<{id:string;fulfillmentOrderId?:string;trackingNumber?:string}>;
+}){
+  if(!input.trackingNumber)throw new Error('Tracking number is required for Shopify fulfillment sync.');
+  const r=await pool.query(`SELECT * FROM tool_connections
+    WHERE company_id=$1 AND provider='SHOPIFY' AND status='CONNECTED'
+    ORDER BY updated_at DESC LIMIT 1`,[input.companyId]);
+  if(!r.rowCount)throw new Error('BLOCKED_EXTERNAL_AUTH: Shopify store execution is not connected');
+  const connection=r.rows[0];
+  const credential=await readCredential<ShopifyCredential>(input.companyId,'SHOPIFY',String(connection.id));
+  const existing=Array.isArray(input.existingFulfillments)?input.existingFulfillments:[];
+
+  const orderData=await graph<{order:{
+    id:string;
+    fulfillmentOrders:{nodes:FulfillmentOrderNode[]};
+  }|null}>(credential,`query FulfillmentOrdersForOrder($id:ID!){
+    order(id:$id){
+      id
+      fulfillmentOrders(first:20){
+        nodes{
+          id status requestStatus supportedActions{action}
+          lineItems(first:100){nodes{id remainingQuantity lineItem{id}}}
+        }
+      }
+    }
+  }`,{id:input.shopifyOrderId});
+  if(!orderData.order)throw new Error('Shopify order not found during fulfillment sync.');
+
+  const results:Array<{id:string;fulfillmentOrderId:string;trackingNumber:string;status:string}>=[];
+
+  for(const fo of orderData.order.fulfillmentOrders.nodes){
+    const prior=existing.find((x)=>x.fulfillmentOrderId===fo.id);
+    if(prior?.id){
+      const updated=await graph<{fulfillmentTrackingInfoUpdate:{
+        fulfillment:{id:string;status:string;trackingInfo:Array<{number:string|null;url:string|null;company:string|null}>}|null;
+        userErrors:Array<{field:string[];message:string}>;
+      }}>(credential,`mutation UpdateFulfillmentTracking($fulfillmentId:ID!,$tracking:FulfillmentTrackingInput!){
+        fulfillmentTrackingInfoUpdate(fulfillmentId:$fulfillmentId,trackingInfoInput:$tracking,notifyCustomer:true){
+          fulfillment{id status trackingInfo{number url company}}
+          userErrors{field message}
+        }
+      }`,{
+        fulfillmentId:prior.id,
+        tracking:{
+          number:input.trackingNumber,
+          url:input.trackingUrl||undefined,
+          company:input.trackingCompany||undefined
+        }
+      });
+      if(updated.fulfillmentTrackingInfoUpdate.userErrors.length){
+        throw new Error(`Shopify tracking update error: ${updated.fulfillmentTrackingInfoUpdate.userErrors.map((e)=>e.message).join('; ')}`);
+      }
+      if(updated.fulfillmentTrackingInfoUpdate.fulfillment){
+        results.push({id:prior.id,fulfillmentOrderId:fo.id,trackingNumber:input.trackingNumber,status:updated.fulfillmentTrackingInfoUpdate.fulfillment.status});
+      }
+      continue;
+    }
+
+    const canCreate=fo.supportedActions.some((x)=>x.action==='CREATE_FULFILLMENT')||['OPEN','IN_PROGRESS'].includes(fo.status);
+    if(!canCreate)continue;
+    const remaining=fo.lineItems.nodes.filter((li)=>Number(li.remainingQuantity)>0);
+    if(!remaining.length)continue;
+
+    const created=await graph<{fulfillmentCreate:{
+      fulfillment:{id:string;status:string;trackingInfo:Array<{number:string|null;url:string|null;company:string|null}>}|null;
+      userErrors:Array<{field:string[];message:string}>;
+    }}>(credential,`mutation CreateFulfillment($fulfillment:FulfillmentInput!){
+      fulfillmentCreate(fulfillment:$fulfillment){
+        fulfillment{id status trackingInfo{number url company}}
+        userErrors{field message}
+      }
+    }`,{fulfillment:{
+      notifyCustomer:true,
+      trackingInfo:{
+        number:input.trackingNumber,
+        url:input.trackingUrl||undefined,
+        company:input.trackingCompany||undefined
+      },
+      lineItemsByFulfillmentOrder:[{
+        fulfillmentOrderId:fo.id,
+        fulfillmentOrderLineItems:remaining.map((li)=>({id:li.id,quantity:Number(li.remainingQuantity)}))
+      }]
+    }});
+    if(created.fulfillmentCreate.userErrors.length){
+      throw new Error(`Shopify fulfillment error: ${created.fulfillmentCreate.userErrors.map((e)=>e.message).join('; ')}`);
+    }
+    const fulfillment=created.fulfillmentCreate.fulfillment;
+    if(fulfillment){
+      results.push({id:fulfillment.id,fulfillmentOrderId:fo.id,trackingNumber:input.trackingNumber,status:fulfillment.status});
+    }
+  }
+
+  if(!results.length&&existing.length===0){
+    throw new Error('No Shopify fulfillment order was eligible for fulfillment.');
+  }
+  return results.length?results:existing.map((x)=>({id:x.id,fulfillmentOrderId:String(x.fulfillmentOrderId||''),trackingNumber:input.trackingNumber,status:'SUCCESS'}));
 }
