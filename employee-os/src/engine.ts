@@ -906,7 +906,7 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
   if(step.step_type==='FRONT_SCAN'){
     const candidate=await candidateName(job);
     try{
-      const data=await getCommerceOpportunities(candidate);
+      const data=await getCommerceOpportunities(job.company_id,candidate);
       const items:SourceEvidence[]=[];
       for(const opportunity of data.opportunities.slice(0,5)){
         for(const ev of opportunity.evidence.slice(0,3)){
