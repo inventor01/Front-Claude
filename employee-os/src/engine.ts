@@ -75,15 +75,32 @@ export async function runOne(){
     return {processed:true,jobId:job.id,status:'STEP_SUCCEEDED'};
   }catch(e){
     const message=e instanceof Error?e.message:'Unknown worker error';
-    const terminal=job.attempt_count>=job.max_attempts || !retryable(message);
-    await pool.query(`UPDATE jobs SET status=$2,last_error=$3,scheduled_for=CASE WHEN $2='RETRY_SCHEDULED' THEN now()+interval '2 minutes' ELSE scheduled_for END,lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,
-      [job.id,terminal?'FAILED':'RETRY_SCHEDULED',message]);
+    const blockedExternalAuth=message.startsWith('BLOCKED_EXTERNAL_AUTH:');
+    const terminal=blockedExternalAuth || job.attempt_count>=job.max_attempts || !retryable(message);
+    const jobStatus=blockedExternalAuth ? 'BLOCKED' : terminal ? 'FAILED' : 'RETRY_SCHEDULED';
+    const stepStatus=blockedExternalAuth ? 'BLOCKED' : terminal ? 'FAILED' : 'WAITING';
+
+    await pool.query(`UPDATE job_steps
+      SET status=$2,last_error=$3,attempt_history=attempt_history || $4::jsonb,updated_at=now()
+      WHERE job_id=$1 AND status='RUNNING'`,
+      [job.id,stepStatus,message,JSON.stringify([{at:new Date().toISOString(),result:jobStatus,error:message}])]);
+
+    await pool.query(`UPDATE jobs SET status=$2,last_error=$3,
+      scheduled_for=CASE WHEN $2='RETRY_SCHEDULED' THEN now()+interval '2 minutes' ELSE scheduled_for END,
+      lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,
+      [job.id,jobStatus,message]);
+
     if(terminal){
-      const workStatus=message.startsWith('BLOCKED_EXTERNAL_AUTH:') ? 'BLOCKED_EXTERNAL_AUTH' : 'FAILED';
+      const workStatus=blockedExternalAuth ? 'BLOCKED_EXTERNAL_AUTH' : 'FAILED';
       await pool.query(`UPDATE work_orders SET status=$2,blockers=$3,updated_at=now() WHERE id=$1`,
         [job.work_order_id,workStatus,JSON.stringify([message])]);
+    }else{
+      await pool.query(`UPDATE work_orders SET status='IN_PROGRESS',blockers=$2,updated_at=now() WHERE id=$1`,
+        [job.work_order_id,JSON.stringify([message])]);
     }
-    await emitEvent(job.company_id,terminal?'JOB_FAILED':'JOB_RETRY_SCHEDULED',{jobId:job.id,workOrderId:job.work_order_id,error:message});
-    return {processed:true,jobId:job.id,status:terminal?'FAILED':'RETRY_SCHEDULED',error:message};
+
+    const eventType=blockedExternalAuth ? 'JOB_BLOCKED' : terminal ? 'JOB_FAILED' : 'JOB_RETRY_SCHEDULED';
+    await emitEvent(job.company_id,eventType,{jobId:job.id,workOrderId:job.work_order_id,error:message});
+    return {processed:true,jobId:job.id,status:jobStatus,error:message};
   }
 }
