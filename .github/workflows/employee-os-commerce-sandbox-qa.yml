@@ -54,3 +54,7 @@ jobs:
       - name: Run isolated commerce lifecycle
         working-directory: employee-os
         run: node tests/commerce-sandbox.mjs
+
+      - name: Run Link-to-Launch lifecycle
+        working-directory: employee-os
+        run: node tests/link-launch-sandbox.mjs
