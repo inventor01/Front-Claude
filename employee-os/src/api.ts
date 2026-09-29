@@ -43,21 +43,22 @@ app.get('/api/me',async req=>{
 });
 app.get('/api/company/:companyId/state',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as any; await requireCompany(userId,companyId);
-  const [employees,objectives,projects,work,approvals,events]=await Promise.all([
+  const [employees,objectives,projects,work,approvals,events,candidates]=await Promise.all([
     pool.query('SELECT * FROM employees WHERE company_id=$1 ORDER BY created_at',[companyId]),
     pool.query('SELECT * FROM objectives WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
     pool.query('SELECT * FROM projects WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
     pool.query('SELECT * FROM work_orders WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT * FROM approvals WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
-    pool.query('SELECT * FROM events WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId])
+    pool.query('SELECT * FROM events WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
+    pool.query('SELECT * FROM product_candidates WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId])
   ]);
-  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows};
+  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows};
 });
 app.get('/api/company/:companyId/execution',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as any; await requireCompany(userId,companyId);
   const [jobs,steps,evidence,messages]=await Promise.all([
     pool.query('SELECT id,project_id,work_order_id,employee_slug,job_type,status,priority,scheduled_for,lease_expires_at,attempt_count,max_attempts,last_error,created_at,updated_at FROM jobs WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
-    pool.query('SELECT id,job_id,sequence,step_type,status,evidence_refs,last_error,created_at,updated_at FROM job_steps WHERE company_id=$1 ORDER BY created_at DESC,sequence ASC LIMIT 500',[companyId]),
+    pool.query('SELECT id,job_id,sequence,step_type,status,input,output,evidence_refs,last_error,attempt_history,created_at,updated_at FROM job_steps WHERE company_id=$1 ORDER BY created_at DESC,sequence ASC LIMIT 500',[companyId]),
     pool.query('SELECT id,project_id,work_order_id,employee_slug,evidence_type,source_type,source_name,source_url,external_id,content_summary,confidence,verification_status,captured_at FROM evidence WHERE company_id=$1 ORDER BY captured_at DESC LIMIT 200',[companyId]),
     pool.query('SELECT id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,evidence_refs,authority_context,created_at,consumed_at FROM employee_messages WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200',[companyId])
   ]);
@@ -75,7 +76,7 @@ app.post('/api/company/:companyId/objectives',async(req,reply)=>{
     const key=`product-research:${p.rows[0].id}`;
     const j=await c.query(`INSERT INTO jobs(company_id,project_id,work_order_id,employee_slug,job_type,payload,idempotency_key) VALUES($1,$2,$3,'rowan','PRODUCT_RESEARCH',$4,$5) RETURNING *`,
       [companyId,p.rows[0].id,w.rows[0].id,JSON.stringify({query:body.query,statement:body.statement,constraints:body.constraints}),key]);
-    const steps=['FRONT_SCAN','DEMAND_VALIDATION','SUPPLIER_VALIDATION','ECONOMICS','CONTENTABILITY','RISK_REVIEW','MANAGER_REVIEW'];
+    const steps=['DISCOVERY','FRONT_SCAN','DEMAND_VALIDATION','SUPPLIER_VALIDATION','ECONOMICS','CONTENTABILITY','RISK_REVIEW','MANAGER_REVIEW'];
     for(let i=0;i<steps.length;i++)await c.query('INSERT INTO job_steps(company_id,job_id,sequence,step_type,input) VALUES($1,$2,$3,$4,$5)',[companyId,j.rows[0].id,i+1,steps[i],JSON.stringify({objective:body.statement})]);
     await c.query(`INSERT INTO employee_messages(company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,authority_context,payload) VALUES($1,$2,$3,'WORK_ASSIGNMENT','ava','rowan',$4,'Evidence-backed product research',$5,$6)`,
       [companyId,p.rows[0].id,w.rows[0].id,body.statement,JSON.stringify({risk:'LOW',spendAllowed:false,publishAllowed:false}),JSON.stringify({jobId:j.rows[0].id})]);
