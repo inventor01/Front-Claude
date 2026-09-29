@@ -1,4 +1,6 @@
-const SHOPIFY_TRENDS='https://r.jina.ai/http://www.shopify.com/blog/trending-products';
+const PROVIDER_TEST_MODE=process.env.PROVIDER_TEST_MODE==='1';
+const RESEARCH_TEST_BASE=PROVIDER_TEST_MODE&&process.env.RESEARCH_TEST_BASE_URL?String(process.env.RESEARCH_TEST_BASE_URL).replace(/\/$/,''):'';
+const SHOPIFY_TRENDS=RESEARCH_TEST_BASE?`${RESEARCH_TEST_BASE}/research/shopify-trends`:'https://r.jina.ai/http://www.shopify.com/blog/trending-products';
 
 export type SourceEvidence={
   sourceType:'SHOPIFY'|'AMAZON'|'ALIEXPRESS'|'FRONT';
@@ -118,7 +120,7 @@ export async function discoverCandidate(ownerQuery:string):Promise<DiscoveryResu
 
 export async function validateDemand(candidate:string,discovery?:DiscoveryResult):Promise<DemandResult>{
   const encoded=encodeURIComponent(candidate);
-  const amazonUrl=jina(`https://www.amazon.com/s?k=${encoded}`);
+  const amazonUrl=RESEARCH_TEST_BASE?`${RESEARCH_TEST_BASE}/research/amazon?q=${encoded}`:jina(`https://www.amazon.com/s?k=${encoded}`);
   const [amazon,shopify]=await Promise.all([
     fetchText(amazonUrl).catch(()=>''),fetchText(SHOPIFY_TRENDS).catch(()=>'')
   ]);
@@ -145,7 +147,8 @@ export async function validateDemand(candidate:string,discovery?:DiscoveryResult
 export async function validateSupplier(candidate:string):Promise<SupplierResult>{
   const encoded=encodeURIComponent(candidate);
   const sourceUrl=`https://www.aliexpress.com/wholesale?SearchText=${encoded}`;
-  const markdown=await fetchText(jina(sourceUrl)).catch(()=> '');
+  const supplierFetchUrl=RESEARCH_TEST_BASE?`${RESEARCH_TEST_BASE}/research/aliexpress?q=${encoded}`:jina(sourceUrl);
+  const markdown=await fetchText(supplierFetchUrl).catch(()=> '');
   const context=markdown?excerpt(markdown,candidate,2200):'';
   const tokens=significantTokens(candidate);
   const lower=markdown.toLowerCase();
