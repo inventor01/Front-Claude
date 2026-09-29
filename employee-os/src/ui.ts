@@ -57,8 +57,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     <button data-view="venture">Venture</button>
     <button data-view="approvals">Approvals</button>
     <button data-view="support">Customer Ops</button>
-    <button data-view="brain">Company Brain</button>\n    <button data-view="academy">Academy</button>
-    <button data-view="activity">Activity</button>
+    <button data-view="brain">Company Brain</button>\n    <button data-view="academy">Academy</button>\n    <button data-view="connections">Connections</button>\n    <button data-view="activity">Activity</button>
   </nav>
   <div class="aside-foot"><button id="logout">Log out</button></div>
 </aside>
@@ -72,7 +71,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
 (function(){
   var token=localStorage.getItem('employee_os_token')||'';
   var companyId=localStorage.getItem('employee_os_company')||'';
-  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null;
+  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null;
 
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
   function badge(v){var x=String(v||'');var cls=/DONE|SUCCEEDED|APPROVED|READY_FOR/.test(x)?'good':/BLOCK|FAILED|REJECT/.test(x)?'bad':'warn';return '<span class="badge '+cls+'">'+esc(x)+'</span>';}
@@ -97,9 +96,10 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
         request('/api/company/'+companyId+'/briefing'),
         request('/api/company/'+companyId+'/execution'),
         request('/api/company/'+companyId+'/memories'),
-        request('/api/company/'+companyId+'/academy')
+        request('/api/company/'+companyId+'/academy'),
+        request('/api/company/'+companyId+'/integrations/shopify')
       ]);
-      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];
+      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];
       document.getElementById('auth').classList.add('hidden');document.getElementById('app').classList.remove('hidden');render();
     }catch(e){if(e.status===401){localStorage.clear();token='';companyId='';showAuth();}else notice(e.message,'error');}
   }
@@ -135,6 +135,8 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     if(view==='approvals')h=renderApprovals();
     if(view==='support')h=renderSupport();
     if(view==='brain')h=renderBrain();
+    if(view==='academy')h=renderAcademy();
+    if(view==='connections')h=renderConnections();
     if(view==='activity')h=renderActivity();
     document.getElementById('content').innerHTML=h;bindView();
   }
@@ -168,7 +170,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
   }
   function renderBrain(){return '<div class="stack">'+(((memories&&memories.memories)||[]).map(function(m){return '<div class="item"><div class="row"><b>'+esc(m.subject)+'</b>'+badge(m.type)+'</div><p>'+esc(m.content)+'</p><span class="muted">'+esc(m.source||'No source')+' · confidence '+esc(m.confidence)+'</span></div>';}).join('')||'<div class="empty">Company Brain has no active memory yet.</div>')+'</div>';}
   function renderAcademy(){
-    var profiles=(academy&&academy.profiles)||[],sources=(academy&&academy.sources)||[],lessons=(academy&&academy.lessons)||[],tools=(academy&&academy.tools)||[],claims=(academy&&academy.claims)||[];
+    var profiles=(academy&&academy.profiles)||[],sources=(academy&&academy.sources)||[],lessons=(academy&&academy.lessons)||[],tools=(academy&&academy.tools)||[],claims=(academy&&academy.claims)||[],skills=(academy&&academy.skills)||[];
     var employeeOptions='<option value="">Company-wide</option>'+((state&&state.employees)||[]).map(function(e){return '<option value="'+esc(e.slug)+'">'+esc(e.name)+' — '+esc(e.title)+'</option>';}).join('');
     var profileCards=profiles.map(function(p){
       return '<div class="item"><div class="row"><b>'+esc(p.employee_slug)+'</b>'+badge(p.uncertainty_policy)+'</div><p>First principles: '+esc(p.first_principles?'ON':'OFF')+' · think '+esc(p.forward_horizon_steps)+' moves ahead</p><span class="muted">'+esc(p.learning_policy)+'</span></div>';
@@ -179,20 +181,36 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var lessonCards=lessons.slice(0,40).map(function(l){
       return '<div class="item"><div class="row"><b>'+esc(l.lesson_type)+'</b>'+badge(l.confidence)+'</div><p>'+esc(l.principle)+'</p><span class="muted">'+esc(l.employee_slug||'Company-wide')+' · '+esc(l.source_title)+'</span></div>';
     }).join('');
+    var skillCards=skills.slice(0,30).map(function(s){
+      return '<div class="item"><div class="row"><b>'+esc(s.name)+' v'+esc(s.current_version)+'</b>'+badge(s.status)+'</div><p>'+esc(s.purpose)+'</p><span class="muted">'+esc(s.employee_slug||'Company-wide')+' · tools: '+esc((s.required_tools||[]).join(', ')||'none')+'</span><div style="margin-top:8px"><button class="secondary skill-test" data-id="'+esc(s.id)+'">Run skill test</button></div></div>';
+    }).join('');
     var toolCards=tools.slice(0,40).map(function(t){
       return '<div class="item"><div class="row"><b>'+esc(t.name)+'</b>'+badge(t.verification_grade)+'</div><p>'+esc(t.capability)+'</p><span class="muted">'+esc(t.automation_policy)+' · '+esc(t.provider)+'</span></div>';
     }).join('');
-    var claimCards=claims.slice(0,20).map(function(c){
-      return '<div class="item"><div class="row"><b>'+esc(c.claim_type)+'</b>'+badge(c.status)+'</div><p>'+esc(c.claim_text)+'</p><span class="muted">Tool: '+esc(c.selected_tool_id||'none yet')+' · desired '+esc(c.desired_grade)+'</span></div>';
+    var claimCards=claims.slice(0,20).map(function(claim){
+      return '<div class="item"><div class="row"><b>'+esc(claim.claim_type)+'</b>'+badge(claim.status)+'</div><p>'+esc(claim.claim_text)+'</p><span class="muted">Tool: '+esc(claim.selected_tool_id||'none yet')+' · desired '+esc(claim.desired_grade)+'</span></div>';
     }).join('');
-    return '<div class="hero"><h2>Employee Academy</h2><p>Teach each AI from threads, tutorials, docs, examples, and your own notes. Sources stay traceable; lessons do not silently become facts.</p></div>'+
+    return '<div class="hero"><h2>Employee Academy</h2><p>Teach each AI from threads, tutorials, docs, examples, and your own notes. Then compile sourced lessons into versioned, testable Skills.</p></div>'+
       '<div class="grid two"><div class="card"><h3>Train an employee</h3><form id="trainingForm" class="form"><select id="trainingEmployee">'+employeeOptions+'</select><input id="trainingTitle" placeholder="Optional title"/><input id="trainingUrl" placeholder="X thread, tutorial, docs, or public URL"/><textarea id="trainingText" placeholder="Or paste training text / notes here"></textarea><input id="trainingTags" placeholder="Tags, comma separated (ai-video, hooks, editing)"/><button class="action">Ingest training source</button></form></div>'+
-      '<div class="card"><h3>Find the right verification tool</h3><form id="toolDiscoveryForm" class="form"><select id="claimType"><option>OWN_REVENUE</option><option>COMPETITOR_REVENUE</option><option>TRAFFIC</option><option>AD_ACTIVITY</option><option>TREND</option></select><textarea id="claimDescription">Verify whether a competitor store is actually generating the revenue being claimed.</textarea><button class="action">Find verification tools</button></form><p class="muted">The system distinguishes first-party verification, public records, corroboration, estimates, and signals.</p></div></div>'+
+      '<div class="card"><h3>Compile a reusable Skill</h3><form id="skillCompileForm" class="form"><select id="skillEmployee">'+employeeOptions+'</select><input id="skillName" placeholder="Skill name" value="Cinematic product video"/><textarea id="skillPurpose">Turn sourced AI-video lessons into a repeatable product-video procedure with verification and tool requirements.</textarea><button class="action">Compile skill from active lessons</button></form><p class="muted">A Skill keeps source provenance, required tools, verification rules, versions, and tests.</p></div></div>'+
+      '<div class="grid two" style="margin-top:10px"><div class="card"><h3>Find the right verification tool</h3><form id="toolDiscoveryForm" class="form"><select id="claimType"><option>OWN_REVENUE</option><option>COMPETITOR_REVENUE</option><option>TRAFFIC</option><option>AD_ACTIVITY</option><option>TREND</option></select><textarea id="claimDescription">Verify whether a competitor store is actually generating the revenue being claimed.</textarea><button class="action">Find verification tools</button></form></div>'+
+      '<div class="card"><h3>Skill status</h3><p>Skills can be ACTIVE, READY_NEEDS_TOOLS, or DRAFT. Tool-dependent skills do not pretend they are executable until the required connection exists.</p></div></div>'+
+      '<h3 class="section-title">Compiled skills</h3><div class="stack">'+(skillCards||'<div class="empty">Compile your first Skill from active lessons.</div>')+'</div>'+
       '<h3 class="section-title">Reasoning contracts</h3><div class="grid two">'+(profileCards||'<div class="empty">No reasoning profiles yet.</div>')+'</div>'+
       '<h3 class="section-title">Training sources</h3><div class="stack">'+(sourceCards||'<div class="empty">Add your first tutorial, thread, document, or note.</div>')+'</div>'+
       '<h3 class="section-title">Extracted lessons</h3><div class="stack">'+(lessonCards||'<div class="empty">Lessons will appear after training ingestion.</div>')+'</div>'+
       '<h3 class="section-title">Verification tool registry</h3><div class="grid two">'+(toolCards||'<div class="empty">Tool catalog is empty.</div>')+'</div>'+
       '<h3 class="section-title">Verification claims</h3><div class="stack">'+(claimCards||'<div class="empty">No claim-verification requests yet.</div>')+'</div>';
+  }
+  function renderConnections(){
+    var connected=shopify&&shopify.connected, meta=(shopify&&shopify.metadata)||{};
+    var status=connected?'<div class="success"><b>Shopify connected</b><br>'+esc(meta.storeName||meta.storeDomain||'Store')+' · '+esc((meta.primaryDomain||{}).url||meta.storeDomain||'')+'</div>':'<div class="error"><b>Shopify not connected</b><br>Luca can build the internal store package, but cannot create a live storefront until a dedicated venture store is authorized once.</div>';
+    var scopes='write_products, read_publications, write_publications, read_content, write_content';
+    return '<div class="hero"><h2>Connections</h2><p>Authorize external tools once. Employees can then use them through audited backend adapters without exposing credentials to the browser again.</p></div>'+
+      '<div class="grid two"><div class="card"><h3>Shopify execution</h3>'+status+
+      (connected?'<p>API version: '+esc(meta.apiVersion||'2026-07')+' · Online Store: '+esc(meta.publicationTitle||'Online Store')+'</p><button id="disconnectShopify" class="danger">Disconnect Shopify</button>':
+      '<form id="shopifyConnectForm" class="form"><input id="shopifyDomain" placeholder="venture-store.myshopify.com" autocomplete="off"/><input id="shopifyToken" type="password" placeholder="Admin API access token" autocomplete="new-password"/><button class="action">Connect dedicated venture store</button></form><p class="muted">Required custom-app scopes: '+esc(scopes)+'. The token is encrypted server-side with AES-256-GCM and is never returned by this API.</p>')+
+      '</div><div class="card"><h3>Finish-line rule</h3><p>A store is not DONE because a brief exists. DONE requires Shopify execution, Online Store publication, and a reachable product URL persisted in the project.</p></div></div>';
   }
   function renderActivity(){return '<div class="stack">'+((state.events||[]).map(function(e){return '<div class="item"><div class="row"><b>'+esc(e.type)+'</b><span class="muted">'+esc(fmt(e.created_at))+'</span></div><p>'+esc(JSON.stringify(e.payload))+'</p></div>';}).join('')||'<div class="empty">No events yet.</div>')+'</div>';}
 
@@ -214,6 +232,33 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
       var result=await request('/api/company/'+companyId+'/academy/tools/discover',{method:'POST',body:JSON.stringify({claimType:document.getElementById('claimType').value,claimDescription:document.getElementById('claimDescription').value})});
       var suffix=result.webSearchStatus==='AUTH_REQUIRED'?' Existing verified catalog searched; web tool scout needs a Jina Search API key.':' Tool discovery completed.';
       notice('Verification tools evaluated.'+suffix);await load();
+    }catch(err){notice(err.message,'error');}};
+    var skillCompile=document.getElementById('skillCompileForm');
+    if(skillCompile)skillCompile.onsubmit=async function(e){e.preventDefault();try{
+      var result=await request('/api/company/'+companyId+'/academy/skills/compile',{method:'POST',body:JSON.stringify({
+        employeeSlug:document.getElementById('skillEmployee').value||null,
+        name:document.getElementById('skillName').value,
+        purpose:document.getElementById('skillPurpose').value,
+        sourceIds:[]
+      })});
+      notice('Skill compiled as version '+result.definition.current_version+'. Run its test before relying on it.');await load();
+    }catch(err){notice(err.message,'error');}};
+    document.querySelectorAll('.skill-test').forEach(function(b){b.onclick=async function(){try{
+      var result=await request('/api/company/'+companyId+'/academy/skills/'+b.dataset.id+'/test',{method:'POST'});
+      notice('Skill test: '+result.status+(result.missingTools&&result.missingTools.length?' · missing '+result.missingTools.join(', '):''));await load();
+    }catch(err){notice(err.message,'error');}};});
+    var shopifyForm=document.getElementById('shopifyConnectForm');
+    if(shopifyForm)shopifyForm.onsubmit=async function(e){e.preventDefault();try{
+      notice('Validating store, scopes, and Online Store publication…');
+      await request('/api/company/'+companyId+'/integrations/shopify/connect',{method:'POST',body:JSON.stringify({
+        storeDomain:document.getElementById('shopifyDomain').value,
+        accessToken:document.getElementById('shopifyToken').value
+      })});
+      document.getElementById('shopifyToken').value='';notice('Shopify connected. Luca can now execute approved store builds.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var disconnect=document.getElementById('disconnectShopify');
+    if(disconnect)disconnect.onclick=async function(){try{
+      await request('/api/company/'+companyId+'/integrations/shopify',{method:'DELETE'});notice('Shopify disconnected.');await load();
     }catch(err){notice(err.message,'error');}};
   }
   load();
