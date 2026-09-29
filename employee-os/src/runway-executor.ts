@@ -203,8 +203,9 @@ export async function renderOriginalProductClips(input:{
       results.push(asset);
     }catch(error){
       const message=error instanceof Error?error.message:'Runway task wait failed';
-      if(/did not finish before/i.test(message))await markExternalWaiting(String(action.action.id),taskId,{specId:spec.id});
-      else await failExternalAction(String(action.action.id),message,'FAILED');
+      const terminal=/task (FAILED|CANCELED)/i.test(message);
+      if(terminal)await failExternalAction(String(action.action.id),message,'FAILED');
+      else await markExternalWaiting(String(action.action.id),taskId,{specId:spec.id,lastError:message});
       throw error;
     }
   }

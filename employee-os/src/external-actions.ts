@@ -33,11 +33,14 @@ export async function startExternalAction(ctx:ExternalActionContext){
   if(row.status==='RECONCILIATION_REQUIRED'){
     throw new Error(`BLOCKED_EXTERNAL_RECONCILIATION: ${ctx.provider} action requires provider reconciliation before retry.`);
   }
+  if(row.status==='FAILED'){
+    throw new Error(`BLOCKED_EXTERNAL_FAILED: ${ctx.provider} action failed terminally; create an explicit new action/version to retry.`);
+  }
   const running=(await pool.query(`
     UPDATE external_actions
     SET status='RUNNING',attempt_count=attempt_count+1,last_error=NULL,
         started_at=COALESCE(started_at,now()),
-        provider_external_id=CASE WHEN status='WAITING_EXTERNAL' THEN provider_external_id ELSE NULL END,
+        provider_external_id=provider_external_id,
         updated_at=now()
     WHERE id=$1 RETURNING *
   `,[row.id])).rows[0];

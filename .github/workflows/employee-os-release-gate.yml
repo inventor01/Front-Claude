@@ -53,3 +53,5 @@ jobs:
         run: node tests/resume-sandbox.mjs
       - name: Module 7 — manager handoff dedupe
         run: node tests/manager-handoff-dedupe.mjs
+      - name: Module 8 — failure recovery and ambiguity safety
+        run: node tests/failure-recovery-sandbox.mjs
