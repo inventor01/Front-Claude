@@ -4,7 +4,10 @@ import { pollPaidShopifyOrdersOnce,processApprovedCJPaymentsOnce,syncCJFulfillme
 
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 let nextCommerceSyncAt=0;
-const COMMERCE_SYNC_INTERVAL_MS=60_000;
+const requestedCommerceInterval=Number(process.env.COMMERCE_SYNC_INTERVAL_MS||60_000);
+const COMMERCE_SYNC_INTERVAL_MS=process.env.PROVIDER_TEST_MODE==='1'
+  ?Math.max(250,requestedCommerceInterval)
+  :Math.max(10_000,requestedCommerceInterval);
 console.log('employee worker started');
 
 for(;;){
