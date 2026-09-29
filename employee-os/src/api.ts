@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { pool,tx } from './db.js';
 import { hashPassword,verifyPassword,signSession,requireUser,requireCompany } from './auth.js';
 import { commandCenterHtml } from './ui.js';
+import { ensureAcademyDefaults,ingestTrainingSource,discoverTools,recommendVerificationTools } from './academy.js';
 
 const app=Fastify({logger:true});
 await app.register(cors,{origin:true});
@@ -75,6 +76,108 @@ app.get('/api/company/:companyId/execution',async req=>{
     pool.query('SELECT id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,evidence_refs,authority_context,payload,created_at,consumed_at FROM employee_messages WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200',[companyId])
   ]);
   return {jobs:jobs.rows,steps:steps.rows,evidence:evidence.rows,messages:messages.rows};
+});
+
+app.get('/api/company/:companyId/academy',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  await ensureAcademyDefaults(companyId);
+  const [profiles,sources,lessons,tools,discoveries,claims]=await Promise.all([
+    pool.query('SELECT * FROM reasoning_profiles WHERE company_id=$1 ORDER BY employee_slug',[companyId]),
+    pool.query(`SELECT id,employee_slug,source_type,title,source_url,source_author,source_quality,status,tags,ingest_metadata,created_at,updated_at
+      FROM training_sources WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200`,[companyId]),
+    pool.query(`SELECT l.id,l.source_id,l.employee_slug,l.lesson_type,l.principle,l.applicability,l.confidence,l.status,l.created_at,s.title source_title,s.source_url,s.source_quality
+      FROM training_lessons l JOIN training_sources s ON s.id=l.source_id
+      WHERE l.company_id=$1 ORDER BY l.created_at DESC LIMIT 500`,[companyId]),
+    pool.query('SELECT * FROM tool_catalog WHERE company_id=$1 ORDER BY verification_grade,name',[companyId]),
+    pool.query('SELECT * FROM tool_discovery_runs WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
+    pool.query('SELECT * FROM verification_claims WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200',[companyId])
+  ]);
+  return {profiles:profiles.rows,sources:sources.rows,lessons:lessons.rows,tools:tools.rows,discoveries:discoveries.rows,claims:claims.rows};
+});
+
+app.post('/api/company/:companyId/academy/sources',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({
+    employeeSlug:z.string().min(1).max(60).nullable().default(null),
+    url:z.string().url().max(2000).optional(),
+    text:z.string().max(180000).optional(),
+    title:z.string().max(240).optional(),
+    tags:z.array(z.string().max(60)).max(20).default([])
+  }).refine((value)=>Boolean(value.url||value.text),{message:'Provide a URL or training text'}).parse(req.body);
+  const result=await ingestTrainingSource({
+    companyId,userId,employeeSlug:body.employeeSlug,url:body.url,text:body.text,title:body.title,tags:body.tags
+  });
+  return reply.code(201).send(result);
+});
+
+app.post('/api/company/:companyId/academy/sources/:sourceId/status',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId,sourceId}=req.params as {companyId:string;sourceId:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({status:z.enum(['ACTIVE','PAUSED','REJECTED'])}).parse(req.body);
+  const r=await pool.query('UPDATE training_sources SET status=$3,updated_at=now() WHERE id=$1 AND company_id=$2 RETURNING id,status',[sourceId,companyId,body.status]);
+  if(!r.rowCount)return reply.code(404).send({error:'Training source not found'});
+  await pool.query('UPDATE training_lessons SET status=$3,updated_at=now() WHERE source_id=$1 AND company_id=$2',[sourceId,companyId,body.status==='ACTIVE'?'ACTIVE':'PAUSED']);
+  return r.rows[0];
+});
+
+app.put('/api/company/:companyId/academy/employees/:employeeSlug/reasoning',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId,employeeSlug}=req.params as {companyId:string;employeeSlug:string};
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  await ensureAcademyDefaults(companyId);
+  const body=z.object({
+    firstPrinciples:z.boolean().default(true),
+    forwardHorizonSteps:z.number().int().min(1).max(12).default(3),
+    uncertaintyPolicy:z.enum(['NEVER_ASSUME','STATE_ASSUMPTIONS','BEST_EFFORT']).default('NEVER_ASSUME'),
+    learningPolicy:z.string().min(3).max(200).default('LEARN_FROM_BEST_AVAILABLE_EVIDENCE'),
+    operatingPrinciples:z.array(z.string().min(5).max(1000)).max(30),
+    verificationPolicy:z.record(z.string(),z.unknown())
+  }).parse(req.body);
+  const exists=await pool.query('SELECT 1 FROM employees WHERE company_id=$1 AND slug=$2',[companyId,employeeSlug]);
+  if(!exists.rowCount)return reply.code(404).send({error:'Employee not found'});
+  const r=await pool.query(`UPDATE reasoning_profiles SET first_principles=$3,forward_horizon_steps=$4,
+    uncertainty_policy=$5,learning_policy=$6,operating_principles=$7,verification_policy=$8,updated_at=now()
+    WHERE company_id=$1 AND employee_slug=$2 RETURNING *`,[
+    companyId,employeeSlug,body.firstPrinciples,body.forwardHorizonSteps,body.uncertaintyPolicy,body.learningPolicy,
+    JSON.stringify(body.operatingPrinciples),JSON.stringify(body.verificationPolicy)
+  ]);
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'REASONING_PROFILE_UPDATED',$2)`,[
+    companyId,JSON.stringify({employeeSlug,updatedBy:userId,forwardHorizonSteps:body.forwardHorizonSteps,uncertaintyPolicy:body.uncertaintyPolicy})
+  ]);
+  return r.rows[0];
+});
+
+app.post('/api/company/:companyId/academy/tools/discover',async(req)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  const body=z.object({claimType:z.string().min(2).max(120),claimDescription:z.string().min(5).max(1000)}).parse(req.body);
+  return discoverTools(companyId,body.claimType,body.claimDescription);
+});
+
+app.post('/api/company/:companyId/academy/claims',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; await requireCompany(userId,companyId);
+  const body=z.object({
+    employeeSlug:z.string().min(1).max(60),
+    claimType:z.string().min(2).max(120),
+    claimText:z.string().min(5).max(2000),
+    desiredGrade:z.enum(['VERIFIED_FIRST_PARTY','VERIFIED_PUBLIC_RECORD','CORROBORATED','ESTIMATE','SIGNAL']).default('VERIFIED_FIRST_PARTY'),
+    projectId:z.string().uuid().optional(),
+    workOrderId:z.string().uuid().optional()
+  }).parse(req.body);
+  const recommended=await recommendVerificationTools(companyId,body.claimType);
+  const selected=recommended[0]||null;
+  const status=selected?'READY_TO_VERIFY':'NEEDS_TOOL_DISCOVERY';
+  const r=await pool.query(`INSERT INTO verification_claims(
+    company_id,project_id,work_order_id,employee_slug,claim_type,claim_text,desired_grade,status,selected_tool_id,result_summary
+  ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[
+    companyId,body.projectId||null,body.workOrderId||null,body.employeeSlug,body.claimType,body.claimText,body.desiredGrade,
+    status,selected?.tool_id||null,
+    selected?`Recommended ${selected.name} at evidence grade ${selected.verification_grade}. Do not report a stronger claim than the tool can support.`:
+      'No known verification tool matched. Run tool discovery before making the claim.'
+  ]);
+  return reply.code(201).send({claim:r.rows[0],recommended});
 });
 
 app.post('/api/company/:companyId/objectives',async(req,reply)=>{
