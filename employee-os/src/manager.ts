@@ -148,6 +148,7 @@ export async function processOneManagerMessage(){
           await c.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'DISTRIBUTION_WORK_ASSIGNED',$2)`,[
             message.company_id,JSON.stringify({projectId:message.project_id,workOrderId:wo.id,jobId:job.rows[0].id,from:'ava',to:'nova'})
           ]);
+          }
         }
       }
     }else if(message.type==='WORK_RESULT' && payload.candidateId && message.project_id && message.work_order_id){
