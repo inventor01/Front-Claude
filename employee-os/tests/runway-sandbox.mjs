@@ -6,6 +6,8 @@ process.env.PROVIDER_TEST_MODE='1';
 process.env.RUNWAY_TEST_BASE_URL=`http://127.0.0.1:${PORT}`;
 
 let creates=0,lookups=0;
+const validKey='key_'+'a'.repeat(128);
+const unlinkedKey='key_'+'b'.repeat(128);
 function json(res,status,payload){
   const body=JSON.stringify(payload);
   res.writeHead(status,{'content-type':'application/json','content-length':Buffer.byteLength(body)});
@@ -15,7 +17,10 @@ const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url||'/',`http://127.0.0.1:${PORT}`);
   const chunks=[];for await(const c of req)chunks.push(c);
   if(req.method==='GET'&&url.pathname==='/v1/tasks/00000000-0000-0000-0000-000000000000'){
-    return json(res,404,{error:'not found'});
+    const auth=String(req.headers.authorization||'');
+    if(auth==='Bearer '+unlinkedKey)return json(res,400,{error:'No workspace is linked to this API project.'});
+    if(auth==='Bearer '+validKey)return json(res,404,{error:'not found'});
+    return json(res,401,{error:'invalid api key'});
   }
   if(req.method==='POST'&&url.pathname==='/v1/image_to_video'){
     creates++; return json(res,200,{id:'runway-task-qa-1'});
@@ -32,8 +37,18 @@ const {connectRunway,renderOriginalProductClips}=await import('../dist/runway-ex
 
 try{
   const company=(await pool.query("INSERT INTO companies(name) VALUES('Runway QA') RETURNING id")).rows[0].id;
-  const connection=await connectRunway({companyId:company,apiSecret:'runway-qa-secret-123456',model:'gen4.5'});
+  const connection=await connectRunway({companyId:company,apiSecret:'RUNWAYML_API_SECRET="'+validKey+'"',model:'gen4.5'});
   assert.equal(connection.connected,true);
+
+  const unlinkedCompany=(await pool.query("INSERT INTO companies(name) VALUES('Runway Unlinked QA') RETURNING id")).rows[0].id;
+  await assert.rejects(
+    ()=>connectRunway({companyId:unlinkedCompany,apiSecret:unlinkedKey,model:'gen4.5'}),
+    /RUNWAY_WORKSPACE_LINK_REQUIRED/
+  );
+  await assert.rejects(
+    ()=>connectRunway({companyId:unlinkedCompany,apiSecret:'not-a-runway-key',model:'gen4.5'}),
+    /format is invalid/
+  );
 
   const input={
     companyId:company,jobId:null,workOrderId:null,employeeSlug:'maya',idempotencyKey:'runway-qa-render',
@@ -57,7 +72,7 @@ try{
   assert.equal(actions.rows[0].provider_external_id,'runway-task-qa-1');
 
   console.log('RUNWAY SANDBOX QA PASSED');
-  console.log(JSON.stringify({creates,lookups,taskId:first[0].taskId,deduped:true},null,2));
+  console.log(JSON.stringify({creates,lookups,taskId:first[0].taskId,deduped:true,keyNormalization:true,workspaceLinkDetection:true},null,2));
 }finally{
   await pool.end();
   await new Promise(r=>server.close(r));

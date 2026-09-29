@@ -386,7 +386,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
       '<div class="grid two"><div class="card"><h3>Runway</h3>'+runwayHtml+
       (runway&&runway.connected
         ? '<button id="disconnectRunway" class="danger">Disconnect Runway</button>'
-        : '<form id="runwayConnectForm" class="form"><input id="runwayApiSecret" type="password" placeholder="Runway Dev API secret" autocomplete="new-password"/><input id="runwayModel" value="gen4.5" placeholder="Model"/><button class="action">Connect Runway</button></form>')+
+        : '<form id="runwayConnectForm" class="form"><input id="runwayApiSecret" type="password" placeholder="Runway Dev API secret (key_…)" autocomplete="new-password"/><input id="runwayModel" value="gen4.5" placeholder="Model"/><button class="action">Connect Runway</button></form><p class="muted">Use the API key from dev.runwayml.com. The Dev project must also be linked to a Runway workspace under Manage → Connections.</p>')+
       '</div><div class="card"><h3>TikTok / Instagram / X publishing</h3>'+socialHtml+
       (social&&social.connected
         ? '<button id="disconnectSocial" class="danger">Disconnect social publisher</button>'

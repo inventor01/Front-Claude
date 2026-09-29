@@ -50,19 +50,42 @@ async function latestConnection(companyId:string){
   return r.rows[0];
 }
 
+function normalizeRunwaySecret(value:string){
+  let secret=value.trim();
+  const assignment=secret.match(/^RUNWAYML_API_SECRET\s*=\s*(.+)$/i);
+  if(assignment)secret=assignment[1]!.trim();
+  if((secret.startsWith('"')&&secret.endsWith('"'))||(secret.startsWith("'")&&secret.endsWith("'"))){
+    secret=secret.slice(1,-1).trim();
+  }
+  return secret;
+}
+
 export async function connectRunway(input:{companyId:string;apiSecret:string;model?:string}){
-  const apiSecret=input.apiSecret.trim();
+  const apiSecret=normalizeRunwaySecret(input.apiSecret);
   const model=(input.model||DEFAULT_RENDER_MODEL).trim();
-  if(apiSecret.length<10)throw new Error('Runway API secret is too short.');
+  if(!/^key_[0-9a-f]{128}$/i.test(apiSecret)){
+    throw new Error('Runway Dev API key format is invalid. Use the project API key from dev.runwayml.com (key_ followed by 128 hexadecimal characters), not a Runway web-app token.');
+  }
   // Runway has no lightweight account endpoint. A nonexistent task is a non-billable auth probe:
   // 401/403 means the key is invalid; 404 means authentication succeeded.
   const probe=await fetch(`${RUNWAY_BASE}/v1/tasks/00000000-0000-0000-0000-000000000000`,{
     headers:headers(apiSecret)
   });
-  if([401,403].includes(probe.status))throw new Error('Runway API secret was rejected.');
+  const probeText=await probe.text();
+  if([401,403].includes(probe.status))throw new Error('Runway Dev API key was rejected. Confirm the key is enabled in the Runway Developer Portal.');
+  if(probe.status===400){
+    let message=probeText;
+    try{
+      const parsed=JSON.parse(probeText) as {error?:string;message?:string};
+      message=String(parsed.error||parsed.message||probeText);
+    }catch{}
+    if(/workspace.*linked|linked.*workspace|no workspace/i.test(message)){
+      throw new Error('RUNWAY_WORKSPACE_LINK_REQUIRED: The API key is valid, but this Runway Dev project is not linked to a Runway workspace. In dev.runwayml.com open Manage → Connections, generate the one-time link code, then connect that project to the intended Runway workspace and retry.');
+    }
+    throw new Error(`Runway Dev rejected the connection probe (HTTP 400): ${message.slice(0,500)}`);
+  }
   if(![200,404].includes(probe.status)){
-    const text=await probe.text();
-    throw new Error(`Runway connection check failed (HTTP ${probe.status}): ${text.slice(0,500)}`);
+    throw new Error(`Runway connection check failed (HTTP ${probe.status}): ${probeText.slice(0,500)}`);
   }
 
   const existing=await pool.query(`SELECT * FROM tool_connections WHERE company_id=$1 AND provider='RUNWAY'
