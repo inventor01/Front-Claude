@@ -1,6 +1,7 @@
 name: Employee OS Module 3 Live QA
 
 on:
+  pull_request:
   push:
     branches: [front-commerce-dev]
     paths:
