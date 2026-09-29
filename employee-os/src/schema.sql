@@ -496,6 +496,8 @@ CREATE TABLE IF NOT EXISTS supplier_product_mappings (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(company_id,candidate_id,provider)
 );
+ALTER TABLE supplier_product_mappings ADD COLUMN IF NOT EXISTS freight_cost_estimate numeric;
+ALTER TABLE supplier_product_mappings ADD COLUMN IF NOT EXISTS landed_cost_estimate numeric;
 CREATE INDEX IF NOT EXISTS supplier_product_mappings_company_idx ON supplier_product_mappings(company_id,provider,status,updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS fulfillment_orders (
