@@ -88,5 +88,44 @@ jobs:
           test "$(jq -r --arg p "$PROJECT" '[.jobs[] | select(.project_id==$p and .employee_slug=="luca" and .job_type=="STORE_BUILD")] | length' <<<"$EXEC2")" = "1"
           test "$(jq -r --arg p "$PROJECT" '[.messages[] | select(.project_id==$p and .type=="WORK_ASSIGNMENT" and .from_employee_slug=="ava" and .to_employee_slug=="luca")] | length' <<<"$EXEC2")" = "1"
 
+          echo "Wait for Luca internal store package and truthful Shopify boundary"
+          LUCA_JOB_STATUS=""
+          for i in $(seq 1 30); do
+            STATE3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            LUCA_JOB_STATUS="$(jq -r --arg j "$LUCA_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC3")"
+            if [[ "$LUCA_JOB_STATUS" == "BLOCKED" || "$LUCA_JOB_STATUS" == "SUCCEEDED" || "$LUCA_JOB_STATUS" == "FAILED" ]]; then break; fi
+            sleep 2
+          done
+
+          test "$LUCA_JOB_STATUS" = "BLOCKED"
+          STATE3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          test "$(jq -r --arg w "$LUCA_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE3")" = "BLOCKED_EXTERNAL_AUTH"
+          test "$(jq -r --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0].phase' <<<"$STATE3")" = "STORE_CONNECTION_REQUIRED"
+          test "$(jq -r --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="BRAND_STRATEGY")] | .[0].status' <<<"$EXEC3")" = "SUCCEEDED"
+          test "$(jq -r --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="STORE_BRIEF")] | .[0].status' <<<"$EXEC3")" = "SUCCEEDED"
+          test "$(jq -r --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="STORE_QA")] | .[0].status' <<<"$EXEC3")" = "SUCCEEDED"
+          test "$(jq -r --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="EXTERNAL_HANDOFF")] | .[0].status' <<<"$EXEC3")" = "BLOCKED"
+
+          jq -e --arg p "$PROJECT" '
+            [.storePackages[] | select(.project_id==$p)] | length == 1 and
+            .[0].status == "READY_NEEDS_CONNECTION" and
+            .[0].qa_result.passed == true and
+            (.[0].brand_direction | length) > 0 and
+            (.[0].offer | length) > 0 and
+            (.[0].page_architecture | length) >= 6 and
+            (.[0].copy_draft | length) > 0 and
+            .[0].external_state.shopify == "NOT_CONNECTED" and
+            .[0].external_state.publishAllowed == false
+          ' <<<"$STATE3" >/dev/null
+
+          test "$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="SHOPIFY_DRAFT_BUILD")] | length' <<<"$STATE3")" = "0"
+          jq -e --arg p "$PROJECT" '
+            [.messages[] | select(.project_id==$p and .type=="BLOCKER" and .from_employee_slug=="luca" and .to_employee_slug=="ava" and .payload.reason=="SHOPIFY_NOT_CONNECTED")] | length >= 1
+          ' <<<"$EXEC3" >/dev/null
+
+          echo "MODULE 4 LIVE QA PASSED"
           echo "MODULE 3 LIVE QA PASSED"
           jq -nc             --arg company "$COMPANY"             --arg project "$PROJECT"             --arg approval "$APPROVAL"             --arg researchJob "$RESEARCH_JOB"             --arg lucaWorkOrder "$LUCA_WO"             --arg lucaJob "$LUCA_JOB"             '{result:"PASS",company:$company,project:$project,approval:$approval,researchJob:$researchJob,lucaWorkOrder:$lucaWorkOrder,lucaJob:$lucaJob}'
