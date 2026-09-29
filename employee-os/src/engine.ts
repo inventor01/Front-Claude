@@ -9,6 +9,7 @@ import { getEmployeeIntelligenceContext,type EmployeeIntelligenceContext } from 
 import { executeStorePackage,persistVideosToShopify } from './shopify-executor.js';
 import { captureReferenceSource,analyzeReferenceSource,type SourceAnalysis,type SocialCapture } from './source-intel.js';
 import { renderOriginalProductClips,DEFAULT_RENDER_CLIPS,DEFAULT_RENDER_DURATION,DEFAULT_RENDER_COST_CENTS } from './runway-executor.js';
+import { publishSocial,sendSupportEmail } from './external-connections.js';
 
 type JsonRecord=Record<string,unknown>;
 type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:JsonRecord;status:string;attempt_count:number;retry_count:number;max_attempts:number;lease_id:string|null};
@@ -450,6 +451,42 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     return {output:{caseId,status:'WAITING_APPROVAL',approvalId:approval.rows[0].id},evidenceRefs:[]};
   }
 
+  if(job.job_type==='SUPPORT_CASE' && step.step_type==='SUPPORT_SEND_EXECUTE'){
+    const caseId=String(job.payload?.supportCaseId||'');
+    const scR=await pool.query('SELECT * FROM support_cases WHERE id=$1 AND company_id=$2',[caseId,job.company_id]);
+    if(!scR.rowCount)throw new Error('Support case missing for send execution.');
+    const sc=scR.rows[0];
+    if(String(sc.channel).toUpperCase()!=='EMAIL')throw new Error('BLOCKED_EXTERNAL_AUTH: Live-chat execution provider is not connected.');
+    const approval=await pool.query(`SELECT * FROM approvals
+      WHERE company_id=$1 AND project_id=$2 AND work_order_id=$3 AND job_id=$4
+      AND action_type='SUPPORT_SEND' AND status='APPROVED'
+      ORDER BY resolved_at DESC NULLS LAST,created_at DESC LIMIT 1`,[
+      job.company_id,job.project_id,job.work_order_id,job.id
+    ]);
+    if(!approval.rowCount)throw new Error('BLOCKED_APPROVAL_REQUIRED: Approved customer-send authorization is required.');
+    const to=String(sc.customer_ref||'').trim();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){
+      throw new Error('BLOCKED_CUSTOMER_DATA: Support case customer_ref is not a deliverable email address.');
+    }
+    const draft=String(sc.draft_response||'').trim();
+    if(!draft)throw new Error('Support draft is missing.');
+    const sent=await sendSupportEmail({
+      companyId:job.company_id,
+      to,
+      subject:String(sc.subject||'Support reply'),
+      text:draft
+    });
+    await pool.query(`UPDATE support_cases SET status='SENT',
+      external_state=$2,updated_at=now() WHERE id=$1`,[
+      caseId,JSON.stringify({provider:'RESEND',sent:true,messageId:sent.id,from:sent.from,to:sent.to,sentAt:new Date().toISOString()})
+    ]);
+    await emitEvent(job.company_id,'SUPPORT_MESSAGE_SENT',{
+      projectId:job.project_id,workOrderId:job.work_order_id,supportCaseId:caseId,
+      provider:'RESEND',messageId:sent.id,to:sent.to
+    });
+    return {output:{caseId,status:'SENT',messageId:sent.id,to:sent.to},evidenceRefs:[]};
+  }
+
   if(job.job_type==='CREATIVE_PRODUCTION' && step.step_type==='CREATIVE_STRATEGY'){
     const candidateId=String(job.payload?.candidateId||'');
     const storePackageId=String(job.payload?.storePackageId||'');
@@ -870,6 +907,54 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     ]);
     await pool.query(`UPDATE work_orders SET status='NEEDS_APPROVAL',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.work_order_id]);
     return {output:{status:'WAITING_APPROVAL',approvalId:approval.rows[0].id,distributionPackageId:p.rows[0].id},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='DISTRIBUTION_PLANNING' && step.step_type==='SOCIAL_PUBLISH_EXECUTE'){
+    const creativePackageId=String(job.payload?.creativePackageId||'');
+    const [pR,cR]=await Promise.all([
+      pool.query('SELECT * FROM distribution_packages WHERE project_id=$1 AND creative_package_id=$2',[job.project_id,creativePackageId]),
+      pool.query('SELECT * FROM creative_packages WHERE id=$1 AND company_id=$2',[creativePackageId,job.company_id])
+    ]);
+    if(!pR.rowCount||!cR.rowCount)throw new Error('Distribution or creative package missing for publishing execution.');
+    const pkg=pR.rows[0],creative=cR.rows[0];
+    const approval=await pool.query(`SELECT * FROM approvals
+      WHERE company_id=$1 AND project_id=$2 AND work_order_id=$3 AND job_id=$4
+      AND action_type='SOCIAL_PUBLISH' AND status='APPROVED'
+      ORDER BY resolved_at DESC NULLS LAST,created_at DESC LIMIT 1`,[
+      job.company_id,job.project_id,job.work_order_id,job.id
+    ]);
+    if(!approval.rowCount)throw new Error('BLOCKED_APPROVAL_REQUIRED: Approved social-publish authorization is required.');
+
+    const assets=Array.isArray(creative.external_state?.assets)?creative.external_state.assets:[];
+    const mediaUrls=assets.map((a:any)=>String(a?.url||'')).filter(Boolean);
+    if(!mediaUrls.length)throw new Error('BLOCKED_CREATIVE_ASSETS: No durable rendered asset is available for publishing.');
+    const captions=Array.isArray(pkg.caption_templates)?pkg.caption_templates:[];
+    const post=String(captions[0]||`New product launch: ${String(job.payload?.candidate||'See the product in action.')}`);
+    const published=await publishSocial({
+      companyId:job.company_id,
+      post,
+      platforms:['instagram','tiktok'],
+      mediaUrls:[mediaUrls[0]]
+    });
+    const postIds=Array.isArray(published?.postIds)?published.postIds:[];
+    const successful=postIds.filter((x:any)=>String(x?.status||'').toLowerCase()==='success');
+    if(postIds.length&&successful.length===0){
+      throw new Error(`Social publisher returned no successful platform posts: ${JSON.stringify(postIds).slice(0,900)}`);
+    }
+    const state={
+      ...(pkg.external_state&&typeof pkg.external_state==='object'?pkg.external_state:{}),
+      publisher:'AYRSHARE',
+      publishedCount:Math.max(1,successful.length),
+      result:published,
+      publishedAt:new Date().toISOString()
+    };
+    await pool.query(`UPDATE distribution_packages SET status='PUBLISHED',external_state=$2,updated_at=now()
+      WHERE id=$1`,[pkg.id,JSON.stringify(state)]);
+    await emitEvent(job.company_id,'SOCIAL_CONTENT_PUBLISHED',{
+      projectId:job.project_id,workOrderId:job.work_order_id,distributionPackageId:pkg.id,
+      publishedCount:state.publishedCount,postIds
+    });
+    return {output:{distributionPackageId:pkg.id,status:'PUBLISHED',publishedCount:state.publishedCount,postIds},evidenceRefs:[]};
   }
 
   if(step.step_type==='DISCOVERY'){
