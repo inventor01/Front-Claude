@@ -78,7 +78,12 @@ export async function runOne(){
     const terminal=job.attempt_count>=job.max_attempts || !retryable(message);
     await pool.query(`UPDATE jobs SET status=$2,last_error=$3,scheduled_for=CASE WHEN $2='RETRY_SCHEDULED' THEN now()+interval '2 minutes' ELSE scheduled_for END,lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,
       [job.id,terminal?'FAILED':'RETRY_SCHEDULED',message]);
-    await emitEvent(job.company_id,terminal?'JOB_FAILED':'JOB_RETRY_SCHEDULED',{jobId:job.id,error:message});
+    if(terminal){
+      const workStatus=message.startsWith('BLOCKED_EXTERNAL_AUTH:') ? 'BLOCKED_EXTERNAL_AUTH' : 'FAILED';
+      await pool.query(`UPDATE work_orders SET status=$2,blockers=$3,updated_at=now() WHERE id=$1`,
+        [job.work_order_id,workStatus,JSON.stringify([message])]);
+    }
+    await emitEvent(job.company_id,terminal?'JOB_FAILED':'JOB_RETRY_SCHEDULED',{jobId:job.id,workOrderId:job.work_order_id,error:message});
     return {processed:true,jobId:job.id,status:terminal?'FAILED':'RETRY_SCHEDULED',error:message};
   }
 }
