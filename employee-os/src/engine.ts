@@ -6,6 +6,7 @@ import {
   type DemandResult,type SupplierResult
 } from './research.js';
 import { getEmployeeIntelligenceContext,type EmployeeIntelligenceContext } from './academy.js';
+import { executeStorePackage } from './shopify-executor.js';
 
 type JsonRecord=Record<string,unknown>;
 type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:JsonRecord;status:string;attempt_count:number;retry_count:number;max_attempts:number;lease_id:string|null};
@@ -216,10 +217,10 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
 
     const approval=await pool.query(`INSERT INTO approvals(
       company_id,project_id,work_order_id,job_id,requested_by_employee_slug,action_type,action_payload,reason,risk,cost_cents,status
-    ) VALUES($1,$2,$3,$4,'luca','SHOPIFY_DRAFT_BUILD',$5,$6,'MEDIUM',0,'PENDING') RETURNING id`,[
+    ) VALUES($1,$2,$3,$4,'luca','SHOPIFY_BUILD_AND_PUBLISH',$5,$6,'MEDIUM',0,'PENDING') RETURNING id`,[
       job.company_id,job.project_id,job.work_order_id,job.id,
-      JSON.stringify({packageId:p.rows[0].id,connectionId:connection.rows[0].id}),
-      'Luca completed internal store QA. Owner approval is required before creating or changing a Shopify draft store.'
+      JSON.stringify({packageId:p.rows[0].id,connectionId:connection.rows[0].id,publish:true}),
+      'Luca completed internal store QA. Owner approval is required before creating and publishing the Shopify storefront.'
     ]);
     await pool.query(`UPDATE store_packages SET status='NEEDS_EXTERNAL_APPROVAL',
       external_state=$2,updated_at=now() WHERE id=$1`,[
@@ -228,6 +229,34 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     await pool.query(`UPDATE work_orders SET status='NEEDS_APPROVAL',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.work_order_id]);
     await pool.query(`UPDATE projects SET phase='STORE_EXTERNAL_APPROVAL',updated_at=now() WHERE id=$1`,[job.project_id]);
     return {output:{status:'WAITING_APPROVAL',approvalId:approval.rows[0].id,packageId:p.rows[0].id},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='STORE_BUILD' && step.step_type==='SHOPIFY_EXECUTE'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const p=await pool.query('SELECT * FROM store_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
+    if(!p.rowCount)throw new Error('Store package missing for Shopify execution.');
+    const approval=await pool.query(`SELECT * FROM approvals
+      WHERE company_id=$1 AND project_id=$2 AND work_order_id=$3 AND job_id=$4
+      AND action_type='SHOPIFY_BUILD_AND_PUBLISH' AND status='APPROVED'
+      ORDER BY resolved_at DESC NULLS LAST,created_at DESC LIMIT 1`,[
+      job.company_id,job.project_id,job.work_order_id,job.id
+    ]);
+    if(!approval.rowCount){
+      throw new Error('BLOCKED_APPROVAL_REQUIRED: Approved Shopify build/publish authorization is required.');
+    }
+    const result=await executeStorePackage({
+      companyId:job.company_id,
+      projectId:job.project_id,
+      packageId:String(p.rows[0].id),
+      candidateId
+    });
+    await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'SHOPIFY_STORE_LIVE',$2)`,[
+      job.company_id,JSON.stringify({
+        projectId:job.project_id,workOrderId:job.work_order_id,jobId:job.id,
+        productUrl:result.productUrl,primaryDomain:result.primaryDomain,productId:result.productId
+      })
+    ]);
+    return {output:{status:'LIVE',...result},evidenceRefs:[]};
   }
 
   if(job.job_type==='SUPPORT_CASE' && step.step_type==='SUPPORT_CLASSIFY'){
@@ -833,6 +862,12 @@ export async function runOne(){
     await stepSuccess(step.id,output,result.evidenceRefs);
 
     const outputStatus=resultStatus(output);
+    if(outputStatus==='WAITING_APPROVAL'){
+      await pool.query(`UPDATE jobs SET status='WAITING_APPROVAL',last_error=NULL,lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,[job.id]);
+      await pool.query(`UPDATE work_orders SET status='NEEDS_APPROVAL',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.work_order_id]);
+      await emitEvent(job.company_id,'JOB_WAITING_APPROVAL',{jobId:job.id,workOrderId:job.work_order_id});
+      return {processed:true,jobId:job.id,status:'WAITING_APPROVAL'};
+    }
     if(outputStatus.startsWith('BLOCKED') || outputStatus.startsWith('WAITING_')){
       await pool.query(`UPDATE jobs SET status='BLOCKED',last_error=$2,lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,[job.id,outputStatus]);
       await pool.query(`UPDATE work_orders SET status='BLOCKED',blockers=$2,updated_at=now() WHERE id=$1`,[job.work_order_id,JSON.stringify([outputStatus])]);
