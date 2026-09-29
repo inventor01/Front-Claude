@@ -77,7 +77,8 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
   function badge(v){var x=String(v||'');var cls=/DONE|SUCCEEDED|APPROVED|READY_FOR/.test(x)?'good':/BLOCK|FAILED|REJECT/.test(x)?'bad':'warn';return '<span class="badge '+cls+'">'+esc(x)+'</span>';}
   function fmt(v){try{return new Date(v).toLocaleString();}catch(e){return String(v||'');}}
   async function request(path,opts){
-    opts=opts||{};opts.headers=Object.assign({'content-type':'application/json'},opts.headers||{});
+    opts=opts||{};opts.headers=Object.assign({},opts.headers||{});
+    if(opts.body!=null&&!opts.headers['content-type'])opts.headers['content-type']='application/json';
     if(token)opts.headers.authorization='Bearer '+token;
     var r=await fetch(path,opts);var body=await r.json().catch(function(){return {};});
     if(!r.ok){var e=new Error(body.error||('HTTP '+r.status));e.status=r.status;throw e;}return body;
