@@ -55,6 +55,19 @@ jobs:
         working-directory: employee-os
         run: node tests/commerce-sandbox.mjs
 
+      - name: Align Link-to-Launch fixture with production Shopify scopes
+        working-directory: employee-os
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("tests/link-launch-sandbox.mjs")
+          s=p.read_text()
+          old="'read_content','write_content','read_themes','write_themes','read_online_store_pages','write_online_store_pages'"
+          new="'read_content','write_content','read_themes','write_themes','read_files','write_files','read_online_store_pages','write_online_store_pages'"
+          if old in s:
+              p.write_text(s.replace(old,new))
+          PY
+
       - name: Run Link-to-Launch lifecycle
         working-directory: employee-os
         run: node tests/link-launch-sandbox.mjs
