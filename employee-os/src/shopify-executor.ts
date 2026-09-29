@@ -3,6 +3,8 @@ import { readCredential,storeCredential,deleteCredential } from './credentials.j
 import { mapCandidateToCJ,requireVerifiedCJMapping } from './cj-executor.js';
 
 const API_VERSION='2026-07';
+const PROVIDER_TEST_MODE=process.env.PROVIDER_TEST_MODE==='1';
+const SHOPIFY_TEST_BASE=PROVIDER_TEST_MODE?String(process.env.SHOPIFY_TEST_BASE_URL||'').replace(/\/$/,''):'';
 
 type ShopifyCredential={storeDomain:string;accessToken:string};
 
@@ -21,7 +23,8 @@ function normalizeStoreDomain(value:string){
 }
 
 async function graph<T>(credential:ShopifyCredential,query:string,variables:Record<string,unknown>={}):Promise<T>{
-  const response=await fetch(`https://${credential.storeDomain}/admin/api/${API_VERSION}/graphql.json`,{
+  const endpoint=SHOPIFY_TEST_BASE?`${SHOPIFY_TEST_BASE}/admin/api/${API_VERSION}/graphql.json`:`https://${credential.storeDomain}/admin/api/${API_VERSION}/graphql.json`;
+  const response=await fetch(endpoint,{
     method:'POST',
     headers:{
       'content-type':'application/json',
