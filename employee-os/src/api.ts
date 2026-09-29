@@ -43,7 +43,7 @@ app.get('/api/me',async req=>{
 });
 app.get('/api/company/:companyId/state',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as any; await requireCompany(userId,companyId);
-  const [employees,objectives,projects,work,approvals,events,candidates,storePackages]=await Promise.all([
+  const [employees,objectives,projects,work,approvals,events,candidates,storePackages,creativePackages,distributionPackages]=await Promise.all([
     pool.query('SELECT * FROM employees WHERE company_id=$1 ORDER BY created_at',[companyId]),
     pool.query('SELECT * FROM objectives WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
     pool.query('SELECT * FROM projects WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
@@ -51,14 +51,16 @@ app.get('/api/company/:companyId/state',async req=>{
     pool.query('SELECT * FROM approvals WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT * FROM events WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT * FROM product_candidates WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
-    pool.query('SELECT * FROM store_packages WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId])
+    pool.query('SELECT * FROM store_packages WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
+    pool.query('SELECT * FROM creative_packages WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
+    pool.query('SELECT * FROM distribution_packages WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId])
   ]);
-  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows,storePackages:storePackages.rows};
+  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows,storePackages:storePackages.rows,creativePackages:creativePackages.rows,distributionPackages:distributionPackages.rows};
 });
 app.get('/api/company/:companyId/execution',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as any; await requireCompany(userId,companyId);
   const [jobs,steps,evidence,messages]=await Promise.all([
-    pool.query('SELECT id,project_id,work_order_id,employee_slug,job_type,status,priority,scheduled_for,lease_expires_at,attempt_count,max_attempts,last_error,created_at,updated_at FROM jobs WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
+    pool.query('SELECT id,project_id,work_order_id,employee_slug,job_type,status,priority,scheduled_for,lease_expires_at,attempt_count,retry_count,max_attempts,last_error,created_at,updated_at FROM jobs WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT id,job_id,sequence,step_type,status,input,output,evidence_refs,last_error,attempt_history,created_at,updated_at FROM job_steps WHERE company_id=$1 ORDER BY created_at DESC,sequence ASC LIMIT 500',[companyId]),
     pool.query('SELECT id,project_id,work_order_id,employee_slug,evidence_type,source_type,source_name,source_url,external_id,content_summary,confidence,verification_status,captured_at FROM evidence WHERE company_id=$1 ORDER BY captured_at DESC LIMIT 200',[companyId]),
     pool.query('SELECT id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,evidence_refs,authority_context,payload,created_at,consumed_at FROM employee_messages WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200',[companyId])
