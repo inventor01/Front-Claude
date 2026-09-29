@@ -216,7 +216,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var status=blockers.length?'<div class="error">Connect '+esc(blockers.join(' + '))+' in Connections before a blocked Instagram source can be visually analyzed.</div>':'<div class="success">Social capture and multimodal analysis are connected.</div>';
     return '<div class="hero"><h2>Link-to-Launch</h2><p>Paste one social-commerce reference. Rowan identifies and sources the product; Luca builds the storefront; Maya models the creative structure into original variants; Nova plans distribution; Ellis owns customer operations.</p></div>'+
       status+
-      '<div class="card"><form id="linkLaunchForm" class="form"><input id="linkLaunchUrl" placeholder="https://www.instagram.com/reel/..."/><textarea id="linkLaunchConstraints" placeholder="Optional constraints, one per line">Prefer lowest verified landed cost without sacrificing reasonable U.S. delivery\nAvoid regulated, high-return, IP-sensitive, or unsafe products\nNo publishing or spending without owner approval</textarea><button class="action">Start Link-to-Launch</button></form></div>'+
+      '<div class="card"><form id="linkLaunchForm" class="form"><input id="linkLaunchUrl" placeholder="https://www.instagram.com/reel/..."/><textarea id="linkLaunchConstraints" placeholder="Optional constraints, one per line">Prefer lowest verified landed cost without sacrificing reasonable U.S. delivery&#10;Avoid regulated, high-return, IP-sensitive, or unsafe products&#10;No publishing or spending without owner approval</textarea><button class="action">Start Link-to-Launch</button></form></div>'+
       '<h3 class="section-title">Reference ventures</h3><div class="stack">'+(rows||'<div class="empty">No link-based ventures yet.</div>')+'</div>';
   }
 
@@ -304,7 +304,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     if(quick)quick.onsubmit=async function(e){e.preventDefault();try{await submitLinkLaunch(document.getElementById('linkLaunchQuickUrl').value,[]);}catch(err){notice(err.message,'error');}};
     var linkForm=document.getElementById('linkLaunchForm');
     if(linkForm)linkForm.onsubmit=async function(e){e.preventDefault();try{
-      var constraints=document.getElementById('linkLaunchConstraints').value.split('\n').map(function(x){return x.trim();}).filter(Boolean);
+      var constraints=document.getElementById('linkLaunchConstraints').value.split('\\n').map(function(x){return x.trim();}).filter(Boolean);
       await submitLinkLaunch(document.getElementById('linkLaunchUrl').value,constraints);
     }catch(err){notice(err.message,'error');}};
     var objective=document.getElementById('objectiveForm');
