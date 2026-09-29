@@ -14,6 +14,33 @@ import { connectFront,disconnectFront,frontStatus,connectAyrshare,disconnectSoci
 
 const app=Fastify({logger:true});
 
+async function resumeBlockedJobsForConnection(companyId:string,provider:'SHOPIFY'|'CJ'|'RUNWAY'|'SOCIAL_PUBLISHER'|'EMAIL'){
+  const map={
+    SHOPIFY:{jobType:'STORE_BUILD',stepType:'EXTERNAL_HANDOFF'},
+    CJ:{jobType:'STORE_BUILD',stepType:'SHOPIFY_EXECUTE'},
+    RUNWAY:{jobType:'CREATIVE_PRODUCTION',stepType:'RENDER_HANDOFF'},
+    SOCIAL_PUBLISHER:{jobType:'DISTRIBUTION_PLANNING',stepType:'PUBLISH_HANDOFF'},
+    EMAIL:{jobType:'SUPPORT_CASE',stepType:'SUPPORT_SEND_HANDOFF'}
+  } as const;
+  const target=map[provider];
+  const rows=await pool.query(`SELECT j.id job_id,j.work_order_id,js.id step_id
+    FROM jobs j JOIN job_steps js ON js.job_id=j.id AND js.step_type=$3
+    WHERE j.company_id=$1 AND j.job_type=$2
+      AND j.status IN ('BLOCKED','FAILED')
+      AND js.status IN ('BLOCKED','FAILED','WAITING')
+    ORDER BY j.updated_at DESC LIMIT 50`,[companyId,target.jobType,target.stepType]);
+  for(const row of rows.rows){
+    await pool.query(`UPDATE job_steps SET status='PENDING',last_error=NULL,updated_at=now() WHERE id=$1`,[row.step_id]);
+    await pool.query(`UPDATE jobs SET status='QUEUED',last_error=NULL,scheduled_for=now(),retry_count=0,
+      lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,[row.job_id]);
+    await pool.query(`UPDATE work_orders SET status='READY',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[row.work_order_id]);
+    await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'JOB_RESUMED_AFTER_CONNECTION',$2)`,[
+      companyId,JSON.stringify({provider,jobId:row.job_id,workOrderId:row.work_order_id,stepType:target.stepType})
+    ]);
+  }
+  return rows.rowCount;
+}
+
 async function resumeBlockedLinkLaunches(companyId:string,stage:'SOURCE_CAPTURE'|'SOURCE_ANALYSIS'){
   const stepType=stage;
   const blockedSourceStatus=stage==='SOURCE_CAPTURE'?'BLOCKED_SOURCE_ACCESS':'BLOCKED_ANALYSIS';
@@ -266,10 +293,11 @@ app.post('/api/company/:companyId/integrations/shopify/connect',async(req,reply)
     accessToken:z.string().min(10).max(500)
   }).parse(req.body);
   const result=await connectShopify({companyId,storeDomain:body.storeDomain,accessToken:body.accessToken});
+  const resumed=await resumeBlockedJobsForConnection(companyId,'SHOPIFY');
   await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
-    companyId,JSON.stringify({provider:'SHOPIFY',storeDomain:result.shop.myshopifyDomain,primaryDomain:result.shop.primaryDomain?.url||null})
+    companyId,JSON.stringify({provider:'SHOPIFY',storeDomain:result.shop.myshopifyDomain,primaryDomain:result.shop.primaryDomain?.url||null,resumedJobs:resumed})
   ]);
-  return reply.code(201).send({
+  return reply.code(201).send({resumedJobs:resumed,
     connected:true,
     shop:result.shop,
     publication:result.onlineStorePublication,
@@ -295,10 +323,11 @@ app.post('/api/company/:companyId/integrations/cj/connect',async(req,reply)=>{
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   const body=z.object({apiKey:z.string().min(10).max(500)}).parse(req.body);
   const result=await connectCJ({companyId,apiKey:body.apiKey});
+  const resumed=await resumeBlockedJobsForConnection(companyId,'CJ');
   await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
-    companyId,JSON.stringify({provider:'CJ',openId:result.openId})
+    companyId,JSON.stringify({provider:'CJ',openId:result.openId,resumedJobs:resumed})
   ]);
-  return reply.code(201).send({connected:true,connection:result.connection});
+  return reply.code(201).send({connected:true,connection:result.connection,resumedJobs:resumed});
 });
 
 app.delete('/api/company/:companyId/integrations/cj',async(req,reply)=>{
@@ -519,8 +548,9 @@ app.post('/api/company/:companyId/integrations/social/connect',async(req,reply)=
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   const body=z.object({apiKey:z.string().min(8).max(1000)}).parse(req.body);
   const result=await connectAyrshare({companyId,apiKey:body.apiKey});
-  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[companyId,JSON.stringify({provider:'SOCIAL_PUBLISHER',name:'Ayrshare'})]);
-  return reply.code(201).send(result);
+  const resumed=await resumeBlockedJobsForConnection(companyId,'SOCIAL_PUBLISHER');
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[companyId,JSON.stringify({provider:'SOCIAL_PUBLISHER',name:'Ayrshare',resumedJobs:resumed})]);
+  return reply.code(201).send({...result,resumedJobs:resumed});
 });
 app.delete('/api/company/:companyId/integrations/social',async(req,reply)=>{
   const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
@@ -537,8 +567,9 @@ app.post('/api/company/:companyId/integrations/email/connect',async(req,reply)=>
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   const body=z.object({apiKey:z.string().min(8).max(1000),fromEmail:z.string().email().max(320)}).parse(req.body);
   const result=await connectResend({companyId,...body});
-  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[companyId,JSON.stringify({provider:'EMAIL',name:'Resend',fromEmail:body.fromEmail})]);
-  return reply.code(201).send(result);
+  const resumed=await resumeBlockedJobsForConnection(companyId,'EMAIL');
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[companyId,JSON.stringify({provider:'EMAIL',name:'Resend',fromEmail:body.fromEmail,resumedJobs:resumed})]);
+  return reply.code(201).send({...result,resumedJobs:resumed});
 });
 app.delete('/api/company/:companyId/integrations/email',async(req,reply)=>{
   const userId=await requireUser(req),{companyId}=req.params as {companyId:string}; const membership=await requireCompany(userId,companyId);
