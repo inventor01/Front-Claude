@@ -186,7 +186,10 @@ async function waitFor(fn,label,timeout=30000,interval=250){
   throw new Error(`Timed out waiting for ${label}${last?': '+last.message:''}`);
 }
 async function api(path,opts={}){
-  const res=await fetch(`http://127.0.0.1:${API_PORT}${path}`,opts);
+  const headers={...(opts.headers||{})};
+  if(opts.body==null)delete headers['content-type'];
+  else if(!headers['content-type'])headers['content-type']='application/json';
+  const res=await fetch(`http://127.0.0.1:${API_PORT}${path}`,{...opts,headers});
   const data=await res.json().catch(()=>({}));
   if(!res.ok)throw Object.assign(new Error(data.error||`HTTP ${res.status}`),{status:res.status,data});
   return data;
