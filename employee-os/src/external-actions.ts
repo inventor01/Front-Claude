@@ -30,7 +30,7 @@ export async function startExternalAction(ctx:ExternalActionContext){
       )).rows[0];
   if(!row)throw new Error('External action ledger entry could not be created.');
   if(row.status==='SUCCEEDED')return {action:row,reused:true,result:row.result};
-  if(row.status==='RECONCILIATION_REQUIRED'){
+  if(row.status==='RECONCILIATION_REQUIRED'||row.status==='RUNNING'){
     throw new Error(`BLOCKED_EXTERNAL_RECONCILIATION: ${ctx.provider} action requires provider reconciliation before retry.`);
   }
   if(row.status==='FAILED'){

@@ -1,5 +1,6 @@
 import { pool } from './db.js';
 import { readCredential,storeCredential,deleteCredential } from './credentials.js';
+import { startExternalAction,completeExternalAction } from './external-actions.js';
 import { mapCandidateToCJ,requireVerifiedCJMapping } from './cj-executor.js';
 import { buildAndPublishTheme } from './theme-executor.js';
 
@@ -121,6 +122,15 @@ export async function shopifyStatus(companyId:string){
 }
 
 export async function verifyShopifyDraftWrite(companyId:string){
+  const action=await startExternalAction({
+    companyId,jobId:null,workOrderId:null,employeeSlug:'system',provider:'SHOPIFY',
+    actionType:'SHOPIFY_RELEASE_GATE_DRAFT',target:'release-gate-draft',
+    idempotencyKey:`shopify-release-gate-draft:${companyId}:v1`
+  });
+  if(action.reused)return action.result as {
+    shop:{name:string;myshopifyDomain:string};productReadSucceeded:boolean;
+    draftProduct:{id:string;handle:string;title:string;status:string};verifiedAt:string;
+  };
   const connectionR=await pool.query(`SELECT * FROM tool_connections
     WHERE company_id=$1 AND provider='SHOPIFY' AND status='CONNECTED'
     ORDER BY updated_at DESC LIMIT 1`,[companyId]);
@@ -145,7 +155,9 @@ export async function verifyShopifyDraftWrite(companyId:string){
   );
   if(write.productSet.userErrors.length)throw new Error(`Shopify draft QA error: ${write.productSet.userErrors.map(e=>e.message).join('; ')}`);
   if(!write.productSet.product||write.productSet.product.status!=='DRAFT')throw new Error('Shopify draft QA failed: provider did not confirm DRAFT status.');
-  return {shop:read.shop,productReadSucceeded:true,draftProduct:write.productSet.product,verifiedAt:new Date().toISOString()};
+  const result={shop:read.shop,productReadSucceeded:true,draftProduct:write.productSet.product,verifiedAt:new Date().toISOString()};
+  await completeExternalAction(String(action.action.id),String(write.productSet.product.id),result);
+  return result;
 }
 
 function slugify(value:string){
@@ -197,6 +209,7 @@ async function ensurePage(credential:ShopifyCredential,title:string,handle:strin
 
 export async function executeStorePackage(input:{
   companyId:string;projectId:string;packageId:string;candidateId:string;
+  jobId:string;workOrderId:string;employeeSlug:string;idempotencyKey:string;
 }){
   const connectionR=await pool.query(`SELECT * FROM tool_connections
     WHERE company_id=$1 AND provider='SHOPIFY' AND status='CONNECTED'
@@ -236,6 +249,12 @@ export async function executeStorePackage(input:{
   const handle=slugify(String(candidate.name));
   const title=String(candidate.name).replace(/\b\w/g,(m)=>m.toUpperCase()).slice(0,255);
   const description=descriptionHtml(candidate,pkg);
+
+  const externalAction=await startExternalAction({
+    companyId:input.companyId,jobId:input.jobId,workOrderId:input.workOrderId,employeeSlug:input.employeeSlug,
+    provider:'SHOPIFY',actionType:'SHOPIFY_STORE_EXECUTE',target:handle,idempotencyKey:input.idempotencyKey
+  });
+  if(externalAction.reused)return externalAction.result as any;
 
   const productData=await graph<{productSet:{
     product:{id:string;handle:string;title:string;status:string;variants:{nodes:Array<{id:string;price:string}>}}|null;
@@ -340,6 +359,7 @@ export async function executeStorePackage(input:{
   await pool.query(`UPDATE projects SET phase=$2,updated_at=now() WHERE id=$1`,[
     input.projectId,result.published&&storefrontReachable?'STORE_LIVE':'STORE_EXTERNAL_QA'
   ]);
+  await completeExternalAction(String(externalAction.action.id),String(product.id),result);
   return result;
 }
 

@@ -316,10 +316,9 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
       throw new Error('BLOCKED_APPROVAL_REQUIRED: Approved Shopify build/publish authorization is required.');
     }
     const result=await executeStorePackage({
-      companyId:job.company_id,
-      projectId:job.project_id,
-      packageId:String(p.rows[0].id),
-      candidateId
+      companyId:job.company_id,projectId:job.project_id,packageId:String(p.rows[0].id),candidateId,
+      jobId:job.id,workOrderId:job.work_order_id,employeeSlug:job.employee_slug,
+      idempotencyKey:`shopify-store-execute:${job.id}:${p.rows[0].id}`
     });
     await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'SHOPIFY_STORE_LIVE',$2)`,[
       job.company_id,JSON.stringify({
