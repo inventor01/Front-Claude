@@ -12,6 +12,36 @@ import { connectApify,disconnectApify,apifyStatus,connectOpenAI,disconnectOpenAI
 import { connectRunway,disconnectRunway,runwayStatus } from './runway-executor.js';
 
 const app=Fastify({logger:true});
+
+async function resumeBlockedLinkLaunches(companyId:string,stage:'SOURCE_CAPTURE'|'SOURCE_ANALYSIS'){
+  const stepType=stage;
+  const blockedSourceStatus=stage==='SOURCE_CAPTURE'?'BLOCKED_SOURCE_ACCESS':'BLOCKED_ANALYSIS';
+  const rows=await pool.query(`SELECT j.id job_id,j.work_order_id,j.project_id,js.id step_id,rs.id source_id
+    FROM jobs j
+    JOIN job_steps js ON js.job_id=j.id AND js.step_type=$2
+    JOIN reference_sources rs ON rs.project_id=j.project_id AND rs.company_id=j.company_id
+    WHERE j.company_id=$1 AND j.job_type='LINK_PRODUCT_RESEARCH'
+      AND j.status IN ('BLOCKED','FAILED')
+      AND js.status IN ('BLOCKED','FAILED','WAITING')
+      AND rs.status=$3`,[companyId,stepType,blockedSourceStatus]);
+  for(const row of rows.rows){
+    await pool.query(`UPDATE job_steps SET status='PENDING',last_error=NULL,updated_at=now()
+      WHERE id=$1`,[row.step_id]);
+    await pool.query(`UPDATE jobs SET status='QUEUED',last_error=NULL,scheduled_for=now(),
+      retry_count=0,lease_id=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,[row.job_id]);
+    await pool.query(`UPDATE work_orders SET status='READY',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[row.work_order_id]);
+    await pool.query(`UPDATE reference_sources SET status=$2,error=NULL,updated_at=now() WHERE id=$1`,[
+      row.source_id,stage==='SOURCE_CAPTURE'?'PENDING_CAPTURE':'CAPTURED'
+    ]);
+    await pool.query(`UPDATE link_launches SET status=$2,updated_at=now() WHERE project_id=$1`,[
+      row.project_id,stage
+    ]);
+    await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'LINK_LAUNCH_RESUMED',$2)`,[
+      companyId,JSON.stringify({projectId:row.project_id,jobId:row.job_id,stage})
+    ]);
+  }
+  return rows.rowCount;
+}
 await app.register(cors,{origin:true});
 app.get('/health',async()=>({ok:true,service:'employee-os-api',time:new Date().toISOString()}));
 app.get('/',async(_req,reply)=>reply.type('text/html; charset=utf-8').send(commandCenterHtml()));
@@ -301,10 +331,11 @@ app.post('/api/company/:companyId/integrations/apify/connect',async(req,reply)=>
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   const body=z.object({token:z.string().min(10).max(1000)}).parse(req.body);
   const result=await connectApify({companyId,token:body.token});
+  const resumed=await resumeBlockedLinkLaunches(companyId,'SOURCE_CAPTURE');
   await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
-    companyId,JSON.stringify({provider:'APIFY',purpose:'SOCIAL_REFERENCE_CAPTURE'})
+    companyId,JSON.stringify({provider:'APIFY',purpose:'SOCIAL_REFERENCE_CAPTURE',resumedLinkLaunches:resumed})
   ]);
-  return reply.code(201).send(result);
+  return reply.code(201).send({...result,resumedLinkLaunches:resumed});
 });
 app.delete('/api/company/:companyId/integrations/apify',async(req,reply)=>{
   const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
@@ -323,10 +354,11 @@ app.post('/api/company/:companyId/integrations/openai/connect',async(req,reply)=
   if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   const body=z.object({apiKey:z.string().min(10).max(1000)}).parse(req.body);
   const result=await connectOpenAI({companyId,apiKey:body.apiKey});
+  const resumed=await resumeBlockedLinkLaunches(companyId,'SOURCE_ANALYSIS');
   await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'TOOL_CONNECTED',$2)`,[
-    companyId,JSON.stringify({provider:'OPENAI',purpose:'MULTIMODAL_REFERENCE_ANALYSIS',model:result.model})
+    companyId,JSON.stringify({provider:'OPENAI',purpose:'MULTIMODAL_REFERENCE_ANALYSIS',model:result.model,resumedLinkLaunches:resumed})
   ]);
-  return reply.code(201).send(result);
+  return reply.code(201).send({...result,resumedLinkLaunches:resumed});
 });
 app.delete('/api/company/:companyId/integrations/openai',async(req,reply)=>{
   const userId=await requireUser(req),{companyId}=req.params as {companyId:string};
