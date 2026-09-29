@@ -1,7 +1,10 @@
 import { pool } from './db.js';
 import { readCredential,storeCredential,deleteCredential } from './credentials.js';
 
-const BASE='https://developers.cjdropshipping.com/api2.0/v1';
+const PROVIDER_TEST_MODE=process.env.PROVIDER_TEST_MODE==='1';
+const BASE=PROVIDER_TEST_MODE&&process.env.CJ_TEST_BASE_URL
+  ?String(process.env.CJ_TEST_BASE_URL).replace(/\/$/,'')
+  :'https://developers.cjdropshipping.com/api2.0/v1';
 
 type CjCredential={
   apiKey:string;
