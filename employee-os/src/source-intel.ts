@@ -56,6 +56,9 @@ export type SourceAnalysis={
 };
 
 const INSTAGRAM_ACTOR='apify~instagram-api-scraper';
+const PROVIDER_TEST_MODE=process.env.PROVIDER_TEST_MODE==='1';
+const APIFY_BASE=PROVIDER_TEST_MODE&&process.env.APIFY_TEST_BASE_URL?String(process.env.APIFY_TEST_BASE_URL).replace(/\/$/,''):'https://api.apify.com';
+const OPENAI_BASE=PROVIDER_TEST_MODE&&process.env.OPENAI_TEST_BASE_URL?String(process.env.OPENAI_TEST_BASE_URL).replace(/\/$/,''):'https://api.openai.com';
 
 function publicHttpUrl(value:string){
   const url=new URL(value);
@@ -86,7 +89,7 @@ async function latestConnection(companyId:string,provider:string){
 
 export async function connectApify(input:{companyId:string;token:string}){
   const token=input.token.trim();
-  const response=await fetch(`https://api.apify.com/v2/acts/${encodeURIComponent(INSTAGRAM_ACTOR)}?token=${encodeURIComponent(token)}`,{
+  const response=await fetch(`${APIFY_BASE}/v2/acts/${encodeURIComponent(INSTAGRAM_ACTOR)}?token=${encodeURIComponent(token)}`,{
     headers:{'user-agent':'AI-Employee-OS/0.5'}
   });
   if(!response.ok)throw new Error(`Apify authentication/actor validation failed (HTTP ${response.status}).`);
@@ -125,7 +128,7 @@ export async function disconnectApify(companyId:string){
 }
 
 async function chooseOpenAIModel(apiKey:string){
-  const response=await fetch('https://api.openai.com/v1/models',{headers:{authorization:`Bearer ${apiKey}`,'user-agent':'AI-Employee-OS/0.5'}});
+  const response=await fetch(`${OPENAI_BASE}/v1/models`,{headers:{authorization:`Bearer ${apiKey}`,'user-agent':'AI-Employee-OS/0.5'}});
   if(!response.ok)throw new Error(`OpenAI API authentication failed (HTTP ${response.status}).`);
   const body=await response.json() as {data?:Array<{id?:string}>};
   const ids=new Set((body.data||[]).map((x)=>String(x.id||'')));
@@ -188,7 +191,7 @@ function firstNumber(obj:Record<string,unknown>,keys:string[]){
 async function captureInstagram(companyId:string,url:string):Promise<SocialCapture>{
   const connection=await latestConnection(companyId,'APIFY');
   const credential=await readCredential<ApifyCredential>(companyId,'APIFY',String(connection.id));
-  const endpoint=`https://api.apify.com/v2/acts/${encodeURIComponent(credential.actorId||INSTAGRAM_ACTOR)}/run-sync-get-dataset-items?token=${encodeURIComponent(credential.token)}&timeout=120&memory=512`;
+  const endpoint=`${APIFY_BASE}/v2/acts/${encodeURIComponent(credential.actorId||INSTAGRAM_ACTOR)}/run-sync-get-dataset-items?token=${encodeURIComponent(credential.token)}&timeout=120&memory=512`;
   const response=await fetch(endpoint,{
     method:'POST',
     headers:{'content-type':'application/json','user-agent':'AI-Employee-OS/0.5'},
@@ -329,7 +332,7 @@ export async function analyzeReferenceSource(companyId:string,capture:SocialCapt
     }
   };
 
-  const response=await fetch('https://api.openai.com/v1/responses',{
+  const response=await fetch(`${OPENAI_BASE}/v1/responses`,{
     method:'POST',
     headers:{'content-type':'application/json',authorization:`Bearer ${credential.apiKey}`,'user-agent':'AI-Employee-OS/0.5'},
     body:JSON.stringify({
