@@ -292,3 +292,58 @@ export async function executeStorePackage(input:{
   ]);
   return result;
 }
+
+
+export type ShopifyPaidOrder={
+  id:string;
+  name:string;
+  createdAt:string;
+  displayFinancialStatus:string;
+  displayFulfillmentStatus:string;
+  email:string|null;
+  shippingAddress:{
+    name:string;
+    address1:string;
+    address2:string|null;
+    city:string;
+    province:string|null;
+    provinceCode:string|null;
+    zip:string|null;
+    country:string|null;
+    countryCodeV2:string;
+    phone:string|null;
+  }|null;
+  lineItems:{nodes:Array<{
+    id:string;
+    name:string;
+    quantity:number;
+    sku:string|null;
+    variant:{id:string;sku:string|null;product:{id:string}}|null;
+  }>};
+};
+
+export async function connectedShopifyCompanies(){
+  const r=await pool.query(`SELECT company_id,id,metadata FROM tool_connections
+    WHERE provider='SHOPIFY' AND status='CONNECTED'
+    ORDER BY updated_at DESC LIMIT 50`);
+  return r.rows;
+}
+
+export async function listPaidUnfulfilledOrders(companyId:string):Promise<ShopifyPaidOrder[]>{
+  const r=await pool.query(`SELECT * FROM tool_connections
+    WHERE company_id=$1 AND provider='SHOPIFY' AND status='CONNECTED'
+    ORDER BY updated_at DESC LIMIT 1`,[companyId]);
+  if(!r.rowCount)return [];
+  const connection=r.rows[0];
+  const credential=await readCredential<ShopifyCredential>(companyId,'SHOPIFY',String(connection.id));
+  const data=await graph<{orders:{nodes:ShopifyPaidOrder[]}}>(credential,`query PaidUnfulfilledOrders($query:String!){
+    orders(first:25,query:$query,sortKey:CREATED_AT,reverse:true){
+      nodes{
+        id name createdAt displayFinancialStatus displayFulfillmentStatus email
+        shippingAddress{name address1 address2 city province provinceCode zip country countryCodeV2 phone}
+        lineItems(first:50){nodes{id name quantity sku variant{id sku product{id}}}}
+      }
+    }
+  }`,{query:'financial_status:paid fulfillment_status:unfulfilled'});
+  return data.orders.nodes.filter((o)=>o.displayFinancialStatus==='PAID');
+}
