@@ -31,7 +31,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/employee_os_qa
       PGSSLMODE: disable
       JWT_SECRET: employee-os-ci-jwt-secret-at-least-32-bytes
-      CREDENTIALS_MASTER_KEY: employee-os-ci-credentials-master-key-32bytes-minimum
+      CREDENTIALS_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
