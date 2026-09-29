@@ -515,6 +515,18 @@ app.post('/api/company/:companyId/approvals/:approvalId/:decision',async(req,rep
           companyId,JSON.stringify({approvalId,candidateId:candidate.id})
         ]);
       }
+    }else if(approval.action_type==='CJ_ORDER_PAYMENT'){
+      const fulfillmentOrderId=String((approval.action_payload||{}).fulfillmentOrderId||'');
+      const fulfillment=await c.query('SELECT * FROM fulfillment_orders WHERE id=$1 AND company_id=$2 FOR UPDATE',[fulfillmentOrderId,companyId]);
+      if(!fulfillment.rowCount)throw Object.assign(new Error('Fulfillment order not found'),{statusCode:409});
+      await c.query('UPDATE fulfillment_orders SET status=$3,updated_at=now() WHERE id=$1 AND company_id=$2',[
+        fulfillmentOrderId,companyId,decision==='approve'?'PAYMENT_APPROVED':'PAYMENT_REJECTED'
+      ]);
+      await c.query(`INSERT INTO events(company_id,type,payload) VALUES($1,$2,$3)`,[
+        companyId,
+        decision==='approve'?'FULFILLMENT_PAYMENT_APPROVED':'FULFILLMENT_PAYMENT_REJECTED',
+        JSON.stringify({approvalId,fulfillmentOrderId,supplierOrderId:fulfillment.rows[0].supplier_order_id})
+      ]);
     }else{
       if(approval.job_id){
         await c.query(`UPDATE jobs SET status=$2,scheduled_for=now(),last_error=NULL,updated_at=now() WHERE id=$1`,[
