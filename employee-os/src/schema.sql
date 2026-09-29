@@ -194,3 +194,31 @@ CREATE TABLE IF NOT EXISTS tool_connections (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(company_id, tool_id)
 );
+
+
+CREATE TABLE IF NOT EXISTS product_candidates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  work_order_id uuid NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  status text NOT NULL,
+  score integer NOT NULL,
+  confidence text NOT NULL,
+  discovery_mode text NOT NULL,
+  trend_growth_pct numeric,
+  demand_score integer NOT NULL,
+  marketplace_seen boolean NOT NULL DEFAULT false,
+  supplier_seen boolean NOT NULL DEFAULT false,
+  observed_market_price numeric,
+  observed_source_price numeric,
+  observed_gross_margin_pct numeric,
+  contentability_score integer NOT NULL,
+  risk_flags jsonb NOT NULL DEFAULT '[]'::jsonb,
+  creative_angles jsonb NOT NULL DEFAULT '[]'::jsonb,
+  analysis jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(project_id, name)
+);
+CREATE INDEX IF NOT EXISTS product_candidates_company_idx ON product_candidates(company_id, created_at DESC);
