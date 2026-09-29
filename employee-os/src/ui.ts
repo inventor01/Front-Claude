@@ -71,7 +71,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
 (function(){
   var token=localStorage.getItem('employee_os_token')||'';
   var companyId=localStorage.getItem('employee_os_company')||'';
-  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null, cj=null, apify=null, openai=null, runway=null;
+  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null, cj=null, apify=null, openai=null, runway=null, front=null, social=null, emailConn=null, searchConn=null;
 
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
   function badge(v){var x=String(v||'');var cls=/DONE|SUCCEEDED|APPROVED|READY_FOR/.test(x)?'good':/BLOCK|FAILED|REJECT/.test(x)?'bad':'warn';return '<span class="badge '+cls+'">'+esc(x)+'</span>';}
@@ -119,9 +119,13 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
         optionalRequest('/api/company/'+companyId+'/integrations/cj',{connected:false,status:'UNAVAILABLE'},'cj'),
         optionalRequest('/api/company/'+companyId+'/integrations/apify',{connected:false,status:'UNAVAILABLE'},'apify'),
         optionalRequest('/api/company/'+companyId+'/integrations/openai',{connected:false,status:'UNAVAILABLE'},'openai'),
-        optionalRequest('/api/company/'+companyId+'/integrations/runway',{connected:false,status:'UNAVAILABLE'},'runway')
+        optionalRequest('/api/company/'+companyId+'/integrations/runway',{connected:false,status:'UNAVAILABLE'},'runway'),
+        optionalRequest('/api/company/'+companyId+'/integrations/front',{connected:false,status:'UNAVAILABLE'},'front'),
+        optionalRequest('/api/company/'+companyId+'/integrations/social',{connected:false,status:'UNAVAILABLE'},'social'),
+        optionalRequest('/api/company/'+companyId+'/integrations/email',{connected:false,status:'UNAVAILABLE'},'email'),
+        optionalRequest('/api/company/'+companyId+'/integrations/search',{connected:false,status:'UNAVAILABLE'},'search')
       ]);
-      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];cj=all[6];apify=all[7];openai=all[8];runway=all[9];
+      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];cj=all[6];apify=all[7];openai=all[8];runway=all[9];front=all[10];social=all[11];emailConn=all[12];searchConn=all[13];
       render();
     }catch(e){
       if(e.status===401){
@@ -273,58 +277,72 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
       '<h3 class="section-title">Verification claims</h3><div class="stack">'+(claimCards||'<div class="empty">No claim-verification requests yet.</div>')+'</div>';
   }
   function renderConnections(){
-    var connected=shopify&&shopify.connected, meta=(shopify&&shopify.metadata)||{};
-    var shopifyStatus=connected
-      ? '<div class="success"><b>Shopify connected</b><br>'+esc(meta.storeName||meta.storeDomain||'Store')+' · '+esc((meta.primaryDomain||{}).url||meta.storeDomain||'')+'</div>'
-      : '<div class="error"><b>Shopify not connected</b><br>Luca cannot publish a live designed storefront until a dedicated venture store is authorized once.</div>';
-    var scopes='read_products, write_products, read_orders, read_publications, write_publications, read_content, write_content, read_themes, write_themes, read_files, write_files, read_online_store_pages, write_online_store_pages, read_merchant_managed_fulfillment_orders, write_merchant_managed_fulfillment_orders, read_third_party_fulfillment_orders, write_third_party_fulfillment_orders';
+    function stateBox(conn,name,okText,missingText){
+      return conn&&conn.connected
+        ? '<div class="success"><b>'+esc(name)+' connected</b><br>'+esc(okText)+'</div>'
+        : '<div class="error"><b>'+esc(name)+' not connected</b><br>'+esc(missingText)+'</div>';
+    }
 
-    var cjConnected=cj&&cj.connected, cjMeta=(cj&&cj.metadata)||{};
-    var cjStatusHtml=cjConnected
-      ? '<div class="success"><b>CJdropshipping connected</b><br>Fulfillment account '+esc(cjMeta.openId||'connected')+' · API 2.0</div>'
-      : '<div class="error"><b>CJdropshipping not connected</b><br>No venture product can publish until a supplier variant, stock, U.S. freight, and landed cost are verified.</div>';
-
-    var apifyConnected=apify&&apify.connected;
-    var apifyHtml=apifyConnected
-      ? '<div class="success"><b>Social reference capture connected</b><br>Instagram Reels can be captured from public URLs.</div>'
-      : '<div class="error"><b>Social reference capture not connected</b><br>Instagram can block ordinary fetchers. Connect Apify once so public Reels can be captured reliably.</div>';
-
-    var openaiConnected=openai&&openai.connected, openaiMeta=(openai&&openai.metadata)||{};
-    var openaiHtml=openaiConnected
-      ? '<div class="success"><b>Multimodal analyzer connected</b><br>'+esc(openaiMeta.model||'Vision model')+' · sampled Reel frames can be analyzed.</div>'
-      : '<div class="error"><b>Multimodal analyzer not connected</b><br>Link-to-Launch needs image understanding to identify products and deconstruct creative from sampled video frames.</div>';
-
-    var runwayConnected=runway&&runway.connected, runwayMeta=(runway&&runway.metadata)||{};
+    var frontMeta=(front&&front.metadata)||{};
+    var socialMeta=(social&&social.metadata)||{};
+    var emailMeta=(emailConn&&emailConn.metadata)||{};
+    var searchMeta=(searchConn&&searchConn.metadata)||{};
+    var shopMeta=(shopify&&shopify.metadata)||{};
+    var cjMeta=(cj&&cj.metadata)||{};
+    var runwayMeta=(runway&&runway.metadata)||{};
     var runwayCost=((Number(runwayMeta.estimatedDefaultCostCents||180))/100).toFixed(2);
-    var runwayHtml=runwayConnected
-      ? '<div class="success"><b>Runway renderer connected</b><br>'+esc(runwayMeta.model||'Video model')+' · default package '+esc(runwayMeta.defaultClipCount||3)+' clips / estimated $'+esc(runwayCost)+'</div>'
-      : '<div class="error"><b>Runway renderer not connected</b><br>Maya can build scripts and storyboards, but cannot generate final original video assets.</div>';
 
-    return '<div class="hero"><h2>Connections</h2><p>Authorize external tools once. Employees can then use them through audited backend adapters without exposing credentials to the browser again.</p></div>'+
-      '<div class="grid two"><div class="card"><h3>Social reference capture</h3>'+apifyHtml+
-      (apifyConnected
-        ? '<button id="disconnectApify" class="danger">Disconnect capture</button>'
-        : '<form id="apifyConnectForm" class="form"><input id="apifyToken" type="password" placeholder="Apify API token" autocomplete="new-password"/><button class="action">Connect Reel capture</button></form><p class="muted">Used for public Instagram reference capture. Token stays encrypted server-side.</p>')+
-      '</div><div class="card"><h3>Multimodal reference analysis</h3>'+openaiHtml+
-      (openaiConnected
-        ? '<button id="disconnectOpenAI" class="danger">Disconnect analyzer</button>'
-        : '<form id="openaiConnectForm" class="form"><input id="openaiApiKey" type="password" placeholder="OpenAI API key" autocomplete="new-password"/><button class="action">Connect visual analyzer</button></form><p class="muted">Employee OS samples frames and sends only the required reference context for product and creative analysis.</p>')+
+    var frontHtml=stateBox(front,'Front Intelligence',frontMeta.baseUrl||'Social + commerce intelligence gateway','Rowan can still use public research, but Front signal enrichment and source intelligence are degraded.');
+    var socialHtml=stateBox(social,'Social publishing',(socialMeta.connectedPlatforms||[]).join(', ')||'Ayrshare connected','Nova cannot publish approved TikTok/Instagram/X content yet.');
+    var emailHtml=stateBox(emailConn,'Customer email',emailMeta.fromEmail||'Resend connected','Ellis can draft replies but cannot send approved customer email yet.');
+    var searchHtml=stateBox(searchConn,'Tool Scout search','Jina Search connected','Employees can use the known tool registry, but cannot autonomously discover new verification tools on the web.');
+    var shopifyHtml=stateBox(shopify,'Shopify',shopMeta.storeName||shopMeta.storeDomain||'Store connected','Luca cannot publish the live storefront until a dedicated venture store is authorized.');
+    var cjHtml=stateBox(cj,'CJdropshipping',cjMeta.openId||'Fulfillment account connected','No product can publish until stock, U.S. freight, and landed cost are verified.');
+    var runwayHtml=stateBox(runway,'Runway',String(runwayMeta.model||'Video model')+' · default package '+String(runwayMeta.defaultClipCount||3)+' clips / est. $'+runwayCost,'Maya can storyboard, but cannot generate final original videos.');
+
+    return '<div class="hero"><h2>Connections</h2><p>One operating panel for the entire company stack. Core business tools are first-class; source-capture providers are implementation details behind Front whenever possible.</p></div>'+
+      '<h3 class="section-title">Intelligence & verification</h3>'+
+      '<div class="grid two"><div class="card"><h3>Front Intelligence</h3>'+frontHtml+
+      (front&&front.connected
+        ? '<button id="disconnectFront" class="danger">Disconnect Front</button>'
+        : '<form id="frontConnectForm" class="form"><input id="frontUrl" placeholder="https://your-front-domain.com"/><input id="frontKey" type="password" placeholder="Front commerce API key" autocomplete="new-password"/><button class="action">Connect Front</button></form><p class="muted">Primary social/commerce intelligence gateway. Employee OS calls Front; Front may internally use browser/API/fallback capture methods.</p>')+
+      '</div><div class="card"><h3>Tool Scout web search</h3>'+searchHtml+
+      (searchConn&&searchConn.connected
+        ? '<button id="disconnectSearch" class="danger">Disconnect search</button>'
+        : '<form id="searchConnectForm" class="form"><input id="searchKey" type="password" placeholder="Jina Search API key" autocomplete="new-password"/><button class="action">Connect Tool Scout search</button></form><p class="muted">Used to discover verification tools and primary documentation when employees do not know the right instrument.</p>')+
       '</div></div>'+
-      '<div class="grid two" style="margin-top:10px"><div class="card"><h3>Runway video rendering</h3>'+runwayHtml+
-      (runwayConnected
+      '<h3 class="section-title">Commerce & fulfillment</h3>'+
+      '<div class="grid two"><div class="card"><h3>Shopify</h3>'+shopifyHtml+
+      (shopify&&shopify.connected
+        ? '<button id="disconnectShopify" class="danger">Disconnect Shopify</button>'
+        : '<form id="shopifyConnectForm" class="form"><input id="shopifyDomain" placeholder="venture-store.myshopify.com"/><input id="shopifyToken" type="password" placeholder="Admin API access token" autocomplete="new-password"/><button class="action">Connect Shopify</button></form>')+
+      '</div><div class="card"><h3>CJdropshipping</h3>'+cjHtml+
+      (cj&&cj.connected
+        ? '<button id="disconnectCJ" class="danger">Disconnect CJ</button>'
+        : '<form id="cjConnectForm" class="form"><input id="cjApiKey" type="password" placeholder="CJ API key" autocomplete="new-password"/><button class="action">Connect CJ</button></form>')+
+      '</div></div>'+
+      '<h3 class="section-title">Creative & distribution</h3>'+
+      '<div class="grid two"><div class="card"><h3>Runway</h3>'+runwayHtml+
+      (runway&&runway.connected
         ? '<button id="disconnectRunway" class="danger">Disconnect Runway</button>'
-        : '<form id="runwayConnectForm" class="form"><input id="runwayApiSecret" type="password" placeholder="Runway Dev API secret" autocomplete="new-password"/><input id="runwayModel" value="gen4.5" placeholder="Model"/><button class="action">Connect Runway renderer</button></form><p class="muted">Rendering remains approval-gated because it can create provider cost. Finished clips are copied into Shopify Files so temporary Runway URLs are never treated as durable assets.</p>')+
-      '</div><div class="card"><h3>Creative execution rule</h3><p>Maya is only DONE after approved clips are rendered, Shopify-hosted assets are READY, and Nova receives durable URLs. Scripts alone are not completion.</p></div></div>'+
-      '<div class="grid two" style="margin-top:10px"><div class="card"><h3>Shopify execution</h3>'+shopifyStatus+
-      (connected
-        ? '<p>API version: '+esc(meta.apiVersion||'2026-07')+' · Online Store: '+esc(meta.publicationTitle||'Online Store')+'</p><button id="disconnectShopify" class="danger">Disconnect Shopify</button>'
-        : '<form id="shopifyConnectForm" class="form"><input id="shopifyDomain" placeholder="venture-store.myshopify.com" autocomplete="off"/><input id="shopifyToken" type="password" placeholder="Admin API access token" autocomplete="new-password"/><button class="action">Connect dedicated venture store</button></form><p class="muted">Required custom-app scopes: '+esc(scopes)+'. The token is encrypted server-side and never returned by this API.</p>')+
-      '</div><div class="card"><h3>CJdropshipping fulfillment</h3>'+cjStatusHtml+
-      (cjConnected
-        ? '<p>Access tokens stay backend-only and are refreshed automatically before expiry.</p><button id="disconnectCJ" class="danger">Disconnect CJ</button>'
-        : '<form id="cjConnectForm" class="form"><input id="cjApiKey" type="password" placeholder="CJ API key" autocomplete="new-password"/><button class="action">Connect CJdropshipping</button></form><p class="muted">Employee OS exchanges the API key for backend-only CJ access and refresh tokens.</p>')+
+        : '<form id="runwayConnectForm" class="form"><input id="runwayApiSecret" type="password" placeholder="Runway Dev API secret" autocomplete="new-password"/><input id="runwayModel" value="gen4.5" placeholder="Model"/><button class="action">Connect Runway</button></form>')+
+      '</div><div class="card"><h3>TikTok / Instagram / X publishing</h3>'+socialHtml+
+      (social&&social.connected
+        ? '<button id="disconnectSocial" class="danger">Disconnect social publisher</button>'
+        : '<form id="socialConnectForm" class="form"><input id="socialKey" type="password" placeholder="Ayrshare API key" autocomplete="new-password"/><button class="action">Connect social publishing</button></form><p class="muted">Ayrshare provides the publishing layer; your social accounts are linked through its authorized account flow.</p>')+
       '</div></div>'+
-      '<div class="card" style="margin-top:10px"><h3>Finish-line rule</h3><p>Link-to-Launch is DONE only after source provenance, product identity, verified supplier mapping, stock, freight, landed cost, designed Shopify theme, product publication, reachable URL, creative package, and fulfillment path are all persisted.</p></div>';
+      '<h3 class="section-title">Customer operations</h3>'+
+      '<div class="grid two"><div class="card"><h3>Email support</h3>'+emailHtml+
+      (emailConn&&emailConn.connected
+        ? '<button id="disconnectEmail" class="danger">Disconnect email</button>'
+        : '<form id="emailConnectForm" class="form"><input id="emailKey" type="password" placeholder="Resend API key" autocomplete="new-password"/><input id="emailFrom" type="email" placeholder="support@yourdomain.com"/><button class="action">Connect support email</button></form><p class="muted">Requires a verified Resend sending domain.</p>')+
+      '</div><div class="card"><h3>Connection policy</h3><p>Employees may research and prepare work without external access. Spending, publishing, customer contact, and other side effects remain approval-gated. Credentials are encrypted server-side and never returned to the browser.</p></div></div>'+
+      '<details style="margin-top:14px"><summary class="secondary">Advanced source fallbacks</summary><div class="grid two" style="margin-top:10px">'+
+      '<div class="card"><h3>Apify fallback</h3>'+stateBox(apify,'Apify capture','Instagram fallback available','Optional fallback only. Front remains the primary intelligence layer.')+
+      (apify&&apify.connected?'<button id="disconnectApify" class="danger">Disconnect Apify</button>':'<form id="apifyConnectForm" class="form"><input id="apifyToken" type="password" placeholder="Apify token"/><button class="secondary">Connect fallback</button></form>')+'</div>'+
+      '<div class="card"><h3>OpenAI visual analyzer</h3>'+stateBox(openai,'Visual analyzer',((openai&&openai.metadata)||{}).model||'Connected','Optional multimodal analysis runtime for sampled source frames.')+
+      (openai&&openai.connected?'<button id="disconnectOpenAI" class="danger">Disconnect analyzer</button>':'<form id="openaiConnectForm" class="form"><input id="openaiApiKey" type="password" placeholder="OpenAI API key"/><button class="secondary">Connect analyzer</button></form>')+'</div>'+
+      '</div></details>';
   }
   function renderActivity(){return '<div class="stack">'+((state.events||[]).map(function(e){return '<div class="item"><div class="row"><b>'+esc(e.type)+'</b><span class="muted">'+esc(fmt(e.created_at))+'</span></div><p>'+esc(JSON.stringify(e.payload))+'</p></div>';}).join('')||'<div class="empty">No events yet.</div>')+'</div>';}
 
@@ -379,6 +397,38 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
       var result=await request('/api/company/'+companyId+'/academy/skills/'+b.dataset.id+'/test',{method:'POST'});
       notice('Skill test: '+result.status+(result.missingTools&&result.missingTools.length?' · missing '+result.missingTools.join(', '):''));await load();
     }catch(err){notice(err.message,'error');}};});
+    var frontForm=document.getElementById('frontConnectForm');
+    if(frontForm)frontForm.onsubmit=async function(e){e.preventDefault();try{
+      await request('/api/company/'+companyId+'/integrations/front/connect',{method:'POST',body:JSON.stringify({baseUrl:document.getElementById('frontUrl').value,apiKey:document.getElementById('frontKey').value})});
+      notice('Front Intelligence connected.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var disconnectFront=document.getElementById('disconnectFront');
+    if(disconnectFront)disconnectFront.onclick=async function(){try{await request('/api/company/'+companyId+'/integrations/front',{method:'DELETE'});notice('Front disconnected.');await load();}catch(err){notice(err.message,'error');}};
+
+    var searchForm=document.getElementById('searchConnectForm');
+    if(searchForm)searchForm.onsubmit=async function(e){e.preventDefault();try{
+      await request('/api/company/'+companyId+'/integrations/search/connect',{method:'POST',body:JSON.stringify({apiKey:document.getElementById('searchKey').value})});
+      notice('Tool Scout search connected.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var disconnectSearch=document.getElementById('disconnectSearch');
+    if(disconnectSearch)disconnectSearch.onclick=async function(){try{await request('/api/company/'+companyId+'/integrations/search',{method:'DELETE'});notice('Search disconnected.');await load();}catch(err){notice(err.message,'error');}};
+
+    var socialForm=document.getElementById('socialConnectForm');
+    if(socialForm)socialForm.onsubmit=async function(e){e.preventDefault();try{
+      await request('/api/company/'+companyId+'/integrations/social/connect',{method:'POST',body:JSON.stringify({apiKey:document.getElementById('socialKey').value})});
+      notice('Social publishing connected.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var disconnectSocial=document.getElementById('disconnectSocial');
+    if(disconnectSocial)disconnectSocial.onclick=async function(){try{await request('/api/company/'+companyId+'/integrations/social',{method:'DELETE'});notice('Social publisher disconnected.');await load();}catch(err){notice(err.message,'error');}};
+
+    var emailForm=document.getElementById('emailConnectForm');
+    if(emailForm)emailForm.onsubmit=async function(e){e.preventDefault();try{
+      await request('/api/company/'+companyId+'/integrations/email/connect',{method:'POST',body:JSON.stringify({apiKey:document.getElementById('emailKey').value,fromEmail:document.getElementById('emailFrom').value})});
+      notice('Customer email connected.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var disconnectEmail=document.getElementById('disconnectEmail');
+    if(disconnectEmail)disconnectEmail.onclick=async function(){try{await request('/api/company/'+companyId+'/integrations/email',{method:'DELETE'});notice('Email disconnected.');await load();}catch(err){notice(err.message,'error');}};
+
     var shopifyForm=document.getElementById('shopifyConnectForm');
     if(shopifyForm)shopifyForm.onsubmit=async function(e){e.preventDefault();try{
       notice('Validating store, scopes, and Online Store publication…');
