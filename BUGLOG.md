@@ -1,5 +1,21 @@
 # Front Bug / Fix Log
 
+## 2026-09-29 — Employee OS repeated blocked work flooded Today/Work
+
+### Root cause
+Employee OS persisted every work order correctly, but Today and Work rendered durable history as a flat list. When the same Hoodie objective had been run more than once, identical blocked stages from separate historical runs looked like duplicate current emergencies. In addition, Ava's store→creative and creative→distribution handoffs used a read-then-insert pattern without a transaction-scoped stage lock. Multiple manager workers consuming duplicate result messages concurrently could therefore race between the existence check and insert.
+
+### Permanent fix
+- Collapse identical work-order blockers in Today and Work by objective, assignee, status, and blocker payload while preserving the underlying durable records for audit/history.
+- Show a `runs collapsed` count instead of repeating indistinguishable cards.
+- Resolve each external-auth blocker to its required provider and expose a direct Connections action.
+- Add PostgreSQL transaction-scoped advisory locks for creative-production and distribution-planning handoffs, keyed by company + project + stage.
+- Make creative/distribution job insertion idempotent with the existing `(company_id, idempotency_key)` uniqueness constraint and conflict-safe insertion.
+- Never delete or rewrite distinct support cases or historical venture runs merely to make the UI cleaner.
+
+### Regression / release gate
+`employee-os/tests/manager-handoff-dedupe.mjs` processes duplicate Ava handoff messages concurrently and requires exactly one Maya work order/job/assignment and exactly one Nova work order/job/assignment. The normal Employee OS build, browser/auth QA, Connections QA, commerce lifecycle, Link-to-Launch lifecycle, and external-action sandbox must also pass.
+
 ## 2026-09-21 — Dashboard view counter was missing
 
 ### Root cause
