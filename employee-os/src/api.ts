@@ -319,5 +319,8 @@ app.post('/api/company/:companyId/approvals/:approvalId/:decision',async(req,rep
   });
   return result;
 });
-app.setErrorHandler((e,_req,reply)=>reply.code(e.statusCode||400).send({error:e.message||'Request failed'}));
+app.setErrorHandler((e,_req,reply)=>{
+  const err=e as {statusCode?:number;message?:string};
+  return reply.code(err.statusCode||400).send({error:err.message||'Request failed'});
+});
 const port=Number(process.env.PORT||3000); await app.listen({host:'0.0.0.0',port});
