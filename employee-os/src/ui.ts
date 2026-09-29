@@ -215,8 +215,8 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
       var blocked=/^BLOCKED_/.test(String(l.status||''))||/^BLOCKED_/.test(String(source.status||''));
       var guidance='';
       if(blocked){
-        var missing=String(source.provider||'')==='INSTAGRAM'&&!(apify&&apify.connected)
-          ? 'Connect Social reference capture in Connections, then retry this same Reel.'
+        var missing=String(source.provider||'')==='INSTAGRAM'&&!(front&&front.connected)
+          ? 'Connect Front Intelligence in Connections, then retry this same Reel. Front is the primary social-intelligence gateway; advanced capture fallback is optional.'
           : String(source.status||'')==='BLOCKED_ANALYSIS'&&!(openai&&openai.connected)
             ? 'Connect Multimodal reference analysis in Connections, then retry.'
             : 'The source is recoverable. Retry after the missing connection is available.';
@@ -225,7 +225,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
       return '<div class="item"><div class="row"><b>'+esc(product)+'</b>'+badge(l.status)+'</div><p>'+esc(source.source_url||'')+'</p><span class="muted">Source: '+esc(source.provider||'')+' · confidence '+esc(l.identified_product_confidence||'pending')+(l.product_url?' · '+esc(l.product_url):'')+'</span>'+guidance+'</div>';
     }).join('');
     var blockers=[];
-    if(!(apify&&apify.connected))blockers.push('Apify/social capture');
+    if(!(front&&front.connected))blockers.push('Front Intelligence');
     if(!(openai&&openai.connected))blockers.push('multimodal analyzer');
     var status=blockers.length?'<div class="error">Connect '+esc(blockers.join(' + '))+' in Connections before a blocked Instagram source can be visually analyzed.</div>':'<div class="success">Social capture and multimodal analysis are connected.</div>';
     return '<div class="hero"><h2>Link-to-Launch</h2><p>Paste one social-commerce reference. Rowan identifies and sources the product; Luca builds the storefront; Maya models the creative structure into original variants; Nova plans distribution; Ellis owns customer operations.</p></div>'+
