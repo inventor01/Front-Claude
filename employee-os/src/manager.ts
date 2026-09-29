@@ -51,7 +51,7 @@ export async function processOneManagerMessage(){
             JSON.stringify({storePackageId:store.id,candidateId:store.candidate_id,candidate:store.candidate_name}),
             `creative-production:${store.id}`
           ]);
-          const steps=['CREATIVE_STRATEGY','HOOK_LIBRARY','SCRIPT_PACK','STORYBOARDS','CREATIVE_QA','RENDER_HANDOFF'];
+          const steps=['CREATIVE_STRATEGY','HOOK_LIBRARY','SCRIPT_PACK','STORYBOARDS','CREATIVE_QA','RENDER_HANDOFF','RENDER_EXECUTE'];
           for(let i=0;i<steps.length;i++){
             await c.query(`INSERT INTO job_steps(company_id,job_id,sequence,step_type,input)
               VALUES($1,$2,$3,$4,$5) ON CONFLICT(job_id,sequence) DO NOTHING`,[
