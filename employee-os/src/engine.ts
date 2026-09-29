@@ -194,7 +194,7 @@ async function executeStep(job:JobRow,step:any){
       await pool.query(`UPDATE projects SET phase='RESEARCH_ITERATION',updated_at=now() WHERE id=$1`,[job.project_id]);
       await emitEvent(job.company_id,'PRODUCT_CANDIDATE_NOT_READY',{jobId:job.id,candidateId:candidate.id,status:scored.status,score:scored.score});
     }
-    return {output:{status:scored.status,candidateId:candidate.id,candidate:discovery.candidate,...scored},evidenceRefs};
+    return {output:{candidateId:candidate.id,candidate:discovery.candidate,...scored},evidenceRefs};
   }
 
   return {output:{status:'BLOCKED_ADAPTER',stepType:step.step_type},evidenceRefs:[]};
