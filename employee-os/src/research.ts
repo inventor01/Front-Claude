@@ -202,7 +202,7 @@ export function scoreCandidate(input:{
   const score=Math.round(Math.max(0,Math.min(100,input.demand.demandScore*.35+supplierScore+marginScore+input.content.contentabilityScore*.25-input.risk.riskPenalty)));
   const evidenceCount=input.demand.evidence.length+input.supplier.evidence.length;
   const economicsKnown=input.economics.observedGrossMarginPct!==null;
-  const confidence:evidenceCount>=3&&economicsKnown?'HIGH':'MEDIUM'|'LOW'=evidenceCount>=3&&economicsKnown?'HIGH':evidenceCount>=2?'MEDIUM':'LOW';
+  const confidence:'HIGH'|'MEDIUM'|'LOW'=evidenceCount>=3&&economicsKnown?'HIGH':evidenceCount>=2?'MEDIUM':'LOW';
   let status:'INVESTIGATING'|'VERIFIED_CANDIDATE'|'LAUNCH_REVIEW'|'REJECTED'='INVESTIGATING';
   if(input.risk.highRisk)status='REJECTED';
   else if(input.demand.marketplaceSeen&&input.supplier.supplierSeen&&evidenceCount>=2&&score>=70&&input.content.canSupport50Pieces)status='LAUNCH_REVIEW';
