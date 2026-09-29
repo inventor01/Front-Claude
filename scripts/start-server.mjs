@@ -63,6 +63,8 @@ const workerVariableNames = [
   "FRONT_STANDALONE_USER_ID",
   "FRONT_STANDALONE_USER_EMAIL",
   "FRONT_STANDALONE_USER_NAME",
+  "FRONT_COMMERCE_API_KEY",
+  "FRONT_COMMERCE_OWNER_ID",
 ];
 const forwardedWorkerVariableNames = [];
 for (const name of workerVariableNames) {
