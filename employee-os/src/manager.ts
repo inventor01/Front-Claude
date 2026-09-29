@@ -3,7 +3,7 @@ import { tx } from './db.js';
 type ManagerMessageRow={
   id:string;company_id:string;project_id:string|null;work_order_id:string|null;type:string;
   from_employee_slug:string;to_employee_slug:string;objective:string;required_output:string|null;
-  evidence_refs:any;authority_context:any;payload:any;created_at:string;consumed_at:string|null;
+  evidence_refs:unknown[];authority_context:Record<string,unknown>;payload:Record<string,unknown>;created_at:string;consumed_at:string|null;
 };
 
 export async function processOneManagerMessage(){
