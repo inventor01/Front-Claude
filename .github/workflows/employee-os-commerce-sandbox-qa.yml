@@ -51,6 +51,10 @@ jobs:
         working-directory: employee-os
         run: node dist/migrate.js
 
+      - name: Verify manager handoff idempotency under concurrency
+        working-directory: employee-os
+        run: node tests/manager-handoff-dedupe.mjs
+
       - name: Run isolated commerce lifecycle
         working-directory: employee-os
         run: node tests/commerce-sandbox.mjs
