@@ -71,7 +71,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
 (function(){
   var token=localStorage.getItem('employee_os_token')||'';
   var companyId=localStorage.getItem('employee_os_company')||'';
-  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null;
+  var mode='register', view='today', state=null, briefing=null, execution=null, memories=null, academy=null, shopify=null, cj=null;
 
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
   function badge(v){var x=String(v||'');var cls=/DONE|SUCCEEDED|APPROVED|READY_FOR/.test(x)?'good':/BLOCK|FAILED|REJECT/.test(x)?'bad':'warn';return '<span class="badge '+cls+'">'+esc(x)+'</span>';}
@@ -97,9 +97,10 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
         request('/api/company/'+companyId+'/execution'),
         request('/api/company/'+companyId+'/memories'),
         request('/api/company/'+companyId+'/academy'),
-        request('/api/company/'+companyId+'/integrations/shopify')
+        request('/api/company/'+companyId+'/integrations/shopify'),
+        request('/api/company/'+companyId+'/integrations/cj')
       ]);
-      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];
+      state=all[0];briefing=all[1];execution=all[2];memories=all[3];academy=all[4];shopify=all[5];cj=all[6];
       document.getElementById('auth').classList.add('hidden');document.getElementById('app').classList.remove('hidden');render();
     }catch(e){if(e.status===401){localStorage.clear();token='';companyId='';showAuth();}else notice(e.message,'error');}
   }
@@ -204,13 +205,19 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
   }
   function renderConnections(){
     var connected=shopify&&shopify.connected, meta=(shopify&&shopify.metadata)||{};
-    var status=connected?'<div class="success"><b>Shopify connected</b><br>'+esc(meta.storeName||meta.storeDomain||'Store')+' · '+esc((meta.primaryDomain||{}).url||meta.storeDomain||'')+'</div>':'<div class="error"><b>Shopify not connected</b><br>Luca can build the internal store package, but cannot create a live storefront until a dedicated venture store is authorized once.</div>';
+    var shopifyStatus=connected?'<div class="success"><b>Shopify connected</b><br>'+esc(meta.storeName||meta.storeDomain||'Store')+' · '+esc((meta.primaryDomain||{}).url||meta.storeDomain||'')+'</div>':'<div class="error"><b>Shopify not connected</b><br>Luca can build the internal store package, but cannot create a live storefront until a dedicated venture store is authorized once.</div>';
     var scopes='read_products, write_products, read_publications, write_publications, read_content, write_content, read_online_store_pages, write_online_store_pages';
+    var cjConnected=cj&&cj.connected, cjMeta=(cj&&cj.metadata)||{};
+    var cjStatusHtml=cjConnected?'<div class="success"><b>CJdropshipping connected</b><br>Fulfillment account '+esc(cjMeta.openId||'connected')+' · API 2.0</div>':'<div class="error"><b>CJdropshipping not connected</b><br>No venture product can publish until a supplier variant, stock, U.S. freight, and landed cost are verified.</div>';
     return '<div class="hero"><h2>Connections</h2><p>Authorize external tools once. Employees can then use them through audited backend adapters without exposing credentials to the browser again.</p></div>'+
-      '<div class="grid two"><div class="card"><h3>Shopify execution</h3>'+status+
+      '<div class="grid two"><div class="card"><h3>Shopify execution</h3>'+shopifyStatus+
       (connected?'<p>API version: '+esc(meta.apiVersion||'2026-07')+' · Online Store: '+esc(meta.publicationTitle||'Online Store')+'</p><button id="disconnectShopify" class="danger">Disconnect Shopify</button>':
       '<form id="shopifyConnectForm" class="form"><input id="shopifyDomain" placeholder="venture-store.myshopify.com" autocomplete="off"/><input id="shopifyToken" type="password" placeholder="Admin API access token" autocomplete="new-password"/><button class="action">Connect dedicated venture store</button></form><p class="muted">Required custom-app scopes: '+esc(scopes)+'. The token is encrypted server-side with AES-256-GCM and is never returned by this API.</p>')+
-      '</div><div class="card"><h3>Finish-line rule</h3><p>A store is not DONE because a brief exists. DONE requires Shopify execution, Online Store publication, and a reachable product URL persisted in the project.</p></div></div>';
+      '</div><div class="card"><h3>CJdropshipping fulfillment</h3>'+cjStatusHtml+
+      (cjConnected?'<p>Access tokens stay backend-only and are refreshed automatically before expiry.</p><button id="disconnectCJ" class="danger">Disconnect CJ</button>':
+      '<form id="cjConnectForm" class="form"><input id="cjApiKey" type="password" placeholder="CJ API key" autocomplete="new-password"/><button class="action">Connect CJdropshipping</button></form><p class="muted">Get the API key from your CJ account API authorization page. Employee OS exchanges it for backend-only CJ access/refresh tokens.</p>')+
+      '</div></div>'+
+      '<div class="card" style="margin-top:10px"><h3>Finish-line rule</h3><p>A store is not DONE because a brief exists. DONE requires a verified supplier mapping with stock + U.S. freight + landed cost, Shopify execution, Online Store publication, and a reachable product URL persisted in the project.</p></div>';
   }
   function renderActivity(){return '<div class="stack">'+((state.events||[]).map(function(e){return '<div class="item"><div class="row"><b>'+esc(e.type)+'</b><span class="muted">'+esc(fmt(e.created_at))+'</span></div><p>'+esc(JSON.stringify(e.payload))+'</p></div>';}).join('')||'<div class="empty">No events yet.</div>')+'</div>';}
 
@@ -259,6 +266,16 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var disconnect=document.getElementById('disconnectShopify');
     if(disconnect)disconnect.onclick=async function(){try{
       await request('/api/company/'+companyId+'/integrations/shopify',{method:'DELETE'});notice('Shopify disconnected.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var cjForm=document.getElementById('cjConnectForm');
+    if(cjForm)cjForm.onsubmit=async function(e){e.preventDefault();try{
+      notice('Authenticating with CJ and securing backend tokens…');
+      await request('/api/company/'+companyId+'/integrations/cj/connect',{method:'POST',body:JSON.stringify({apiKey:document.getElementById('cjApiKey').value})});
+      document.getElementById('cjApiKey').value='';notice('CJdropshipping connected. Supplier mapping can now run automatically.');await load();
+    }catch(err){notice(err.message,'error');}};
+    var disconnectCJ=document.getElementById('disconnectCJ');
+    if(disconnectCJ)disconnectCJ.onclick=async function(){try{
+      await request('/api/company/'+companyId+'/integrations/cj',{method:'DELETE'});notice('CJdropshipping disconnected.');await load();
     }catch(err){notice(err.message,'error');}};
   }
   load();
