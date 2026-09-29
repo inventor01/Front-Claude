@@ -1,5 +1,6 @@
 import { pool } from './db.js';
 import { readCredential,storeCredential,deleteCredential } from './credentials.js';
+import { mapCandidateToCJ,requireVerifiedCJMapping } from './cj-executor.js';
 
 const API_VERSION='2026-07';
 
@@ -179,7 +180,27 @@ export async function executeStorePackage(input:{
   if(!pkgR.rowCount||!candidateR.rowCount)throw new Error('Store package or candidate missing for Shopify execution.');
   const pkg=pkgR.rows[0],candidate=candidateR.rows[0];
   if(pkg.qa_result?.passed!==true)throw new Error('Store package must pass internal QA before Shopify execution.');
-  const price=safePrice(candidate);
+
+  let mapping;
+  try{
+    mapping=await requireVerifiedCJMapping(input.companyId,input.candidateId);
+  }catch(error){
+    const message=error instanceof Error?error.message:'CJ supplier mapping missing';
+    if(!message.startsWith('BLOCKED_FULFILLMENT:'))throw error;
+    const mapped=await mapCandidateToCJ(input.companyId,input.candidateId);
+    if(mapped.status==='NEEDS_REVIEW'){
+      throw new Error(`BLOCKED_SUPPLIER_MAPPING_REVIEW: CJ returned multiple plausible supplier matches. Review is required before publication.`);
+    }
+    mapping=await requireVerifiedCJMapping(input.companyId,input.candidateId);
+  }
+
+  const landedCost=Number(mapping.landed_cost_estimate||0);
+  const marketPrice=Number(candidate.observed_market_price||0);
+  if(!(landedCost>0&&marketPrice>landedCost)){
+    throw new Error('BLOCKED_UNVERIFIED_ECONOMICS: Verified landed cost must be below observed market price before publication.');
+  }
+  const price=safePrice({...candidate,observed_source_price:Number(mapping.source_price||candidate.observed_source_price),
+    observed_gross_margin_pct:((marketPrice-landedCost)/marketPrice)*100});
   const handle=slugify(String(candidate.name));
   const title=String(candidate.name).replace(/\b\w/g,(m)=>m.toUpperCase()).slice(0,255);
   const description=descriptionHtml(candidate,pkg);
@@ -248,6 +269,17 @@ export async function executeStorePackage(input:{
     storefrontReachable,
     faqPage:faq,
     shippingPage:shipping,
+    supplier:{
+      provider:'CJ',
+      mappingId:String(mapping.id),
+      supplierProductId:String(mapping.supplier_product_id),
+      supplierVariantId:String(mapping.supplier_variant_id),
+      supplierSku:String(mapping.supplier_sku||''),
+      sourcePrice:Number(mapping.source_price),
+      freightCostEstimate:Number(mapping.freight_cost_estimate),
+      landedCostEstimate:Number(mapping.landed_cost_estimate),
+      stockState:String(mapping.stock_state)
+    },
     executedAt:new Date().toISOString()
   };
   await pool.query(`UPDATE store_packages SET status=$2,external_state=$3,updated_at=now() WHERE id=$1`,[
