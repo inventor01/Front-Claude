@@ -225,7 +225,7 @@ jobs:
           echo "Module 6 Command Center and Customer Ops QA"
           ROOT_HTML="$(curl -fsS "$BASE/")"
           grep -q "AI Employee OS" <<<"$ROOT_HTML"
-          grep -q "Give Ava an objective" <<<"$ROOT_HTML"
+          grep -q "Launch from a reference link" <<<"$ROOT_HTML"
           grep -q "Customer Ops" <<<"$ROOT_HTML"
 
           SUPPORT1="$(curl -fsS -X POST "$BASE/api/company/$COMPANY/support/cases"             "${auth[@]}" -H "content-type: application/json"             -d '{"channel":"EMAIL","customerRef":"qa-customer-1@example.test","subject":"Does this work with my setup?","message":"Does this work with my car setup and what size does it fit?"}')"
