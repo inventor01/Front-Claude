@@ -147,12 +147,16 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     const refAnalysis=(ref.rows[0]?.analysis&&typeof ref.rows[0].analysis==='object')?ref.rows[0].analysis as any:null;
     const referenceVisual=Array.isArray(refAnalysis?.creative?.visualStyle)?refAnalysis.creative.visualStyle:[];
     const audienceSignals=Array.isArray(refAnalysis?.audience?.signals)?refAnalysis.audience.signals:[];
+    const referencePalette=Array.isArray(refAnalysis?.creative?.palette)?refAnalysis.creative.palette:[];
     const brandDirection={
       namingStatus:'UNVERIFIED_TRADEMARK',
       workingNameOptions:[`${root}Lab`,`${root}Haus`,`${root}Co`],
       positioning:`A focused direct-to-consumer brand built around the clearest use-case for ${candidate.name}.`,
       audience:audienceSignals.length?audienceSignals.join(' · '):'People actively searching for the problem/use-case demonstrated by the approved product candidate.',
       visualDirection:[...referenceVisual,'clean product-first composition','strong contrast','mobile-first typography','social-native demonstration imagery'].filter((x,i,a)=>x&&a.indexOf(x)===i).slice(0,10),
+      palette:referencePalette,
+      typographyMood:String(refAnalysis?.creative?.typographyMood||'bold modern sans-serif'),
+      layoutMood:String(refAnalysis?.creative?.layoutMood||'mobile-first product demonstration'),
       referenceSourceUrl:ref.rows[0]?.source_url||null,
       guardrails:['No unsupported performance claims','No fake reviews','No unverified shipping promises','Final brand name requires trademark/domain review']
     };
