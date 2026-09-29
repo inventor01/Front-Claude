@@ -37,3 +37,13 @@ test('commerce API keeps a bounded recent intelligence window',()=>{
   assert.match(route,/LIMIT 4000/);
   assert.match(route,/Math\.min\(50/);
 });
+
+
+test('commerce service integration requires a server-side key and fixed evidence owner',()=>{
+  assert.match(route,/x-front-commerce-key/);
+  assert.match(route,/FRONT_COMMERCE_API_KEY/);
+  assert.match(route,/FRONT_COMMERCE_OWNER_ID/);
+  assert.match(route,/serviceAuthorized/);
+  assert.match(route,/authMode:interactiveUser\?'user':'service'/);
+  assert.doesNotMatch(route,/ownerId=params/);
+});
