@@ -260,7 +260,7 @@ export async function syncCJFulfillmentOnce(){
       const previousTracking=String(row.tracking_number||'');
       await pool.query(`UPDATE fulfillment_orders SET
         status=CASE WHEN status IN ('NEEDS_PAYMENT_APPROVAL','PAYMENT_APPROVED') THEN status ELSE $2 END,
-        amount=CASE WHEN $3>0 THEN $3 ELSE amount END,
+        amount=CASE WHEN $3::numeric>0 THEN $3::numeric ELSE amount END,
         tracking_number=NULLIF($4,''),tracking_url=NULLIF($5,''),raw_state=$6,updated_at=now()
         WHERE id=$1`,[
         row.id,detail.orderStatus,detail.amount,detail.trackingNumber,detail.trackingUrl,JSON.stringify(detail.raw||{})
