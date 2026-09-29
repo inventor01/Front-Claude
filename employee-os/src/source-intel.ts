@@ -2,9 +2,12 @@ import { mkdtemp,readFile,readdir,rm,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import ffmpegPath from 'ffmpeg-static';
+import { createRequire } from 'node:module';
 import { pool } from './db.js';
 import { readCredential,storeCredential,deleteCredential } from './credentials.js';
+
+const require=createRequire(import.meta.url);
+const ffmpegPath=require('ffmpeg-static') as string|null;
 
 type ApifyCredential={token:string;actorId:string};
 type OpenAICredential={apiKey:string;model:string};
@@ -248,11 +251,11 @@ async function downloadMedia(url:string,path:string){
 async function runFfmpeg(args:string[]){
   if(!ffmpegPath)throw new Error('FFmpeg binary is unavailable.');
   await new Promise<void>((resolve,reject)=>{
-    const child=spawn(ffmpegPath,args,{stdio:['ignore','ignore','pipe']});
+    const child=spawn(ffmpegPath,args,{stdio:['ignore','ignore','pipe'] as const});
     let stderr='';
-    child.stderr.on('data',(chunk)=>{stderr+=String(chunk).slice(-3000);});
+    child.stderr.on('data',(chunk:Buffer)=>{stderr+=chunk.toString('utf8').slice(-3000);});
     child.on('error',reject);
-    child.on('close',(code)=>code===0?resolve():reject(new Error(`FFmpeg exited ${code}: ${stderr.slice(-900)}`)));
+    child.on('close',(code:number|null)=>code===0?resolve():reject(new Error(`FFmpeg exited ${code}: ${stderr.slice(-900)}`)));
   });
 }
 
