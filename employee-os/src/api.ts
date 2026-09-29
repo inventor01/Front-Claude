@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { pool,tx } from './db.js';
 import { hashPassword,verifyPassword,signSession,requireUser,requireCompany } from './auth.js';
 import { commandCenterHtml } from './ui.js';
-import { ensureAcademyDefaults,ingestTrainingSource,discoverTools,recommendVerificationTools } from './academy.js';
+import { ensureAcademyDefaults,ingestTrainingSource,discoverTools,recommendVerificationTools,getEmployeeIntelligenceContext } from './academy.js';
 
 const app=Fastify({logger:true});
 await app.register(cors,{origin:true});
@@ -93,6 +93,13 @@ app.get('/api/company/:companyId/academy',async req=>{
     pool.query('SELECT * FROM verification_claims WHERE company_id=$1 ORDER BY created_at DESC LIMIT 200',[companyId])
   ]);
   return {profiles:profiles.rows,sources:sources.rows,lessons:lessons.rows,tools:tools.rows,discoveries:discoveries.rows,claims:claims.rows};
+});
+
+app.get('/api/company/:companyId/academy/employees/:employeeSlug/context',async req=>{
+  const userId=await requireUser(req),{companyId,employeeSlug}=req.params as {companyId:string;employeeSlug:string}; await requireCompany(userId,companyId);
+  const exists=await pool.query('SELECT 1 FROM employees WHERE company_id=$1 AND slug=$2',[companyId,employeeSlug]);
+  if(!exists.rowCount)throw Object.assign(new Error('Employee not found'),{statusCode:404});
+  return getEmployeeIntelligenceContext(companyId,employeeSlug);
 });
 
 app.post('/api/company/:companyId/academy/sources',async(req,reply)=>{
