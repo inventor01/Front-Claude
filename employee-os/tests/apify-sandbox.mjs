@@ -41,7 +41,7 @@ try{
   const work=(await db.query("INSERT INTO work_orders(company_id,project_id,owner_employee_slug,assigned_employee_slug,objective,status,risk_level,success_criteria,blockers) VALUES($1,$2,'ava','rowan','Identify the reference product and verify the opportunity','BLOCKED_EXTERNAL_AUTH','LOW','[]',$3) RETURNING id",[company,project.id,JSON.stringify(['BLOCKED_EXTERNAL_AUTH'])])).rows[0];
   const job=(await db.query("INSERT INTO jobs(company_id,project_id,work_order_id,employee_slug,job_type,payload,status,idempotency_key,last_error) VALUES($1,$2,$3,'rowan','LINK_PRODUCT_RESEARCH','{}','BLOCKED',$4,'BLOCKED_EXTERNAL_AUTH: APIFY is not connected') RETURNING id",[company,project.id,work.id,`apify-qa-${Date.now()}`])).rows[0];
   await db.query("INSERT INTO job_steps(company_id,job_id,sequence,step_type,status) VALUES($1,$2,1,'SOURCE_CAPTURE','BLOCKED')",[company,job.id]);
-  await db.query("INSERT INTO reference_sources(company_id,project_id,source_url,status) VALUES($1,$2,'https://www.instagram.com/reel/qa','BLOCKED_SOURCE_ACCESS')",[company,project.id]);
+  await db.query("INSERT INTO reference_sources(company_id,project_id,source_url,provider,source_type,status) VALUES($1,$2,'https://www.instagram.com/reel/qa','INSTAGRAM','SOCIAL_VIDEO','BLOCKED_SOURCE_ACCESS')",[company,project.id]);
 
   const connected=await call(`/api/company/${company}/integrations/apify/connect`,{method:'POST',headers:auth,body:JSON.stringify({token:'apify-test-token-123456'})});
   assert.equal(connected.connected,true);
