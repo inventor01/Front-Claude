@@ -1,0 +1,71 @@
+name: Employee OS Connections QA
+
+on:
+  push:
+    branches: [front-commerce-dev]
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-connections-qa.yml'
+  pull_request:
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-connections-qa.yml'
+
+jobs:
+  connections-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify connection surface and status endpoints
+        env:
+          BASE: https://employee-os-api-production.up.railway.app
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, uuid
+          BASE=os.environ["BASE"].rstrip("/")
+
+          def call(path,method="GET",body=None,token=None,timeout=30):
+              headers={"content-type":"application/json"}
+              if token: headers["authorization"]="Bearer "+token
+              data=None if body is None else json.dumps(body).encode()
+              req=urllib.request.Request(BASE+path,data=data,headers=headers,method=method)
+              with urllib.request.urlopen(req,timeout=timeout) as r:
+                  raw=r.read().decode()
+                  return r.status,json.loads(raw or "{}")
+
+          for _ in range(45):
+              try:
+                  s,h=call("/health",timeout=10)
+                  if s==200 and h.get("ok"): break
+              except Exception: pass
+              time.sleep(2)
+          else: raise SystemExit("API never became healthy")
+
+          suffix=str(uuid.uuid4()).replace("-","")[:12]
+          _,reg=call("/api/auth/register","POST",{
+              "email":f"qa-connections-{suffix}@example.com",
+              "password":"Qa!Connections-"+suffix+"-Aa9",
+              "companyName":"Connections QA"
+          })
+          token=reg["token"]; company=reg["company"]["id"]
+
+          names=["front","search","shopify","cj","runway","social","email","apify","openai"]
+          statuses={}
+          for name in names:
+              status,body=call(f"/api/company/{company}/integrations/{name}",token=token)
+              assert status==200,(name,status,body)
+              assert "connected" in body,(name,body)
+              statuses[name]=body.get("status")
+
+          req=urllib.request.Request(BASE+"/")
+          with urllib.request.urlopen(req,timeout=20) as r:
+              html=r.read().decode()
+          for label in [
+              "Front Intelligence","Tool Scout web search","Shopify","CJdropshipping",
+              "Runway","TikTok / Instagram / X publishing","Email support","Advanced source fallbacks"
+          ]:
+              assert label in html,label
+
+          print("CONNECTIONS LIVE QA PASSED")
+          print(json.dumps(statuses,indent=2))
+          PY
