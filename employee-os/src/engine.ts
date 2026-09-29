@@ -168,6 +168,7 @@ async function executeStep(job:JobRow,step:any){
         external_state=$2,updated_at=now() WHERE id=$1`,[
         p.rows[0].id,JSON.stringify({shopify:'NOT_CONNECTED',publishAllowed:false,lastCheckedAt:new Date().toISOString()})
       ]);
+      await pool.query(`UPDATE projects SET phase='STORE_CONNECTION_REQUIRED',updated_at=now() WHERE id=$1`,[job.project_id]);
       const existing=await pool.query(`SELECT id FROM employee_messages
         WHERE company_id=$1 AND work_order_id=$2 AND type='BLOCKER'
         AND from_employee_slug='luca' AND to_employee_slug='ava' AND consumed_at IS NULL LIMIT 1`,[
