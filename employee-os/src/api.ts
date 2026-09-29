@@ -631,7 +631,7 @@ app.post('/api/company/:companyId/support/cases',async(req,reply)=>{
       JSON.stringify({supportCaseId:supportCase.rows[0].id,channel:body.channel}),
       `support-case:${supportCase.rows[0].id}`
     ]);
-    const steps=['SUPPORT_CLASSIFY','SUPPORT_DRAFT','SUPPORT_FEEDBACK','SUPPORT_SEND_HANDOFF'];
+    const steps=['SUPPORT_CLASSIFY','SUPPORT_DRAFT','SUPPORT_FEEDBACK','SUPPORT_SEND_HANDOFF','SUPPORT_SEND_EXECUTE'];
     for(let i=0;i<steps.length;i++){
       await c.query(`INSERT INTO job_steps(company_id,job_id,sequence,step_type,input)
         VALUES($1,$2,$3,$4,$5)`,[
