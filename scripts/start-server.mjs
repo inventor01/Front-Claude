@@ -5,9 +5,11 @@ import { projectRoot } from "./sites-env.mjs";
 
 const port = String(process.env.PORT || "8787");
 const host = process.env.HOST || "0.0.0.0";
-const persistDir = process.env.FRONT_PERSIST_DIR
-  ? path.resolve(process.env.FRONT_PERSIST_DIR)
-  : path.join(projectRoot, ".wrangler/state");
+const persistDir = process.env.RAILWAY_VOLUME_MOUNT_PATH
+  ? path.resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH)
+  : process.env.FRONT_PERSIST_DIR
+    ? path.resolve(process.env.FRONT_PERSIST_DIR)
+    : path.join(projectRoot, ".wrangler/state");
 mkdirSync(persistDir, { recursive: true });
 
 const migrate = spawnSync(
