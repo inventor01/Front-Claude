@@ -172,7 +172,8 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     if(view==='today')h=renderToday();
     if(view==='work')h=renderWork();
     if(view==='team')h=renderTeam();
-    if(view==='venture')h=renderVenture();\n    if(view==='link')h=renderLinkLaunch();
+    if(view==='venture')h=renderVenture();
+    if(view==='link')h=renderLinkLaunch();
     if(view==='approvals')h=renderApprovals();
     if(view==='support')h=renderSupport();
     if(view==='brain')h=renderBrain();
