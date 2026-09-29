@@ -136,6 +136,89 @@ jobs:
             [.messages[] | select(.project_id==$p and .type=="BLOCKER" and .from_employee_slug=="luca" and .to_employee_slug=="ava" and .payload.reason=="SHOPIFY_NOT_CONNECTED")] | length >= 1
           ' <<<"$EXEC3" >/dev/null
 
+          echo "Wait for Maya creative package and truthful render boundary"
+          MAYA_JOB=""
+          MAYA_WO=""
+          for i in $(seq 1 40); do
+            STATE4="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC4="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            MAYA_WO="$(jq -r --arg p "$PROJECT" '[.workOrders[] | select(.project_id==$p and .assigned_employee_slug=="maya")] | .[0].id // empty' <<<"$STATE4")"
+            MAYA_JOB="$(jq -r --arg p "$PROJECT" '[.jobs[] | select(.project_id==$p and .employee_slug=="maya" and .job_type=="CREATIVE_PRODUCTION")] | .[0].id // empty' <<<"$EXEC4")"
+            MAYA_STATUS="$(jq -r --arg j "$MAYA_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC4")"
+            if [[ -n "$MAYA_JOB" && "$MAYA_STATUS" == "BLOCKED" ]]; then break; fi
+            sleep 2
+          done
+          test -n "$MAYA_WO" && test -n "$MAYA_JOB"
+          test "$MAYA_STATUS" = "BLOCKED"
+          STATE4="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC4="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          test "$(jq -r --arg w "$MAYA_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE4")" = "BLOCKED_EXTERNAL_AUTH"
+          for STEP in CREATIVE_STRATEGY HOOK_LIBRARY SCRIPT_PACK STORYBOARDS CREATIVE_QA; do
+            test "$(jq -r --arg j "$MAYA_JOB" --arg s "$STEP" '[.steps[] | select(.job_id==$j and .step_type==$s)] | .[0].status' <<<"$EXEC4")" = "SUCCEEDED"
+          done
+          test "$(jq -r --arg j "$MAYA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="RENDER_HANDOFF")] | .[0].status' <<<"$EXEC4")" = "BLOCKED"
+
+          CREATIVE_ID="$(jq -r --arg p "$PROJECT" '[.creativePackages[] | select(.project_id==$p)] | .[0].id // empty' <<<"$STATE4")"
+          test -n "$CREATIVE_ID"
+          jq -e --arg id "$CREATIVE_ID" '
+            [.creativePackages[] | select(.id==$id)] | length == 1 and
+            .[0].status == "READY_NEEDS_RENDER_CONNECTION" and
+            .[0].qa_result.passed == true and
+            (.[0].hooks | length) >= 10 and
+            (.[0].scripts | length) >= 6 and
+            (.[0].storyboards | length) >= 6 and
+            .[0].external_state.renderer == "NOT_CONNECTED" and
+            .[0].external_state.renderedAssets == 0 and
+            .[0].external_state.publishableAssets == 0 and
+            ([.[0].scripts[].renderedAssetId] | all(. == null))
+          ' <<<"$STATE4" >/dev/null
+          test "$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="CREATIVE_RENDER")] | length' <<<"$STATE4")" = "0"
+          jq -e --arg p "$PROJECT" '
+            [.messages[] | select(.project_id==$p and .type=="BLOCKER" and .from_employee_slug=="maya" and .to_employee_slug=="ava" and .payload.reason=="CREATIVE_RENDER_NOT_CONNECTED")] | length >= 1
+          ' <<<"$EXEC4" >/dev/null
+
+          echo "Wait for Nova distribution package and truthful publishing boundary"
+          NOVA_JOB=""
+          NOVA_WO=""
+          for i in $(seq 1 40); do
+            STATE5="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC5="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            NOVA_WO="$(jq -r --arg p "$PROJECT" '[.workOrders[] | select(.project_id==$p and .assigned_employee_slug=="nova")] | .[0].id // empty' <<<"$STATE5")"
+            NOVA_JOB="$(jq -r --arg p "$PROJECT" '[.jobs[] | select(.project_id==$p and .employee_slug=="nova" and .job_type=="DISTRIBUTION_PLANNING")] | .[0].id // empty' <<<"$EXEC5")"
+            NOVA_STATUS="$(jq -r --arg j "$NOVA_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC5")"
+            if [[ -n "$NOVA_JOB" && "$NOVA_STATUS" == "BLOCKED" ]]; then break; fi
+            sleep 2
+          done
+          test -n "$NOVA_WO" && test -n "$NOVA_JOB"
+          test "$NOVA_STATUS" = "BLOCKED"
+          STATE5="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC5="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          test "$(jq -r --arg w "$NOVA_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE5")" = "BLOCKED_EXTERNAL_AUTH"
+          for STEP in CHANNEL_PLAN CONTENT_CALENDAR DISTRIBUTION_QA; do
+            test "$(jq -r --arg j "$NOVA_JOB" --arg s "$STEP" '[.steps[] | select(.job_id==$j and .step_type==$s)] | .[0].status' <<<"$EXEC5")" = "SUCCEEDED"
+          done
+          test "$(jq -r --arg j "$NOVA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="PUBLISH_HANDOFF")] | .[0].status' <<<"$EXEC5")" = "BLOCKED"
+
+          DIST_ID="$(jq -r --arg p "$PROJECT" '[.distributionPackages[] | select(.project_id==$p)] | .[0].id // empty' <<<"$STATE5")"
+          test -n "$DIST_ID"
+          jq -e --arg id "$DIST_ID" '
+            [.distributionPackages[] | select(.id==$id)] | length == 1 and
+            .[0].status == "READY_NEEDS_SOCIAL_CONNECTION" and
+            .[0].qa_result.passed == true and
+            (.[0].calendar | length) >= 10 and
+            ([.[0].calendar[].platform] | index("TikTok")) != null and
+            ([.[0].calendar[].platform] | index("Instagram Reels")) != null and
+            ([.[0].calendar[].status] | all(. == "PLANNED_NOT_PUBLISHED")) and
+            .[0].external_state.publishedCount == 0
+          ' <<<"$STATE5" >/dev/null
+          test "$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="SOCIAL_PUBLISH")] | length' <<<"$STATE5")" = "0"
+          jq -e --arg p "$PROJECT" '
+            [.messages[] | select(.project_id==$p and .type=="BLOCKER" and .from_employee_slug=="nova" and .to_employee_slug=="ava" and .payload.reason=="SOCIAL_PUBLISHING_NOT_CONNECTED")] | length >= 1
+          ' <<<"$EXEC5" >/dev/null
+
+          echo "MODULE 5 LIVE QA PASSED"
           echo "MODULE 4 LIVE QA PASSED"
           echo "MODULE 3 LIVE QA PASSED"
           jq -nc             --arg company "$COMPANY"             --arg project "$PROJECT"             --arg approval "$APPROVAL"             --arg researchJob "$RESEARCH_JOB"             --arg lucaWorkOrder "$LUCA_WO"             --arg lucaJob "$LUCA_JOB"             '{result:"PASS",company:$company,project:$project,approval:$approval,researchJob:$researchJob,lucaWorkOrder:$lucaWorkOrder,lucaJob:$lucaJob}'
