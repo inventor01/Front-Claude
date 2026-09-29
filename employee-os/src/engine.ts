@@ -6,8 +6,9 @@ import {
   type DemandResult,type SupplierResult
 } from './research.js';
 import { getEmployeeIntelligenceContext,type EmployeeIntelligenceContext } from './academy.js';
-import { executeStorePackage } from './shopify-executor.js';
+import { executeStorePackage,persistVideosToShopify } from './shopify-executor.js';
 import { captureReferenceSource,analyzeReferenceSource,type SourceAnalysis,type SocialCapture } from './source-intel.js';
+import { renderOriginalProductClips,DEFAULT_RENDER_CLIPS,DEFAULT_RENDER_DURATION,DEFAULT_RENDER_COST_CENTS } from './runway-executor.js';
 
 type JsonRecord=Record<string,unknown>;
 type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:JsonRecord;status:string;attempt_count:number;retry_count:number;max_attempts:number;lease_id:string|null};
@@ -641,10 +642,15 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     }
     const approval=await pool.query(`INSERT INTO approvals(
       company_id,project_id,work_order_id,job_id,requested_by_employee_slug,action_type,action_payload,reason,risk,cost_cents,status
-    ) VALUES($1,$2,$3,$4,'maya','CREATIVE_RENDER',$5,$6,'MEDIUM',0,'PENDING') RETURNING id`,[
+    ) VALUES($1,$2,$3,$4,'maya','CREATIVE_RENDER',$5,$6,'MEDIUM',$7,'PENDING') RETURNING id`,[
       job.company_id,job.project_id,job.work_order_id,job.id,
-      JSON.stringify({creativePackageId:p.rows[0].id,connectionId:connection.rows[0].id}),
-      'Creative specs passed QA. Owner approval is required before external rendering because rendering may create provider cost.'
+      JSON.stringify({
+        creativePackageId:p.rows[0].id,connectionId:connection.rows[0].id,
+        clipCount:DEFAULT_RENDER_CLIPS,durationSeconds:DEFAULT_RENDER_DURATION,
+        estimatedCostCents:DEFAULT_RENDER_COST_CENTS
+      }),
+      `Creative specs passed QA. Approve ${DEFAULT_RENDER_CLIPS} original vertical clips at an estimated provider cost of ${(DEFAULT_RENDER_COST_CENTS/100).toFixed(2)}.`,
+      DEFAULT_RENDER_COST_CENTS
     ]);
     await pool.query(`UPDATE creative_packages SET status='NEEDS_RENDER_APPROVAL',
       external_state=$2,updated_at=now() WHERE id=$1`,[
@@ -652,6 +658,105 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     ]);
     await pool.query(`UPDATE work_orders SET status='NEEDS_APPROVAL',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.work_order_id]);
     return {output:{status:'WAITING_APPROVAL',approvalId:approval.rows[0].id,creativePackageId:p.rows[0].id},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='CREATIVE_PRODUCTION' && step.step_type==='RENDER_EXECUTE'){
+    const candidateId=String(job.payload?.candidateId||'');
+    const p=await pool.query('SELECT * FROM creative_packages WHERE project_id=$1 AND candidate_id=$2',[job.project_id,candidateId]);
+    if(!p.rowCount)throw new Error('Creative package missing for render execution.');
+    const pkg=p.rows[0];
+
+    const approval=await pool.query(`SELECT * FROM approvals
+      WHERE company_id=$1 AND project_id=$2 AND work_order_id=$3 AND job_id=$4
+      AND action_type='CREATIVE_RENDER' AND status='APPROVED'
+      ORDER BY resolved_at DESC NULLS LAST,created_at DESC LIMIT 1`,[
+      job.company_id,job.project_id,job.work_order_id,job.id
+    ]);
+    if(!approval.rowCount)throw new Error('BLOCKED_APPROVAL_REQUIRED: Approved creative render authorization is required.');
+
+    const mappingR=await pool.query(`SELECT * FROM supplier_product_mappings
+      WHERE company_id=$1 AND candidate_id=$2 AND status IN ('VERIFIED','VERIFIED_WITH_UNVERIFIED_STOCK')
+      ORDER BY verified_at DESC LIMIT 1`,[job.company_id,candidateId]);
+    if(!mappingR.rowCount)throw new Error('BLOCKED_RENDER_INPUT: Verified supplier product media is required before video rendering.');
+    const mapping=mappingR.rows[0];
+    const stock=(mapping.stock_detail&&typeof mapping.stock_detail==='object')?mapping.stock_detail as Record<string,unknown>:{};
+    const promptImage=String(stock.variantImage||stock.productImage||'');
+    if(!/^https:\/\//i.test(promptImage))throw new Error('BLOCKED_RENDER_INPUT: Supplier mapping has no public HTTPS product image.');
+
+    const scripts:CreativeScript[]=Array.isArray(pkg.scripts)?pkg.scripts:[];
+    const boards=Array.isArray(pkg.storyboards)?pkg.storyboards:[];
+    if(!scripts.length)throw new Error('Creative scripts are missing for render execution.');
+    const ref=(pkg.strategy?.referenceCreative&&typeof pkg.strategy.referenceCreative==='object')?pkg.strategy.referenceCreative as Record<string,unknown>:{};
+    const visualStyle=Array.isArray(ref.visualStyle)?ref.visualStyle.map(String).join(', '):'clean product-led social-commerce';
+    const cameraStyle=Array.isArray(ref.cameraStyle)?ref.cameraStyle.map(String).join(', '):'tight handheld product framing';
+    const doNotCopy=Array.isArray(ref.doNotCopy)?ref.doNotCopy.map(String).join(', '):'source creator footage, branding, script, audio, or exact composition';
+
+    const specs=scripts.slice(0,DEFAULT_RENDER_CLIPS).map((script,index)=>{
+      const board=boards.find((b:any)=>String(b.scriptId||'')===String(script.id||''))||boards[index]||{};
+      const shots=Array.isArray((board as any).shots)?(board as any).shots:[];
+      const shotText=shots.map((shot:any)=>`shot ${shot.shot}: ${shot.framing}; action ${shot.action}; overlay concept ${shot.text}`).join(' | ');
+      const sceneText=Array.isArray(script.scenes)?script.scenes.map((scene:any)=>String(scene.action||'')).join(' → '):'';
+      return {
+        id:String(script.id||`creative-${index+1}`),
+        promptText:[
+          'Create an ORIGINAL vertical ecommerce product video using the supplied product image as the visual identity anchor.',
+          `Creative family: ${visualStyle}.`,
+          `Camera language: ${cameraStyle}.`,
+          `Hook concept: ${String(script.hook||'Immediate product demonstration')}.`,
+          `Sequence: ${shotText||sceneText}.`,
+          `CTA concept: ${String(script.cta||'Show the product clearly and invite the viewer to learn more')}.`,
+          'Keep the product silhouette/materials consistent with the reference image. Use fast social-native pacing, realistic hands/environment when needed, and no unsupported performance claims.',
+          `Do NOT copy: ${doNotCopy}. Do not recreate any identifiable creator or copyrighted source footage. Generate a new composition and motion sequence.`
+        ].join(' ')
+      };
+    });
+
+    const rendered=await renderOriginalProductClips({
+      companyId:job.company_id,promptImage,specs,
+      clipCount:DEFAULT_RENDER_CLIPS,duration:DEFAULT_RENDER_DURATION
+    });
+    const durable=await persistVideosToShopify({
+      companyId:job.company_id,projectId:job.project_id,creativePackageId:String(pkg.id),
+      assets:rendered.map((asset)=>({
+        taskId:asset.taskId,temporaryUrl:asset.temporaryUrl,promptText:asset.promptText,specId:asset.specId
+      }))
+    });
+
+    const externalState={
+      renderer:'RUNWAY',
+      model:rendered[0]?.model||'unknown',
+      renderedAssets:durable.length,
+      publishableAssets:durable.length,
+      estimatedCostCents:Number(approval.rows[0].cost_cents||DEFAULT_RENDER_COST_CENTS),
+      assets:durable,
+      renderTasks:rendered.map((x)=>({taskId:x.taskId,specId:x.specId,duration:x.duration,ratio:x.ratio})),
+      completedAt:new Date().toISOString()
+    };
+    const updated=await pool.query(`UPDATE creative_packages SET status='RENDERED',external_state=$2,updated_at=now()
+      WHERE id=$1 RETURNING *`,[pkg.id,JSON.stringify(externalState)]);
+
+    const dist=await pool.query('SELECT * FROM distribution_packages WHERE project_id=$1 AND creative_package_id=$2 ORDER BY updated_at DESC LIMIT 1',[
+      job.project_id,pkg.id
+    ]);
+    if(dist.rowCount){
+      const existing=(dist.rows[0].external_state&&typeof dist.rows[0].external_state==='object')?dist.rows[0].external_state:{};
+      await pool.query('UPDATE distribution_packages SET external_state=$2,updated_at=now() WHERE id=$1',[
+        dist.rows[0].id,JSON.stringify({...existing,renderedAssets:durable.map((x)=>({id:x.shopifyFileId,url:x.url,filename:x.filename}))})
+      ]);
+    }
+    await pool.query(`INSERT INTO employee_messages(
+      company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,authority_context,payload
+    ) VALUES($1,$2,$3,'ASSET_HANDOFF','maya','nova',$4,'Use these durable rendered assets in distribution planning and publishing',$5,$6)`,[
+      job.company_id,job.project_id,job.work_order_id,
+      'Original product videos are rendered and durably stored',
+      JSON.stringify({publishAllowed:false,spendAllowed:false,renderApproved:true}),
+      JSON.stringify({creativePackageId:pkg.id,assets:durable})
+    ]);
+    await emitEvent(job.company_id,'CREATIVE_RENDER_COMPLETE',{
+      projectId:job.project_id,workOrderId:job.work_order_id,creativePackageId:pkg.id,
+      assetCount:durable.length,assetIds:durable.map((x)=>x.shopifyFileId)
+    });
+    return {output:{status:'RENDERED',creativePackageId:updated.rows[0].id,assets:durable},evidenceRefs:[]};
   }
 
   if(job.job_type==='DISTRIBUTION_PLANNING' && step.step_type==='CHANNEL_PLAN'){
