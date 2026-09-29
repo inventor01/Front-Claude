@@ -7,6 +7,7 @@ import {
 } from './research.js';
 import { getEmployeeIntelligenceContext,type EmployeeIntelligenceContext } from './academy.js';
 import { executeStorePackage } from './shopify-executor.js';
+import { captureReferenceSource,analyzeReferenceSource,type SourceAnalysis,type SocialCapture } from './source-intel.js';
 
 type JsonRecord=Record<string,unknown>;
 type JobRow={id:string;company_id:string;project_id:string;work_order_id:string;employee_slug:string;job_type:string;payload:JsonRecord;status:string;attempt_count:number;retry_count:number;max_attempts:number;lease_id:string|null};
@@ -77,18 +78,82 @@ async function candidateName(job:JobRow){
 }
 
 async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntelligenceContext){
+  if(job.job_type==='LINK_PRODUCT_RESEARCH' && step.step_type==='SOURCE_CAPTURE'){
+    const sourceId=String(job.payload?.sourceId||'');
+    const sourceUrl=String(job.payload?.sourceUrl||'');
+    if(!sourceId||!sourceUrl)throw new Error('Link-to-Launch source payload is incomplete.');
+    try{
+      const capture=await captureReferenceSource(job.company_id,sourceUrl);
+      await pool.query(`UPDATE reference_sources SET provider=$2,status='CAPTURED',capture_method=$3,caption=$4,
+        author_handle=$5,media_url=$6,thumbnail_url=$7,metrics=$8,raw_metadata=$9,error=NULL,captured_at=now(),updated_at=now()
+        WHERE id=$1 AND company_id=$10`,[
+        sourceId,capture.provider,capture.captureMethod,capture.caption,capture.authorHandle,capture.mediaUrl,capture.thumbnailUrl,
+        JSON.stringify(capture.metrics),JSON.stringify(capture.rawMetadata),job.company_id
+      ]);
+      await pool.query(`UPDATE link_launches SET status='SOURCE_ANALYSIS',updated_at=now() WHERE project_id=$1`,[job.project_id]);
+      await emitEvent(job.company_id,'REFERENCE_SOURCE_CAPTURED',{projectId:job.project_id,sourceId,provider:capture.provider,url:sourceUrl});
+      return {output:{status:'CAPTURED',sourceId,...capture},evidenceRefs:[]};
+    }catch(error){
+      const message=error instanceof Error?error.message:'Source capture failed';
+      await pool.query(`UPDATE reference_sources SET status='BLOCKED_SOURCE_ACCESS',error=$2,updated_at=now()
+        WHERE id=$1 AND company_id=$3`,[sourceId,message,job.company_id]);
+      await pool.query(`UPDATE link_launches SET status='BLOCKED_SOURCE_ACCESS',updated_at=now() WHERE project_id=$1`,[job.project_id]);
+      throw error;
+    }
+  }
+
+  if(job.job_type==='LINK_PRODUCT_RESEARCH' && step.step_type==='SOURCE_ANALYSIS'){
+    const sourceId=String(job.payload?.sourceId||'');
+    const r=await pool.query('SELECT * FROM reference_sources WHERE id=$1 AND company_id=$2',[sourceId,job.company_id]);
+    if(!r.rowCount)throw new Error('Link-to-Launch reference source is missing.');
+    const row=r.rows[0];
+    const capture:SocialCapture={
+      provider:String(row.provider),sourceUrl:String(row.source_url),caption:String(row.caption||''),
+      authorHandle:String(row.author_handle||''),mediaUrl:row.media_url?String(row.media_url):null,
+      thumbnailUrl:row.thumbnail_url?String(row.thumbnail_url):null,
+      metrics:(row.metrics&&typeof row.metrics==='object')?row.metrics:{},
+      rawMetadata:(row.raw_metadata&&typeof row.raw_metadata==='object')?row.raw_metadata:{},
+      captureMethod:String(row.capture_method||'UNKNOWN')
+    };
+    try{
+      const analysis=await analyzeReferenceSource(job.company_id,capture);
+      await pool.query(`UPDATE reference_sources SET status='ANALYZED',analysis=$2,creative_reference=$3,error=NULL,analyzed_at=now(),updated_at=now()
+        WHERE id=$1 AND company_id=$4`,[
+        sourceId,JSON.stringify(analysis),JSON.stringify(analysis.creative),job.company_id
+      ]);
+      await pool.query(`UPDATE link_launches SET status='PRODUCT_RESEARCH',identified_product=$2,identified_product_confidence=$3,updated_at=now()
+        WHERE project_id=$1`,[job.project_id,analysis.product.searchQuery,analysis.product.confidence]);
+      await emitEvent(job.company_id,'REFERENCE_SOURCE_ANALYZED',{
+        projectId:job.project_id,sourceId,product:analysis.product.searchQuery,confidence:analysis.product.confidence
+      });
+      return {output:{status:'ANALYZED',sourceId,analysis},evidenceRefs:[]};
+    }catch(error){
+      const message=error instanceof Error?error.message:'Reference analysis failed';
+      await pool.query(`UPDATE reference_sources SET status='BLOCKED_ANALYSIS',error=$2,updated_at=now() WHERE id=$1 AND company_id=$3`,[
+        sourceId,message,job.company_id
+      ]);
+      await pool.query(`UPDATE link_launches SET status='BLOCKED_ANALYSIS',updated_at=now() WHERE project_id=$1`,[job.project_id]);
+      throw error;
+    }
+  }
+
   if(job.job_type==='STORE_BUILD' && step.step_type==='BRAND_STRATEGY'){
     const candidateId=String(job.payload?.candidateId||'');
     const r=await pool.query('SELECT * FROM product_candidates WHERE id=$1 AND company_id=$2',[candidateId,job.company_id]);
     if(!r.rowCount)throw new Error('Store build candidate not found.');
     const candidate=r.rows[0];
     const root=String(candidate.name||'Product').split(/\s+/).filter(Boolean)[0]||'Product';
+    const ref=await pool.query('SELECT analysis,creative_reference,source_url FROM reference_sources WHERE project_id=$1 ORDER BY updated_at DESC LIMIT 1',[job.project_id]);
+    const refAnalysis=(ref.rows[0]?.analysis&&typeof ref.rows[0].analysis==='object')?ref.rows[0].analysis as any:null;
+    const referenceVisual=Array.isArray(refAnalysis?.creative?.visualStyle)?refAnalysis.creative.visualStyle:[];
+    const audienceSignals=Array.isArray(refAnalysis?.audience?.signals)?refAnalysis.audience.signals:[];
     const brandDirection={
       namingStatus:'UNVERIFIED_TRADEMARK',
       workingNameOptions:[`${root}Lab`,`${root}Haus`,`${root}Co`],
       positioning:`A focused direct-to-consumer brand built around the clearest use-case for ${candidate.name}.`,
-      audience:'People actively searching for the problem/use-case demonstrated by the approved product candidate.',
-      visualDirection:['clean product-first composition','strong contrast','mobile-first typography','social-native demonstration imagery'],
+      audience:audienceSignals.length?audienceSignals.join(' · '):'People actively searching for the problem/use-case demonstrated by the approved product candidate.',
+      visualDirection:[...referenceVisual,'clean product-first composition','strong contrast','mobile-first typography','social-native demonstration imagery'].filter((x,i,a)=>x&&a.indexOf(x)===i).slice(0,10),
+      referenceSourceUrl:ref.rows[0]?.source_url||null,
       guardrails:['No unsupported performance claims','No fake reviews','No unverified shipping promises','Final brand name requires trademark/domain review']
     };
     const inserted=await pool.query(`INSERT INTO store_packages(
@@ -390,8 +455,13 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
     if(!candidateR.rowCount||!storeR.rowCount)throw new Error('Creative production inputs are missing.');
     const candidate=candidateR.rows[0], store=storeR.rows[0];
     if(store.qa_result?.passed!==true)throw new Error('Creative production requires a QA-passed store package.');
+    const referenceR=await pool.query('SELECT source_url,creative_reference,analysis FROM reference_sources WHERE project_id=$1 ORDER BY updated_at DESC LIMIT 1',[job.project_id]);
+    const reference=referenceR.rows[0]||null;
+    const creativeReference=(reference?.creative_reference&&typeof reference.creative_reference==='object')?reference.creative_reference:{};
     const strategy={
       product:candidate.name,
+      referenceSourceUrl:reference?.source_url||null,
+      referenceCreative:creativeReference,
       primaryPlatforms:['TikTok','Instagram Reels'],
       secondaryPlatforms:['YouTube Shorts'],
       contentPillars:['problem → solution demonstration','before/after where evidence-safe','POV/use-case','comparison to old method','FAQ/objection handling','reaction/unboxing','feature discovery'],
@@ -694,6 +764,31 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
   }
 
   if(step.step_type==='DISCOVERY'){
+    if(job.job_type==='LINK_PRODUCT_RESEARCH'){
+      const source=await outputFor<{analysis:SourceAnalysis}>(job.id,'SOURCE_ANALYSIS');
+      if(!source?.analysis?.product?.searchQuery)throw new Error('Reference source analysis is missing product identification.');
+      const analysis=source.analysis;
+      const sourceRow=await pool.query('SELECT source_url,caption,author_handle,metrics FROM reference_sources WHERE id=$1 AND company_id=$2',[
+        String(job.payload?.sourceId||''),job.company_id
+      ]);
+      const row=sourceRow.rows[0]||{};
+      const result:DiscoveryResult={
+        candidate:analysis.product.searchQuery,
+        discoveryMode:'SOCIAL_REFERENCE',
+        trendStatement:`Identified from social reference by ${String(row.author_handle||'unknown creator')}; product confidence ${analysis.product.confidence}.`,
+        trendGrowthPct:null,
+        evidence:[{
+          sourceType:'FRONT',
+          sourceName:'Social Reference',
+          sourceUrl:String(row.source_url||job.payload?.sourceUrl||''),
+          summary:`Reference product identification: ${analysis.product.name}; supplier query: ${analysis.product.searchQuery}; confidence: ${analysis.product.confidence}.`,
+          rawExcerpt:String(row.caption||'').slice(0,1800),
+          confidence:analysis.product.confidence
+        }]
+      };
+      const evidenceRefs=await recordEvidence(job,result.evidence,'REFERENCE_DISCOVERY');
+      return {output:{...result,sourceAnalysis:analysis},evidenceRefs};
+    }
     const result=await discoverCandidate(String(job.payload?.query||''));
     const evidenceRefs=await recordEvidence(job,result.evidence,'DISCOVERY');
     return {output:result,evidenceRefs};
@@ -820,6 +915,14 @@ async function executeStep(job:JobRow,step:StepRow,intelligence:EmployeeIntellig
       ]);
       await pool.query(`UPDATE projects SET phase='RESEARCH_ITERATION',updated_at=now() WHERE id=$1`,[job.project_id]);
       await emitEvent(job.company_id,'PRODUCT_CANDIDATE_NOT_READY',{jobId:job.id,candidateId:candidate.id,status:scored.status,score:scored.score});
+    }
+    if(job.job_type==='LINK_PRODUCT_RESEARCH'){
+      await pool.query(`UPDATE link_launches SET status=$2,identified_product=$3,identified_product_confidence=$4,updated_at=now()
+        WHERE project_id=$1`,[
+        job.project_id,
+        scored.status==='LAUNCH_REVIEW'?'PRODUCT_GATE':scored.status==='VERIFIED_CANDIDATE'?'RESEARCH_ITERATION':'RESEARCH_NOT_READY',
+        discovery.candidate,scored.confidence
+      ]);
     }
     return {output:{candidateId:candidate.id,candidate:discovery.candidate,...scored},evidenceRefs};
   }
