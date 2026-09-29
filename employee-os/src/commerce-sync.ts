@@ -1,5 +1,5 @@
 import { pool } from './db.js';
-import { connectedShopifyCompanies,listPaidUnfulfilledOrders,type ShopifyPaidOrder } from './shopify-executor.js';
+import { connectedShopifyCompanies,listPaidUnfulfilledOrders,syncShopifyFulfillmentTracking,type ShopifyPaidOrder } from './shopify-executor.js';
 import { createCJOrderForShopify,getCJOrderDetail,payCJOrder } from './cj-executor.js';
 
 function externalOrderNumber(companyId:string,shopifyOrderId:string){
@@ -265,6 +265,31 @@ export async function syncCJFulfillmentOnce(){
         WHERE id=$1`,[
         row.id,detail.orderStatus,detail.amount,detail.trackingNumber,detail.trackingUrl,JSON.stringify(detail.raw||{})
       ]);
+
+      if(detail.trackingNumber){
+        const currentShopify=Array.isArray(row.shopify_fulfillments)?row.shopify_fulfillments:[];
+        const needsShopifySync=!row.shopify_tracking_synced_at||detail.trackingNumber!==previousTracking||!currentShopify.length;
+        if(needsShopifySync){
+          const shopifyFulfillments=await syncShopifyFulfillmentTracking({
+            companyId:String(row.company_id),
+            shopifyOrderId:String(row.shopify_order_id),
+            trackingNumber:detail.trackingNumber,
+            trackingUrl:detail.trackingUrl||null,
+            trackingCompany:String(detail.trackingProvider||'')||null,
+            existingFulfillments:currentShopify
+          });
+          await pool.query(`UPDATE fulfillment_orders SET shopify_fulfillments=$2,
+            shopify_tracking_synced_at=now(),updated_at=now() WHERE id=$1`,[
+            row.id,JSON.stringify(shopifyFulfillments)
+          ]);
+          await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'SHOPIFY_FULFILLMENT_SYNCED',$2)`,[
+            row.company_id,JSON.stringify({
+              fulfillmentOrderId:row.id,shopifyOrderId:row.shopify_order_id,
+              shopifyFulfillments,trackingNumber:detail.trackingNumber
+            })
+          ]);
+        }
+      }
       if(detail.trackingNumber&&detail.trackingNumber!==previousTracking){
         await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'FULFILLMENT_TRACKING_UPDATED',$2)`,[
           row.company_id,JSON.stringify({
