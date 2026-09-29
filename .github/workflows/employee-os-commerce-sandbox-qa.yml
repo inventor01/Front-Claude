@@ -1,0 +1,56 @@
+name: Employee OS Commerce Sandbox QA
+
+on:
+  push:
+    branches: [front-commerce-dev]
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-commerce-sandbox-qa.yml'
+  pull_request:
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-commerce-sandbox-qa.yml'
+
+jobs:
+  commerce-sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: employeeos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d employeeos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/employeeos_test
+      PGSSLMODE: disable
+      JWT_SECRET: commerce-sandbox-jwt-secret-with-more-than-enough-entropy
+      CREDENTIALS_MASTER_KEY: dGVzdC1vbmx5LTMyLWJ5dGUta2V5LTEyMzQ1Njc4OTA=
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Employee OS
+        run: npm install --prefix employee-os --no-audit --no-fund
+
+      - name: Build Employee OS
+        run: npm run build --prefix employee-os
+
+      - name: Apply Employee OS schema
+        working-directory: employee-os
+        run: node dist/migrate.js
+
+      - name: Run isolated commerce lifecycle
+        working-directory: employee-os
+        run: node tests/commerce-sandbox.mjs
