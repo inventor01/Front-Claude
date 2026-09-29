@@ -272,8 +272,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var openaiConnected=openai&&openai.connected, openaiMeta=(openai&&openai.metadata)||{};
     var openaiHtml=openaiConnected?'<div class="success"><b>Multimodal analyzer connected</b><br>'+esc(openaiMeta.model||'Vision model')+' · sampled Reel frames can be analyzed.</div>':'<div class="error"><b>Multimodal analyzer not connected</b><br>Link-to-Launch needs image understanding to identify products and deconstruct creative from sampled video frames.</div>';
     var runwayConnected=runway&&runway.connected, runwayMeta=(runway&&runway.metadata)||{};
-    var runwayHtml=runwayConnected?'<div class="success"><b>Runway renderer connected</b><br>'+esc(runwayMeta.model||'Video model')+' · default package '+esc(runwayMeta.defaultClipCount||3)+' clips / estimated 
-    return '<div class="hero"><h2>Connections</h2><p>Authorize external tools once. Employees can then use them through audited backend adapters without exposing credentials to the browser again.</p></div>'+
+    var runwayHtml=runwayConnected?'<div class="success"><b>Runway renderer connected</b><br>'+esc(runwayMeta.model||'Video model')+' · default package '+esc(runwayMeta.defaultClipCount||3)+' clips / estimated     return '<div class="hero"><h2>Connections</h2><p>Authorize external tools once. Employees can then use them through audited backend adapters without exposing credentials to the browser again.</p></div>'+
       '<div class="grid two"><div class="card"><h3>Social reference capture</h3>'+apifyHtml+
       (apifyConnected?'<button id="disconnectApify" class="danger">Disconnect capture</button>':'<form id="apifyConnectForm" class="form"><input id="apifyToken" type="password" placeholder="Apify API token" autocomplete="new-password"/><button class="action">Connect Reel capture</button></form><p class="muted">Used for public Instagram reference capture. Token stays encrypted server-side.</p>')+
       '</div><div class="card"><h3>Multimodal reference analysis</h3>'+openaiHtml+
@@ -394,119 +393,6 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var disconnectRunway=document.getElementById('disconnectRunway');
     if(disconnectRunway)disconnectRunway.onclick=async function(){try{
       await request('/api/company/'+companyId+'/integrations/runway',{method:'DELETE'});notice('Runway renderer disconnected.');await load();
-    }catch(err){notice(err.message,'error');}};
-  }
-  load();
-})();
-</script>
-</body></html>`;
-}
-+((Number(runwayMeta.estimatedDefaultCostCents||180))/100).toFixed(2)+'</div>':'<div class="error"><b>Runway renderer not connected</b><br>Maya can build scripts and storyboards, but cannot generate the final original video assets.</div>';
-    return '<div class="hero"><h2>Connections</h2><p>Authorize external tools once. Employees can then use them through audited backend adapters without exposing credentials to the browser again.</p></div>'+
-      '<div class="grid two"><div class="card"><h3>Social reference capture</h3>'+apifyHtml+
-      (apifyConnected?'<button id="disconnectApify" class="danger">Disconnect capture</button>':'<form id="apifyConnectForm" class="form"><input id="apifyToken" type="password" placeholder="Apify API token" autocomplete="new-password"/><button class="action">Connect Reel capture</button></form><p class="muted">Used for public Instagram reference capture. Token stays encrypted server-side.</p>')+
-      '</div><div class="card"><h3>Multimodal reference analysis</h3>'+openaiHtml+
-      (openaiConnected?'<button id="disconnectOpenAI" class="danger">Disconnect analyzer</button>':'<form id="openaiConnectForm" class="form"><input id="openaiApiKey" type="password" placeholder="OpenAI API key" autocomplete="new-password"/><button class="action">Connect visual analyzer</button></form><p class="muted">Employee OS samples frames and sends only the required reference context for product/creative analysis.</p>')+
-      '</div></div>'+
-      '<div class="grid two" style="margin-top:10px"><div class="card"><h3>Shopify execution</h3>'+shopifyStatus+
-      (connected?'<p>API version: '+esc(meta.apiVersion||'2026-07')+' · Online Store: '+esc(meta.publicationTitle||'Online Store')+'</p><button id="disconnectShopify" class="danger">Disconnect Shopify</button>':
-      '<form id="shopifyConnectForm" class="form"><input id="shopifyDomain" placeholder="venture-store.myshopify.com" autocomplete="off"/><input id="shopifyToken" type="password" placeholder="Admin API access token" autocomplete="new-password"/><button class="action">Connect dedicated venture store</button></form><p class="muted">Required custom-app scopes: '+esc(scopes)+'. The token is encrypted server-side and never returned by this API.</p>')+
-      '</div><div class="card"><h3>CJdropshipping fulfillment</h3>'+cjStatusHtml+
-      (cjConnected?'<p>Access tokens stay backend-only and are refreshed automatically before expiry.</p><button id="disconnectCJ" class="danger">Disconnect CJ</button>':
-      '<form id="cjConnectForm" class="form"><input id="cjApiKey" type="password" placeholder="CJ API key" autocomplete="new-password"/><button class="action">Connect CJdropshipping</button></form><p class="muted">Employee OS exchanges the API key for backend-only CJ access/refresh tokens.</p>')+
-      '</div></div>'+
-      '<div class="card" style="margin-top:10px"><h3>Finish-line rule</h3><p>Link-to-Launch is DONE only after source provenance, product identity, verified supplier mapping, stock + freight + landed cost, designed Shopify theme, product publication, reachable URL, creative package, and fulfillment path are all persisted.</p></div>';
-  }
-  function renderActivity(){return '<div class="stack">'+((state.events||[]).map(function(e){return '<div class="item"><div class="row"><b>'+esc(e.type)+'</b><span class="muted">'+esc(fmt(e.created_at))+'</span></div><p>'+esc(JSON.stringify(e.payload))+'</p></div>';}).join('')||'<div class="empty">No events yet.</div>')+'</div>';}
-
-  function bindView(){
-    async function submitLinkLaunch(url,constraints){
-      if(!url)throw new Error('Paste a reference URL first.');
-      notice('Ava accepted the reference. Rowan is capturing and identifying the product…');
-      await request('/api/company/'+companyId+'/ventures/from-link',{method:'POST',body:JSON.stringify({url:url,constraints:constraints||[],budgetCents:null})});
-      notice('Link-to-Launch started. Work will continue in the background.');setTimeout(load,1400);
-    }
-    var quick=document.getElementById('linkLaunchQuickForm');
-    if(quick)quick.onsubmit=async function(e){e.preventDefault();try{await submitLinkLaunch(document.getElementById('linkLaunchQuickUrl').value,[]);}catch(err){notice(err.message,'error');}};
-    var linkForm=document.getElementById('linkLaunchForm');
-    if(linkForm)linkForm.onsubmit=async function(e){e.preventDefault();try{
-      var constraints=document.getElementById('linkLaunchConstraints').value.split('\n').map(function(x){return x.trim();}).filter(Boolean);
-      await submitLinkLaunch(document.getElementById('linkLaunchUrl').value,constraints);
-    }catch(err){notice(err.message,'error');}};
-    var objective=document.getElementById('objectiveForm');
-    if(objective)objective.onsubmit=async function(e){e.preventDefault();try{notice('Ava is creating durable work…');await request('/api/company/'+companyId+'/objectives',{method:'POST',body:JSON.stringify({statement:document.getElementById('objectiveText').value,constraints:['No spending without owner approval','No publishing without owner approval'],query:document.getElementById('objectiveQuery').value})});notice('Objective accepted. The worker will continue after this request.');setTimeout(load,1200);}catch(err){notice(err.message,'error');}};
-    document.querySelectorAll('.approval').forEach(function(b){b.onclick=async function(){try{await request('/api/company/'+companyId+'/approvals/'+b.dataset.id+'/'+b.dataset.decision,{method:'POST'});notice('Decision recorded.');await load();}catch(err){notice(err.message,'error');}};});
-    var support=document.getElementById('supportForm');
-    if(support)support.onsubmit=async function(e){e.preventDefault();try{await request('/api/company/'+companyId+'/support/cases',{method:'POST',body:JSON.stringify({channel:document.getElementById('supportChannel').value,customerRef:document.getElementById('supportCustomer').value,subject:document.getElementById('supportSubject').value,message:document.getElementById('supportMessage').value})});notice('Case accepted by Ellis.');setTimeout(load,1200);}catch(err){notice(err.message,'error');}};
-    var training=document.getElementById('trainingForm');
-    if(training)training.onsubmit=async function(e){e.preventDefault();try{
-      var tags=document.getElementById('trainingTags').value.split(',').map(function(x){return x.trim();}).filter(Boolean);
-      var body={employeeSlug:document.getElementById('trainingEmployee').value||null,title:document.getElementById('trainingTitle').value||undefined,url:document.getElementById('trainingUrl').value||undefined,text:document.getElementById('trainingText').value||undefined,tags:tags};
-      var result=await request('/api/company/'+companyId+'/academy/sources',{method:'POST',body:JSON.stringify(body)});
-      notice('Training ingested: '+result.lessons.length+' sourced lessons extracted.');await load();
-    }catch(err){notice(err.message,'error');}};
-    var discover=document.getElementById('toolDiscoveryForm');
-    if(discover)discover.onsubmit=async function(e){e.preventDefault();try{
-      var result=await request('/api/company/'+companyId+'/academy/tools/discover',{method:'POST',body:JSON.stringify({claimType:document.getElementById('claimType').value,claimDescription:document.getElementById('claimDescription').value})});
-      var suffix=result.webSearchStatus==='AUTH_REQUIRED'?' Existing verified catalog searched; web tool scout needs a Jina Search API key.':' Tool discovery completed.';
-      notice('Verification tools evaluated.'+suffix);await load();
-    }catch(err){notice(err.message,'error');}};
-    var skillCompile=document.getElementById('skillCompileForm');
-    if(skillCompile)skillCompile.onsubmit=async function(e){e.preventDefault();try{
-      var result=await request('/api/company/'+companyId+'/academy/skills/compile',{method:'POST',body:JSON.stringify({
-        employeeSlug:document.getElementById('skillEmployee').value||null,
-        name:document.getElementById('skillName').value,
-        purpose:document.getElementById('skillPurpose').value,
-        sourceIds:[]
-      })});
-      notice('Skill compiled as version '+result.definition.current_version+'. Run its test before relying on it.');await load();
-    }catch(err){notice(err.message,'error');}};
-    document.querySelectorAll('.skill-test').forEach(function(b){b.onclick=async function(){try{
-      var result=await request('/api/company/'+companyId+'/academy/skills/'+b.dataset.id+'/test',{method:'POST'});
-      notice('Skill test: '+result.status+(result.missingTools&&result.missingTools.length?' · missing '+result.missingTools.join(', '):''));await load();
-    }catch(err){notice(err.message,'error');}};});
-    var shopifyForm=document.getElementById('shopifyConnectForm');
-    if(shopifyForm)shopifyForm.onsubmit=async function(e){e.preventDefault();try{
-      notice('Validating store, scopes, and Online Store publication…');
-      await request('/api/company/'+companyId+'/integrations/shopify/connect',{method:'POST',body:JSON.stringify({
-        storeDomain:document.getElementById('shopifyDomain').value,
-        accessToken:document.getElementById('shopifyToken').value
-      })});
-      document.getElementById('shopifyToken').value='';notice('Shopify connected. Luca can now execute approved store builds.');await load();
-    }catch(err){notice(err.message,'error');}};
-    var disconnect=document.getElementById('disconnectShopify');
-    if(disconnect)disconnect.onclick=async function(){try{
-      await request('/api/company/'+companyId+'/integrations/shopify',{method:'DELETE'});notice('Shopify disconnected.');await load();
-    }catch(err){notice(err.message,'error');}};
-    var cjForm=document.getElementById('cjConnectForm');
-    if(cjForm)cjForm.onsubmit=async function(e){e.preventDefault();try{
-      notice('Authenticating with CJ and securing backend tokens…');
-      await request('/api/company/'+companyId+'/integrations/cj/connect',{method:'POST',body:JSON.stringify({apiKey:document.getElementById('cjApiKey').value})});
-      document.getElementById('cjApiKey').value='';notice('CJdropshipping connected. Supplier mapping can now run automatically.');await load();
-    }catch(err){notice(err.message,'error');}};
-    var disconnectCJ=document.getElementById('disconnectCJ');
-    if(disconnectCJ)disconnectCJ.onclick=async function(){try{
-      await request('/api/company/'+companyId+'/integrations/cj',{method:'DELETE'});notice('CJdropshipping disconnected.');await load();
-    }catch(err){notice(err.message,'error');}};
-    var apifyForm=document.getElementById('apifyConnectForm');
-    if(apifyForm)apifyForm.onsubmit=async function(e){e.preventDefault();try{
-      notice('Validating social capture provider…');
-      await request('/api/company/'+companyId+'/integrations/apify/connect',{method:'POST',body:JSON.stringify({token:document.getElementById('apifyToken').value})});
-      document.getElementById('apifyToken').value='';notice('Social reference capture connected.');await load();
-    }catch(err){notice(err.message,'error');}};
-    var disconnectApify=document.getElementById('disconnectApify');
-    if(disconnectApify)disconnectApify.onclick=async function(){try{
-      await request('/api/company/'+companyId+'/integrations/apify',{method:'DELETE'});notice('Social reference capture disconnected.');await load();
-    }catch(err){notice(err.message,'error');}};
-    var openaiForm=document.getElementById('openaiConnectForm');
-    if(openaiForm)openaiForm.onsubmit=async function(e){e.preventDefault();try{
-      notice('Validating multimodal model access…');
-      await request('/api/company/'+companyId+'/integrations/openai/connect',{method:'POST',body:JSON.stringify({apiKey:document.getElementById('openaiApiKey').value})});
-      document.getElementById('openaiApiKey').value='';notice('Multimodal reference analyzer connected.');await load();
-    }catch(err){notice(err.message,'error');}};
-    var disconnectOpenAI=document.getElementById('disconnectOpenAI');
-    if(disconnectOpenAI)disconnectOpenAI.onclick=async function(){try{
-      await request('/api/company/'+companyId+'/integrations/openai',{method:'DELETE'});notice('Multimodal analyzer disconnected.');await load();
     }catch(err){notice(err.message,'error');}};
   }
   load();
