@@ -107,7 +107,7 @@ export async function processOneManagerMessage(){
             JSON.stringify({creativePackageId:creative.id,candidateId:creative.candidate_id,candidate:creative.candidate_name}),
             `distribution-planning:${creative.id}`
           ]);
-          const steps=['CHANNEL_PLAN','CONTENT_CALENDAR','DISTRIBUTION_QA','PUBLISH_HANDOFF'];
+          const steps=['CHANNEL_PLAN','CONTENT_CALENDAR','DISTRIBUTION_QA','PUBLISH_HANDOFF','SOCIAL_PUBLISH_EXECUTE'];
           for(let i=0;i<steps.length;i++){
             await c.query(`INSERT INTO job_steps(company_id,job_id,sequence,step_type,input)
               VALUES($1,$2,$3,$4,$5) ON CONFLICT(job_id,sequence) DO NOTHING`,[
