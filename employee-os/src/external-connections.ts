@@ -116,3 +116,46 @@ export async function searchCredential(companyId:string){
   if(!row||row.status!=='CONNECTED')return null;
   return readCredential<{apiKey:string}>(companyId,'SEARCH',String(row.id));
 }
+
+
+export async function publishSocial(input:{
+  companyId:string;post:string;platforms:string[];mediaUrls:string[];scheduleDate?:string|null;
+}){
+  const row=await latest(input.companyId,'SOCIAL_PUBLISHER');
+  if(!row||row.status!=='CONNECTED')throw new Error('BLOCKED_EXTERNAL_AUTH: Social publishing is not connected');
+  const credential=await readCredential<{apiKey:string}>(input.companyId,'SOCIAL_PUBLISHER',String(row.id));
+  const body:Record<string,unknown>={
+    post:input.post,
+    platforms:input.platforms,
+    mediaUrls:input.mediaUrls
+  };
+  if(input.scheduleDate)body.scheduleDate=input.scheduleDate;
+  const res=await fetch('https://app.ayrshare.com/api/post',{
+    method:'POST',
+    headers:{authorization:`Bearer ${credential.apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.6'},
+    body:JSON.stringify(body)
+  });
+  const text=await res.text();
+  if(!res.ok)throw new Error(`Ayrshare publish failed (HTTP ${res.status}): ${text.slice(0,800)}`);
+  let parsed:any;try{parsed=JSON.parse(text);}catch{throw new Error('Ayrshare returned invalid publish JSON.');}
+  if(parsed?.status==='error'||parsed?.error)throw new Error(`Ayrshare publish failed: ${String(parsed.error||parsed.message||'unknown error')}`);
+  return parsed;
+}
+
+export async function sendSupportEmail(input:{
+  companyId:string;to:string;subject:string;text:string;
+}){
+  const row=await latest(input.companyId,'EMAIL');
+  if(!row||row.status!=='CONNECTED')throw new Error('BLOCKED_EXTERNAL_AUTH: Customer email is not connected');
+  const credential=await readCredential<{apiKey:string;fromEmail:string}>(input.companyId,'EMAIL',String(row.id));
+  const res=await fetch('https://api.resend.com/emails',{
+    method:'POST',
+    headers:{authorization:`Bearer ${credential.apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.6'},
+    body:JSON.stringify({from:credential.fromEmail,to:[input.to],subject:input.subject,text:input.text})
+  });
+  const raw=await res.text();
+  if(!res.ok)throw new Error(`Resend send failed (HTTP ${res.status}): ${raw.slice(0,800)}`);
+  let body:any;try{body=JSON.parse(raw);}catch{throw new Error('Resend returned invalid send JSON.');}
+  if(!body?.id)throw new Error('Resend did not return a message id.');
+  return {id:String(body.id),from:credential.fromEmail,to:input.to};
+}
