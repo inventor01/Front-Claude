@@ -1,0 +1,107 @@
+name: Employee OS Link Blocker Recovery QA
+
+on:
+  push:
+    branches: [front-commerce-dev]
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-link-blocker-qa.yml'
+  pull_request:
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-link-blocker-qa.yml'
+
+jobs:
+  link-blocker-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Prove blocked Instagram source is recoverable and never guessed
+        env:
+          BASE: https://employee-os-api-production.up.railway.app
+          REEL: https://www.instagram.com/reel/DdzMnipOcwJ/?stkn=MXczbXJpcXQ1NTBrYg==
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, urllib.error, uuid
+
+          BASE=os.environ["BASE"].rstrip("/")
+          REEL=os.environ["REEL"]
+
+          def call(path,method="GET",body=None,token=None,timeout=45,allow_error=False):
+              headers={"content-type":"application/json"}
+              if token: headers["authorization"]="Bearer "+token
+              data=None if body is None else json.dumps(body).encode()
+              req=urllib.request.Request(BASE+path,data=data,headers=headers,method=method)
+              try:
+                  with urllib.request.urlopen(req,timeout=timeout) as r:
+                      payload=r.read().decode()
+                      return r.status,json.loads(payload or "{}")
+              except urllib.error.HTTPError as e:
+                  payload=e.read().decode()
+                  parsed=json.loads(payload or "{}")
+                  if allow_error:return e.code,parsed
+                  raise
+
+          for _ in range(30):
+              try:
+                  s,h=call("/health",timeout=10)
+                  if s==200 and h.get("ok"):break
+              except Exception:pass
+              time.sleep(2)
+          else: raise SystemExit("API not healthy")
+
+          suffix=str(uuid.uuid4()).replace("-","")[:12]
+          _,reg=call("/api/auth/register","POST",{
+              "email":f"qa-link-block-{suffix}@example.com",
+              "password":"Qa!LinkBlock-"+suffix+"-Aa9",
+              "companyName":"Link Blocker Recovery QA"
+          })
+          token=reg["token"]; company=reg["company"]["id"]
+
+          _,created=call(f"/api/company/{company}/ventures/from-link","POST",{
+              "url":REEL,
+              "constraints":["Never guess the product if source media cannot be read."],
+              "budgetCents":None
+          },token)
+          project=created["project"]["id"]
+
+          blocked=None
+          for _ in range(25):
+              time.sleep(2)
+              _,state=call(f"/api/company/{company}/state",token=token)
+              launches=[x for x in state["linkLaunches"] if x["project_id"]==project]
+              sources=[x for x in state["referenceSources"] if x["project_id"]==project]
+              if launches and sources and (
+                  str(launches[0].get("status","")).startswith("BLOCKED_")
+                  or str(sources[0].get("status","")).startswith("BLOCKED_")
+              ):
+                  blocked=(launches[0],sources[0],state)
+                  break
+          assert blocked,"source never reached an explicit blocked state"
+          launch,source,state=blocked
+          assert source["source_url"]==REEL,(source["source_url"],REEL)
+          assert source["provider"]=="INSTAGRAM",source
+          assert source["status"]=="BLOCKED_SOURCE_ACCESS",source
+          assert launch["status"]=="BLOCKED_SOURCE_ACCESS",launch
+          assert not launch.get("identified_product"),launch
+          candidates=[x for x in state["productCandidates"] if x["project_id"]==project]
+          assert candidates==[],candidates
+          assert "APIFY" in str(source.get("error","")).upper() or "NOT CONNECTED" in str(source.get("error","")).upper(),source
+
+          status,retry=call(
+              f"/api/company/{company}/link-launches/{project}/retry-source",
+              "POST",{},token,allow_error=True
+          )
+          assert status==409,(status,retry)
+          assert "Connect Social reference capture" in retry.get("error",""),retry
+
+          print("LINK BLOCKER RECOVERY QA PASSED")
+          print(json.dumps({
+              "projectId":project,
+              "sourceStatus":source["status"],
+              "launchStatus":launch["status"],
+              "productGuessed":False,
+              "retryStatus":status,
+              "retryInstruction":retry["error"]
+          },indent=2))
+          PY

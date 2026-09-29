@@ -1,0 +1,121 @@
+name: Employee OS Skill Builder QA
+
+on:
+  push:
+    branches: [front-commerce-dev]
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-skill-builder-qa.yml'
+  pull_request:
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-skill-builder-qa.yml'
+
+jobs:
+  skill-builder-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Train, compile, version, and test reusable employee skill
+        env:
+          BASE: https://employee-os-api-production.up.railway.app
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, uuid
+
+          BASE=os.environ["BASE"].rstrip("/")
+
+          def call(path, method="GET", body=None, token=None, timeout=60):
+              headers={"content-type":"application/json"}
+              if token: headers["authorization"]="Bearer "+token
+              data=None if body is None else json.dumps(body).encode()
+              req=urllib.request.Request(BASE+path,data=data,headers=headers,method=method)
+              with urllib.request.urlopen(req,timeout=timeout) as r:
+                  payload=r.read().decode()
+                  return r.status,json.loads(payload or "{}")
+
+          # health
+          for _ in range(40):
+              try:
+                  status,h=call("/health",timeout=10)
+                  if status==200 and h.get("ok"): break
+              except Exception: pass
+              time.sleep(3)
+          else:
+              raise SystemExit("Employee OS API never became healthy")
+
+          suffix=str(uuid.uuid4()).replace("-","")[:12]
+          _,reg=call("/api/auth/register","POST",{
+              "email":f"qa-skill-{suffix}@example.com",
+              "password":"Qa!Skill-"+suffix+"-Aa9",
+              "companyName":"Skill Builder Live QA"
+          })
+          token=reg["token"]; company=reg["company"]["id"]
+
+          # Maya: source-backed AI video procedure.
+          _,training=call(f"/api/company/{company}/academy/sources","POST",{
+              "employeeSlug":"maya",
+              "url":"https://x.com/example/status/1234567890",
+              "title":"AI product video operating tutorial",
+              "text":"Define reference assets before generation so subject, product details, scene mood, camera motion, timing, and sound each have a clear role.\nTreat every shot as an explicit instruction with a beginning state, camera action, subject action, and ending state.\nLock product invariants such as silhouette, materials, logo placement, and key colors before testing creative variations.\nAfter rendering, compare the actual clip with the intended shot and keep only repeatable prompt structures that improve controllability.",
+              "tags":["ai-video","prompting","camera","qa"]
+          },token)
+          source_id=training["source"]["id"]
+          lesson_ids={x["id"] for x in training["lessons"]}
+          assert len(lesson_ids)>=3, training
+
+          _,compiled=call(f"/api/company/{company}/academy/skills/compile","POST",{
+              "employeeSlug":"maya",
+              "name":"Cinematic Product Video",
+              "purpose":"Turn sourced AI-video lessons into a repeatable product-video procedure with verification and explicit tool requirements.",
+              "sourceIds":[source_id]
+          },token)
+          skill=compiled["definition"]
+          assert skill["current_version"]==1, skill
+          assert compiled["version"]["version"]==1, compiled
+          source_lessons=set(compiled["version"]["source_lesson_ids"])
+          assert lesson_ids.issubset(source_lessons), (lesson_ids,source_lessons)
+          assert len(compiled["version"]["procedure"]["steps"])>=3, compiled
+          assert "creative-renderer" in skill["required_tools"], skill
+
+          # With renderer unconnected, tests must be truthful rather than fake ACTIVE.
+          _,test1=call(f"/api/company/{company}/academy/skills/{skill['id']}/test","POST",{},token)
+          assert test1["status"]=="READY_NEEDS_TOOLS",test1
+          assert test1["skillStatus"]=="READY_NEEDS_TOOLS",test1
+          assert "creative-renderer" in test1["missingTools"],test1
+          assert all(x["passed"] for x in test1["checks"]),test1
+
+          # Add another sourced lesson and compile same named skill => v2, preserving version history.
+          _,training2=call(f"/api/company/{company}/academy/sources","POST",{
+              "employeeSlug":"maya",
+              "title":"Product video revision rule",
+              "text":"When a render fails continuity or product accuracy, change one variable at a time, record the failure, and preserve the strongest previous prompt as the control.",
+              "tags":["ai-video","experimentation"]
+          },token)
+          _,compiled2=call(f"/api/company/{company}/academy/skills/compile","POST",{
+              "employeeSlug":"maya",
+              "name":"Cinematic Product Video",
+              "purpose":"Turn sourced AI-video lessons into a repeatable product-video procedure with verification and explicit tool requirements.",
+              "sourceIds":[source_id,training2["source"]["id"]]
+          },token)
+          assert compiled2["definition"]["current_version"]==2,compiled2
+          assert compiled2["version"]["version"]==2,compiled2
+          assert len(compiled2["version"]["procedure"]["steps"])>len(compiled["version"]["procedure"]["steps"]),(compiled,compiled2)
+
+          _,academy=call(f"/api/company/{company}/academy",token=token)
+          rows=[x for x in academy["skills"] if x["id"]==skill["id"]]
+          assert len(rows)==1,academy["skills"]
+          assert rows[0]["current_version"]==2,rows[0]
+          tests=[x for x in academy["skillTests"] if x["skill_id"]==skill["id"]]
+          assert tests and tests[0]["status"]=="READY_NEEDS_TOOLS",tests
+
+          print("SKILL BUILDER LIVE QA PASSED")
+          print(json.dumps({
+              "skillId":skill["id"],
+              "versions":2,
+              "initialLessons":len(lesson_ids),
+              "currentSteps":len(compiled2["version"]["procedure"]["steps"]),
+              "status":rows[0]["status"],
+              "missingTool":"creative-renderer"
+          },indent=2))
+          PY

@@ -1,0 +1,297 @@
+name: Employee OS Module 3 Live QA
+
+on:
+  pull_request:
+  push:
+    branches: [front-commerce-dev]
+    paths:
+      - ".github/workflows/employee-os-module3-live-qa.yml"
+      - "employee-os/**"
+  workflow_dispatch:
+
+jobs:
+  module3-live-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Live manager, memory, approval, and handoff QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://employee-os-api-production.up.railway.app"
+          SUFFIX="$(date +%s)-$RANDOM"
+          EMAIL="module3-$SUFFIX@example.test"
+          PASSWORD="Module3-QA-$SUFFIX!"
+
+          echo "Health check"
+          curl -fsS "$BASE/health" | jq -e '.ok == true' >/dev/null
+
+          echo "Register isolated QA company"
+          REGISTER="$(curl -fsS -X POST "$BASE/api/auth/register"             -H "content-type: application/json"             -d "$(jq -nc --arg e "$EMAIL" --arg p "$PASSWORD" '{email:$e,password:$p,companyName:"Module 3 Live QA"}')")"
+          TOKEN="$(jq -r '.token' <<<"$REGISTER")"
+          COMPANY="$(jq -r '.company.id' <<<"$REGISTER")"
+          test -n "$TOKEN" && test "$TOKEN" != "null"
+          test -n "$COMPANY" && test "$COMPANY" != "null"
+
+          auth=(-H "Authorization: Bearer $TOKEN")
+
+          echo "Create research objective"
+          CREATED="$(curl -fsS -X POST "$BASE/api/company/$COMPANY/objectives"             "${auth[@]}" -H "content-type: application/json"             -d '{"statement":"Find and verify car diffuser as an organic dropshipping product. Do not spend money or publish anything without owner approval.","constraints":["No spending without owner approval","No publishing without owner approval"],"query":"car diffuser"}')"
+          PROJECT="$(jq -r '.project.id' <<<"$CREATED")"
+          RESEARCH_WO="$(jq -r '.workOrder.id' <<<"$CREATED")"
+          RESEARCH_JOB="$(jq -r '.job.id' <<<"$CREATED")"
+          test "$(jq -r '.job.status' <<<"$CREATED")" = "QUEUED"
+
+          echo "Wait for Rowan result and Ava manager review"
+          APPROVAL=""
+          for i in $(seq 1 40); do
+            STATE="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            APPROVAL="$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="PRODUCT_GATE" and .status=="PENDING")] | .[0].id // empty' <<<"$STATE")"
+            CONSUMED="$(jq -r --arg p "$PROJECT" '[.messages[] | select(.project_id==$p and .type=="WORK_RESULT" and .from_employee_slug=="rowan" and .to_employee_slug=="ava")] | .[0].consumed_at // empty' <<<"$EXEC")"
+            if [[ -n "$APPROVAL" && -n "$CONSUMED" ]]; then break; fi
+            sleep 3
+          done
+          test -n "$APPROVAL"
+          test -n "$CONSUMED"
+
+          echo "Assert manager state is singular and evidence-backed"
+          STATE="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+          BRIEF="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/briefing")"
+          MEM="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/memories")"
+
+          test "$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="PRODUCT_GATE")] | length' <<<"$STATE")" = "1"
+          test "$(jq -r --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0].phase' <<<"$STATE")" = "PRODUCT_GATE"
+          test "$(jq -r --arg w "$RESEARCH_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE")" = "NEEDS_APPROVAL"
+          test "$(jq -r --arg a "$APPROVAL" '[.decisionsNeeded[] | select(.id==$a)] | length' <<<"$BRIEF")" = "1"
+          jq -e '[.memories[] | select(.type=="EMPLOYEE_INTERPRETATION" and (.subject|ascii_downcase|contains("car diffuser")) and (.source|startswith("product_candidate:")))] | length >= 1' <<<"$MEM" >/dev/null
+
+          echo "Approve QA-only product gate"
+          DECISION="$(curl -fsS -X POST "${auth[@]}" "$BASE/api/company/$COMPANY/approvals/$APPROVAL/approve")"
+          test "$(jq -r '.approval.status' <<<"$DECISION")" = "APPROVED"
+          LUCA_WO="$(jq -r '.handoff.workOrder.id' <<<"$DECISION")"
+          LUCA_JOB="$(jq -r '.handoff.job.id' <<<"$DECISION")"
+          test -n "$LUCA_WO" && test "$LUCA_WO" != "null"
+          test -n "$LUCA_JOB" && test "$LUCA_JOB" != "null"
+
+          echo "Assert approval is idempotent"
+          HTTP="$(curl -sS -o /tmp/reapprove.json -w '%{http_code}' -X POST "${auth[@]}" "$BASE/api/company/$COMPANY/approvals/$APPROVAL/approve")"
+          test "$HTTP" = "409"
+
+          STATE2="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC2="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          PHASE_AFTER_APPROVAL="$(jq -r --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0].phase' <<<"$STATE2")"
+          case "$PHASE_AFTER_APPROVAL" in
+            STORE_BUILD|STORE_CONNECTION_REQUIRED|CREATIVE_PRODUCTION|CREATIVE_RENDER_CONNECTION_REQUIRED|SOCIAL_CONNECTION_REQUIRED|LAUNCH_CONNECTIONS_REQUIRED) ;;
+            *) echo "Unexpected phase after product approval: $PHASE_AFTER_APPROVAL"; exit 1 ;;
+          esac
+          test "$(jq -r --arg w "$RESEARCH_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE2")" = "DONE"
+          test "$(jq -r --arg p "$PROJECT" '[.workOrders[] | select(.project_id==$p and .assigned_employee_slug=="luca")] | length' <<<"$STATE2")" = "1"
+          test "$(jq -r --arg p "$PROJECT" '[.jobs[] | select(.project_id==$p and .employee_slug=="luca" and .job_type=="STORE_BUILD")] | length' <<<"$EXEC2")" = "1"
+          test "$(jq -r --arg p "$PROJECT" '[.messages[] | select(.project_id==$p and .type=="WORK_ASSIGNMENT" and .from_employee_slug=="ava" and .to_employee_slug=="luca")] | length' <<<"$EXEC2")" = "1"
+
+          echo "Wait for Luca internal store package and truthful Shopify boundary"
+          LUCA_JOB_STATUS=""
+          for i in $(seq 1 30); do
+            STATE3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            LUCA_JOB_STATUS="$(jq -r --arg j "$LUCA_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC3")"
+            if [[ "$LUCA_JOB_STATUS" == "BLOCKED" || "$LUCA_JOB_STATUS" == "SUCCEEDED" || "$LUCA_JOB_STATUS" == "FAILED" ]]; then break; fi
+            sleep 2
+          done
+
+          echo "Luca diagnostic state"
+          echo "LUCA_JOB_STATUS=$LUCA_JOB_STATUS"
+          jq -c --arg j "$LUCA_JOB" '[.jobs[] | select(.id==$j)] | .[0] | {status,last_error,attempt_count}' <<<"$EXEC3"
+          jq -c --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j)] | map({sequence,step_type,status,last_error})' <<<"$EXEC3"
+          jq -c --arg w "$LUCA_WO" '[.workOrders[] | select(.id==$w)] | .[0] | {status,blockers}' <<<"$STATE3"
+          jq -c --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0] | {phase,status}' <<<"$STATE3"
+          jq -c --arg p "$PROJECT" '[.storePackages[] | select(.project_id==$p)] | map({status,qa_result,external_state,brand_direction,offer,page_architecture,copy_draft})' <<<"$STATE3"
+          jq -c --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p)] | map({action_type,status})' <<<"$STATE3"
+          jq -c --arg p "$PROJECT" '[.messages[] | select(.project_id==$p and .from_employee_slug=="luca")] | map({type,to_employee_slug,payload,consumed_at})' <<<"$EXEC3"
+
+          test "$LUCA_JOB_STATUS" = "BLOCKED"
+          STATE3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC3="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          test "$(jq -r --arg w "$LUCA_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE3")" = "BLOCKED_EXTERNAL_AUTH"
+          test "$(jq -r --arg p "$PROJECT" '[.projects[] | select(.id==$p)] | .[0].phase' <<<"$STATE3")" = "STORE_CONNECTION_REQUIRED"
+          test "$(jq -r --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="BRAND_STRATEGY")] | .[0].status' <<<"$EXEC3")" = "SUCCEEDED"
+          test "$(jq -r --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="STORE_BRIEF")] | .[0].status' <<<"$EXEC3")" = "SUCCEEDED"
+          test "$(jq -r --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="STORE_QA")] | .[0].status' <<<"$EXEC3")" = "SUCCEEDED"
+          test "$(jq -r --arg j "$LUCA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="EXTERNAL_HANDOFF")] | .[0].status' <<<"$EXEC3")" = "BLOCKED"
+
+          jq -e --arg p "$PROJECT" '
+            [.storePackages[] | select(.project_id==$p)] | length == 1 and
+            .[0].status == "READY_NEEDS_CONNECTION" and
+            .[0].qa_result.passed == true and
+            (.[0].brand_direction | length) > 0 and
+            (.[0].offer | length) > 0 and
+            (.[0].page_architecture | length) >= 6 and
+            (.[0].copy_draft | length) > 0 and
+            .[0].external_state.shopify == "NOT_CONNECTED" and
+            .[0].external_state.publishAllowed == false
+          ' <<<"$STATE3" >/dev/null
+
+          test "$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="SHOPIFY_DRAFT_BUILD")] | length' <<<"$STATE3")" = "0"
+          jq -e --arg p "$PROJECT" '
+            [.messages[] | select(.project_id==$p and .type=="BLOCKER" and .from_employee_slug=="luca" and .to_employee_slug=="ava" and .payload.reason=="SHOPIFY_NOT_CONNECTED")] | length >= 1
+          ' <<<"$EXEC3" >/dev/null
+
+          echo "Wait for Maya creative package and truthful render boundary"
+          MAYA_JOB=""
+          MAYA_WO=""
+          for i in $(seq 1 40); do
+            STATE4="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC4="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            MAYA_WO="$(jq -r --arg p "$PROJECT" '[.workOrders[] | select(.project_id==$p and .assigned_employee_slug=="maya")] | .[0].id // empty' <<<"$STATE4")"
+            MAYA_JOB="$(jq -r --arg p "$PROJECT" '[.jobs[] | select(.project_id==$p and .employee_slug=="maya" and .job_type=="CREATIVE_PRODUCTION")] | .[0].id // empty' <<<"$EXEC4")"
+            MAYA_STATUS="$(jq -r --arg j "$MAYA_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC4")"
+            if [[ -n "$MAYA_JOB" && "$MAYA_STATUS" == "BLOCKED" ]]; then break; fi
+            sleep 2
+          done
+          test -n "$MAYA_WO" && test -n "$MAYA_JOB"
+          test "$MAYA_STATUS" = "BLOCKED"
+          STATE4="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC4="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          test "$(jq -r --arg w "$MAYA_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE4")" = "BLOCKED_EXTERNAL_AUTH"
+          for STEP in CREATIVE_STRATEGY HOOK_LIBRARY SCRIPT_PACK STORYBOARDS CREATIVE_QA; do
+            test "$(jq -r --arg j "$MAYA_JOB" --arg s "$STEP" '[.steps[] | select(.job_id==$j and .step_type==$s)] | .[0].status' <<<"$EXEC4")" = "SUCCEEDED"
+          done
+          test "$(jq -r --arg j "$MAYA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="RENDER_HANDOFF")] | .[0].status' <<<"$EXEC4")" = "BLOCKED"
+
+          CREATIVE_ID="$(jq -r --arg p "$PROJECT" '[.creativePackages[] | select(.project_id==$p)] | .[0].id // empty' <<<"$STATE4")"
+          test -n "$CREATIVE_ID"
+          jq -e --arg id "$CREATIVE_ID" '
+            [.creativePackages[] | select(.id==$id)] | length == 1 and
+            .[0].status == "READY_NEEDS_RENDER_CONNECTION" and
+            .[0].qa_result.passed == true and
+            (.[0].hooks | length) >= 10 and
+            (.[0].scripts | length) >= 6 and
+            (.[0].storyboards | length) >= 6 and
+            .[0].external_state.renderer == "NOT_CONNECTED" and
+            .[0].external_state.renderedAssets == 0 and
+            .[0].external_state.publishableAssets == 0 and
+            ([.[0].scripts[].renderedAssetId] | all(. == null))
+          ' <<<"$STATE4" >/dev/null
+          test "$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="CREATIVE_RENDER")] | length' <<<"$STATE4")" = "0"
+          jq -e --arg p "$PROJECT" '
+            [.messages[] | select(.project_id==$p and .type=="BLOCKER" and .from_employee_slug=="maya" and .to_employee_slug=="ava" and .payload.reason=="CREATIVE_RENDER_NOT_CONNECTED")] | length >= 1
+          ' <<<"$EXEC4" >/dev/null
+
+          echo "Wait for Nova distribution package and truthful publishing boundary"
+          NOVA_JOB=""
+          NOVA_WO=""
+          for i in $(seq 1 40); do
+            STATE5="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC5="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            NOVA_WO="$(jq -r --arg p "$PROJECT" '[.workOrders[] | select(.project_id==$p and .assigned_employee_slug=="nova")] | .[0].id // empty' <<<"$STATE5")"
+            NOVA_JOB="$(jq -r --arg p "$PROJECT" '[.jobs[] | select(.project_id==$p and .employee_slug=="nova" and .job_type=="DISTRIBUTION_PLANNING")] | .[0].id // empty' <<<"$EXEC5")"
+            NOVA_STATUS="$(jq -r --arg j "$NOVA_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC5")"
+            if [[ -n "$NOVA_JOB" && "$NOVA_STATUS" == "BLOCKED" ]]; then break; fi
+            sleep 2
+          done
+          test -n "$NOVA_WO" && test -n "$NOVA_JOB"
+          test "$NOVA_STATUS" = "BLOCKED"
+          STATE5="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC5="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          test "$(jq -r --arg w "$NOVA_WO" '[.workOrders[] | select(.id==$w)] | .[0].status' <<<"$STATE5")" = "BLOCKED_EXTERNAL_AUTH"
+          for STEP in CHANNEL_PLAN CONTENT_CALENDAR DISTRIBUTION_QA; do
+            test "$(jq -r --arg j "$NOVA_JOB" --arg s "$STEP" '[.steps[] | select(.job_id==$j and .step_type==$s)] | .[0].status' <<<"$EXEC5")" = "SUCCEEDED"
+          done
+          test "$(jq -r --arg j "$NOVA_JOB" '[.steps[] | select(.job_id==$j and .step_type=="PUBLISH_HANDOFF")] | .[0].status' <<<"$EXEC5")" = "BLOCKED"
+
+          DIST_ID="$(jq -r --arg p "$PROJECT" '[.distributionPackages[] | select(.project_id==$p)] | .[0].id // empty' <<<"$STATE5")"
+          test -n "$DIST_ID"
+          jq -e --arg id "$DIST_ID" '
+            [.distributionPackages[] | select(.id==$id)] | length == 1 and
+            .[0].status == "READY_NEEDS_SOCIAL_CONNECTION" and
+            .[0].qa_result.passed == true and
+            (.[0].calendar | length) >= 10 and
+            ([.[0].calendar[].platform] | index("TikTok")) != null and
+            ([.[0].calendar[].platform] | index("Instagram Reels")) != null and
+            ([.[0].calendar[].status] | all(. == "PLANNED_NOT_PUBLISHED")) and
+            .[0].external_state.publishedCount == 0
+          ' <<<"$STATE5" >/dev/null
+          test "$(jq -r --arg p "$PROJECT" '[.approvals[] | select(.project_id==$p and .action_type=="SOCIAL_PUBLISH")] | length' <<<"$STATE5")" = "0"
+          jq -e --arg p "$PROJECT" '
+            [.messages[] | select(.project_id==$p and .type=="BLOCKER" and .from_employee_slug=="nova" and .to_employee_slug=="ava" and .payload.reason=="SOCIAL_PUBLISHING_NOT_CONNECTED")] | length >= 1
+          ' <<<"$EXEC5" >/dev/null
+
+          echo "Module 6 Command Center and Customer Ops QA"
+          ROOT_HTML="$(curl -fsS "$BASE/")"
+          grep -q "AI Employee OS" <<<"$ROOT_HTML"
+          grep -q "Launch from a reference link" <<<"$ROOT_HTML"
+          grep -q "Customer Ops" <<<"$ROOT_HTML"
+
+          SUPPORT1="$(curl -fsS -X POST "$BASE/api/company/$COMPANY/support/cases"             "${auth[@]}" -H "content-type: application/json"             -d '{"channel":"EMAIL","customerRef":"qa-customer-1@example.test","subject":"Does this work with my setup?","message":"Does this work with my car setup and what size does it fit?"}')"
+          SUPPORT1_JOB="$(jq -r '.job.id' <<<"$SUPPORT1")"
+          SUPPORT1_CASE="$(jq -r '.supportCase.id' <<<"$SUPPORT1")"
+          test "$(jq -r '.job.status' <<<"$SUPPORT1")" = "QUEUED"
+
+          SUPPORT2="$(curl -fsS -X POST "$BASE/api/company/$COMPANY/support/cases"             "${auth[@]}" -H "content-type: application/json"             -d '{"channel":"EMAIL","customerRef":"qa-customer-2@example.test","subject":"Compatibility question","message":"Will this work with my vehicle setup and is it compatible with a small car?"}')"
+          SUPPORT2_JOB="$(jq -r '.job.id' <<<"$SUPPORT2")"
+          SUPPORT2_CASE="$(jq -r '.supportCase.id' <<<"$SUPPORT2")"
+          test "$(jq -r '.job.status' <<<"$SUPPORT2")" = "QUEUED"
+
+          for i in $(seq 1 40); do
+            STATE6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+            EXEC6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+            S1="$(jq -r --arg j "$SUPPORT1_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC6")"
+            S2="$(jq -r --arg j "$SUPPORT2_JOB" '[.jobs[] | select(.id==$j)] | .[0].status // empty' <<<"$EXEC6")"
+            if [[ "$S1" == "BLOCKED" && "$S2" == "BLOCKED" ]]; then break; fi
+            sleep 2
+          done
+
+          test "$S1" = "BLOCKED"
+          test "$S2" = "BLOCKED"
+          STATE6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/state")"
+          EXEC6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/execution")"
+
+          for JOB in "$SUPPORT1_JOB" "$SUPPORT2_JOB"; do
+            for STEP in SUPPORT_CLASSIFY SUPPORT_DRAFT SUPPORT_FEEDBACK; do
+              test "$(jq -r --arg j "$JOB" --arg s "$STEP" '[.steps[] | select(.job_id==$j and .step_type==$s)] | .[0].status' <<<"$EXEC6")" = "SUCCEEDED"
+            done
+            test "$(jq -r --arg j "$JOB" '[.steps[] | select(.job_id==$j and .step_type=="SUPPORT_SEND_HANDOFF")] | .[0].status' <<<"$EXEC6")" = "BLOCKED"
+          done
+
+          jq -e --arg id "$SUPPORT1_CASE" '
+            [.supportCases[] | select(.id==$id)] | length == 1 and
+            .[0].category == "COMPATIBILITY" and
+            (. [0].draft_response | length) > 20 and
+            .[0].status == "READY_NEEDS_SUPPORT_CONNECTION" and
+            .[0].external_state.sent == false
+          ' <<<"$STATE6" >/dev/null
+          jq -e --arg id "$SUPPORT2_CASE" '
+            [.supportCases[] | select(.id==$id)] | length == 1 and
+            .[0].category == "COMPATIBILITY" and
+            (. [0].draft_response | length) > 20 and
+            .[0].status == "READY_NEEDS_SUPPORT_CONNECTION" and
+            .[0].external_state.sent == false
+          ' <<<"$STATE6" >/dev/null
+
+          jq -e '
+            [.issuePatterns[] | select(.category=="COMPATIBILITY" and .occurrences>=2)] | length >= 1
+          ' <<<"$STATE6" >/dev/null
+          jq -e '
+            [.messages[] | select(.type=="INFO_REQUEST" and .from_employee_slug=="ellis" and .to_employee_slug=="luca")] | length >= 1
+          ' <<<"$EXEC6" >/dev/null
+          jq -e '
+            [.messages[] | select(.type=="INFO_REQUEST" and .from_employee_slug=="ellis" and .to_employee_slug=="maya")] | length >= 1
+          ' <<<"$EXEC6" >/dev/null
+          test "$(jq -r '[.approvals[] | select(.action_type=="SUPPORT_SEND")] | length' <<<"$STATE6")" = "0"
+
+          BRIEF6="$(curl -fsS "${auth[@]}" "$BASE/api/company/$COMPANY/briefing")"
+          jq -e '[.attention[] | select(.assigned_employee_slug=="ellis" and .status=="BLOCKED_EXTERNAL_AUTH")] | length >= 1' <<<"$BRIEF6" >/dev/null
+
+          echo "MODULE 6 LIVE QA PASSED"
+          echo "MODULE 5 LIVE QA PASSED"
+          echo "MODULE 4 LIVE QA PASSED"
+          echo "MODULE 3 LIVE QA PASSED"
+          jq -nc             --arg company "$COMPANY"             --arg project "$PROJECT"             --arg approval "$APPROVAL"             --arg researchJob "$RESEARCH_JOB"             --arg lucaWorkOrder "$LUCA_WO"             --arg lucaJob "$LUCA_JOB"             '{result:"PASS",company:$company,project:$project,approval:$approval,researchJob:$researchJob,lucaWorkOrder:$lucaWorkOrder,lucaJob:$lucaJob}'
+
+# Edge smoke refresh 2026-09-29

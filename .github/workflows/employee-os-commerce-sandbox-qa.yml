@@ -1,0 +1,81 @@
+name: Employee OS Commerce Sandbox QA
+
+on:
+  push:
+    branches: [front-commerce-dev]
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-commerce-sandbox-qa.yml'
+  pull_request:
+    paths:
+      - 'employee-os/**'
+      - '.github/workflows/employee-os-commerce-sandbox-qa.yml'
+
+jobs:
+  commerce-sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: employeeos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d employeeos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/employeeos_test
+      PGSSLMODE: disable
+      JWT_SECRET: commerce-sandbox-jwt-secret-with-more-than-enough-entropy
+      CREDENTIALS_MASTER_KEY: dGVzdC1vbmx5LTMyLWJ5dGUta2V5LTEyMzQ1Njc4OTA=
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Employee OS
+        run: npm install --prefix employee-os --no-audit --no-fund
+
+      - name: Build Employee OS
+        run: npm run build --prefix employee-os
+
+      - name: Apply Employee OS schema
+        working-directory: employee-os
+        run: node dist/migrate.js
+
+      - name: Verify manager handoff idempotency under concurrency
+        working-directory: employee-os
+        run: node tests/manager-handoff-dedupe.mjs
+
+      - name: Run isolated commerce lifecycle
+        working-directory: employee-os
+        run: node tests/commerce-sandbox.mjs
+
+      - name: Align Link-to-Launch fixture with production Shopify scopes
+        working-directory: employee-os
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("tests/link-launch-sandbox.mjs")
+          s=p.read_text()
+          old="'read_content','write_content','read_themes','write_themes','read_online_store_pages','write_online_store_pages'"
+          new="'read_content','write_content','read_themes','write_themes','read_files','write_files','read_online_store_pages','write_online_store_pages'"
+          if old in s:
+              p.write_text(s.replace(old,new))
+          PY
+
+      - name: Run Link-to-Launch lifecycle
+        working-directory: employee-os
+        run: node tests/link-launch-sandbox.mjs
+
+      - name: Run social and support external-action sandbox
+        working-directory: employee-os
+        run: node tests/external-actions-sandbox.mjs

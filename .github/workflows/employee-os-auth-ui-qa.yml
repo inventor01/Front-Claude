@@ -1,0 +1,81 @@
+name: Employee OS Auth UI QA
+
+on:
+  push:
+    branches: [front-commerce-dev]
+    paths:
+      - 'employee-os/src/ui.ts'
+      - 'employee-os/src/api.ts'
+      - 'employee-os/src/auth.ts'
+      - '.github/workflows/employee-os-auth-ui-qa.yml'
+  pull_request:
+    paths:
+      - 'employee-os/src/ui.ts'
+      - 'employee-os/src/api.ts'
+      - 'employee-os/src/auth.ts'
+      - '.github/workflows/employee-os-auth-ui-qa.yml'
+
+jobs:
+  auth-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Employee OS
+        run: npm install --prefix employee-os --no-audit --no-fund
+
+      - name: Build Employee OS
+        run: npm run build --prefix employee-os
+
+      - name: Parse generated browser script
+        run: |
+          node --input-type=module <<'NODE'
+          const { commandCenterHtml } = await import('./employee-os/dist/ui.js');
+          const html = commandCenterHtml();
+          const match = html.match(/<script>([\s\S]*?)<\/script>/i);
+          if (!match) throw new Error('Command Center inline script not found');
+          new Function(match[1]);
+          if (!match[1].includes("document.getElementById('authForm').onsubmit")) {
+            throw new Error('Login form submit handler missing');
+          }
+          console.log('COMMAND CENTER BROWSER SCRIPT PARSES');
+          NODE
+
+      - name: Live register logout login session
+        env:
+          BASE: https://employee-os-api-production.up.railway.app
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS "$BASE/health" >/dev/null; then break; fi
+            sleep 2
+          done
+
+          SUFFIX="$(date +%s)-$RANDOM"
+          EMAIL="auth-ui-$SUFFIX@example.test"
+          PASSWORD="Auth-UI-QA-$SUFFIX-Aa9!"
+          REGISTER="$(curl -fsS -X POST "$BASE/api/auth/register"             -H 'content-type: application/json'             -d "$(jq -nc --arg e "$EMAIL" --arg p "$PASSWORD" '{email:$e,password:$p,companyName:"Auth UI Live QA"}')")"
+          TOKEN1="$(jq -r '.token' <<<"$REGISTER")"
+          COMPANY="$(jq -r '.company.id' <<<"$REGISTER")"
+          test -n "$TOKEN1" && test "$TOKEN1" != "null"
+          test -n "$COMPANY" && test "$COMPANY" != "null"
+
+          ME1="$(curl -fsS "$BASE/api/me" -H "Authorization: Bearer $TOKEN1")"
+          jq -e --arg c "$COMPANY" '[.memberships[] | select(.company_id==$c)] | length == 1' <<<"$ME1" >/dev/null
+
+          LOGIN="$(curl -fsS -X POST "$BASE/api/auth/login"             -H 'content-type: application/json'             -d "$(jq -nc --arg e "$EMAIL" --arg p "$PASSWORD" '{email:$e,password:$p}')")"
+          TOKEN2="$(jq -r '.token' <<<"$LOGIN")"
+          test -n "$TOKEN2" && test "$TOKEN2" != "null"
+
+          ME2="$(curl -fsS "$BASE/api/me" -H "Authorization: Bearer $TOKEN2")"
+          jq -e --arg c "$COMPANY" '[.memberships[] | select(.company_id==$c)] | length == 1' <<<"$ME2" >/dev/null
+
+          BAD="$(curl -sS -o /tmp/bad-login.json -w '%{http_code}' -X POST "$BASE/api/auth/login"             -H 'content-type: application/json'             -d "$(jq -nc --arg e "$EMAIL" '{email:$e,password:"definitely-wrong"}')")"
+          test "$BAD" = "401"
+
+          echo "EMPLOYEE OS AUTH UI QA PASSED"
