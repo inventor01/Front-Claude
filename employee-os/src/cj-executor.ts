@@ -275,6 +275,7 @@ export async function createCJOrderForShopify(input:{
   companyId:string;
   shopifyOrderId:string;
   shopifyOrderName:string;
+  externalOrderNumber:string;
   shippingAddress:{
     name:string;address1:string;address2?:string|null;city:string;province?:string|null;
     zip?:string|null;country?:string|null;countryCodeV2:string;phone?:string|null;
@@ -302,7 +303,7 @@ export async function createCJOrderForShopify(input:{
   const freightName=logisticsName(first);
   const origin=String(first.stock_detail?.origin||'CN');
   const body={
-    orderNumber:input.shopifyOrderName.slice(0,50),
+    orderNumber:input.externalOrderNumber.slice(0,50),
     shippingCountryCode:input.shippingAddress.countryCodeV2,
     shippingCountry:input.shippingAddress.country||countryName(input.shippingAddress.countryCodeV2),
     shippingProvince:input.shippingAddress.province||'',
@@ -329,7 +330,7 @@ export async function createCJOrderForShopify(input:{
   const detail=await cjGet<any>(input.companyId,'/shopping/order/getOrderDetail',{orderId});
   return {
     orderId,
-    orderNumber:String(detail?.orderNum||input.shopifyOrderName),
+    orderNumber:String(detail?.orderNum||input.externalOrderNumber),
     cjOrderCode:String(detail?.cjOrderCode||orderId),
     orderStatus:String(detail?.orderStatus||'CREATED'),
     amount:Number(detail?.orderAmount||0),
