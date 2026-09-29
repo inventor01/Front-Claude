@@ -208,7 +208,17 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     var rows=launches.map(function(l){
       var source=sources.find(function(s){return s.id===l.source_id;})||{};
       var product=l.identified_product||((source.analysis||{}).product||{}).searchQuery||'Identifying product…';
-      return '<div class="item"><div class="row"><b>'+esc(product)+'</b>'+badge(l.status)+'</div><p>'+esc(source.source_url||'')+'</p><span class="muted">Source: '+esc(source.provider||'')+' · confidence '+esc(l.identified_product_confidence||'pending')+(l.product_url?' · '+esc(l.product_url):'')+'</span></div>';
+      var blocked=/^BLOCKED_/.test(String(l.status||''))||/^BLOCKED_/.test(String(source.status||''));
+      var guidance='';
+      if(blocked){
+        var missing=String(source.provider||'')==='INSTAGRAM'&&!(apify&&apify.connected)
+          ? 'Connect Social reference capture in Connections, then retry this same Reel.'
+          : String(source.status||'')==='BLOCKED_ANALYSIS'&&!(openai&&openai.connected)
+            ? 'Connect Multimodal reference analysis in Connections, then retry.'
+            : 'The source is recoverable. Retry after the missing connection is available.';
+        guidance='<div class="error" style="margin-top:8px"><b>'+esc(source.status||l.status)+'</b><br>'+esc(source.error||missing)+'<br><span class="muted">'+esc(missing)+'</span></div><button class="secondary link-retry" data-project="'+esc(l.project_id)+'">Retry source</button>';
+      }
+      return '<div class="item"><div class="row"><b>'+esc(product)+'</b>'+badge(l.status)+'</div><p>'+esc(source.source_url||'')+'</p><span class="muted">Source: '+esc(source.provider||'')+' · confidence '+esc(l.identified_product_confidence||'pending')+(l.product_url?' · '+esc(l.product_url):'')+'</span>'+guidance+'</div>';
     }).join('');
     var blockers=[];
     if(!(apify&&apify.connected))blockers.push('Apify/social capture');
@@ -327,6 +337,11 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     }
     var quick=document.getElementById('linkLaunchQuickForm');
     if(quick)quick.onsubmit=async function(e){e.preventDefault();try{await submitLinkLaunch(document.getElementById('linkLaunchQuickUrl').value,[]);}catch(err){notice(err.message,'error');}};
+    document.querySelectorAll('.link-retry').forEach(function(b){b.onclick=async function(){try{
+      notice('Retrying the existing reference source…');
+      await request('/api/company/'+companyId+'/link-launches/'+b.dataset.project+'/retry-source',{method:'POST'});
+      notice('Source retry queued. Rowan will continue from the blocked step.');setTimeout(load,1200);
+    }catch(err){notice(err.message,'error');}};});
     var linkForm=document.getElementById('linkLaunchForm');
     if(linkForm)linkForm.onsubmit=async function(e){e.preventDefault();try{
       var constraints=document.getElementById('linkLaunchConstraints').value.split('\\n').map(function(x){return x.trim();}).filter(Boolean);
