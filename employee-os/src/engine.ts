@@ -296,7 +296,7 @@ async function executeStep(job:JobRow,step:any){
     const candidate=inserted.rows[0];
 
     const refsR=await pool.query(`SELECT evidence_refs FROM job_steps WHERE job_id=$1 ORDER BY sequence`,[job.id]);
-    const evidenceRefs=[...new Set(refsR.rows.flatMap((r:any)=>Array.isArray(r.evidence_refs)?r.evidence_refs:[]))];
+    const evidenceRefs:string[]=[...new Set<string>(refsR.rows.flatMap((r:any)=>Array.isArray(r.evidence_refs)?r.evidence_refs.map(String):[]))];
 
     await pool.query(`INSERT INTO employee_messages(
       company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,evidence_refs,authority_context,payload
