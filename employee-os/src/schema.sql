@@ -472,3 +472,50 @@ CREATE TABLE IF NOT EXISTS skill_test_runs (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS skill_definitions_company_idx ON skill_definitions(company_id,employee_slug,status,updated_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS supplier_product_mappings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  candidate_id uuid NOT NULL REFERENCES product_candidates(id) ON DELETE CASCADE,
+  provider text NOT NULL,
+  supplier_product_id text NOT NULL,
+  supplier_variant_id text NOT NULL,
+  supplier_sku text,
+  product_name text NOT NULL,
+  variant_name text,
+  source_price numeric NOT NULL,
+  stock_state text NOT NULL DEFAULT 'UNKNOWN',
+  stock_detail jsonb NOT NULL DEFAULT '{}'::jsonb,
+  freight_state text NOT NULL DEFAULT 'UNKNOWN',
+  freight_options jsonb NOT NULL DEFAULT '[]'::jsonb,
+  match_score integer NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'MAPPED',
+  verified_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(company_id,candidate_id,provider)
+);
+CREATE INDEX IF NOT EXISTS supplier_product_mappings_company_idx ON supplier_product_mappings(company_id,provider,status,updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS fulfillment_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  provider text NOT NULL,
+  shopify_order_id text NOT NULL,
+  shopify_order_name text,
+  mapping_id uuid REFERENCES supplier_product_mappings(id) ON DELETE SET NULL,
+  supplier_order_id text,
+  supplier_order_number text,
+  status text NOT NULL DEFAULT 'READY_TO_CREATE',
+  amount numeric,
+  currency text NOT NULL DEFAULT 'USD',
+  tracking_number text,
+  tracking_url text,
+  raw_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+  idempotency_key text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(company_id,idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS fulfillment_orders_company_idx ON fulfillment_orders(company_id,status,updated_at DESC);
