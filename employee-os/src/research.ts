@@ -85,25 +85,35 @@ export async function discoverCandidate(ownerQuery:string):Promise<DiscoveryResu
   const markdown=await fetchText(SHOPIFY_TRENDS);
   const section=markdown.split('## What products are trending right now?')[1]?.split('#### How were these trending products identified?')[0]||'';
   const rows=section.split('\n').map(clean).filter(Boolean);
+  const screened:Array<{name:string;statement:string;row:string;growth:number|null;preScore:number}>=[];
   for(const row of rows){
     const match=row.match(/^\d+\.\s+\*\*(.+?):\*\*\s*(.+)$/);
     if(!match)continue;
     const name=clean(match[1]!);
     const statement=clean(match[2]!);
     if(SAFE_TREND_BLOCK.test(name)||RISK_IP.test(name))continue;
-    const growth=statement.match(/([0-9,]+)%/);
-    return {
-      candidate:name,
-      discoveryMode:'SHOPIFY_TREND',
-      trendStatement:statement,
-      trendGrowthPct:growth?Number(growth[1]!.replace(/,/g,'')):null,
-      evidence:[{
-        sourceType:'SHOPIFY',sourceName:'Shopify Trending Products',sourceUrl:'https://www.shopify.com/blog/trending-products',
-        summary:`${name}: ${statement}`,rawExcerpt:row,confidence:'HIGH'
-      }]
-    };
+    const growthMatch=statement.match(/([0-9,]+)%/);
+    const growth=growthMatch?Number(growthMatch[1]!.replace(/,/g,'')):null;
+    const content=evaluateContentability(name).contentabilityScore;
+    const safety=reviewRisk(name);
+    const growthScore=growth===null?15:Math.min(55,Math.log10(Math.max(1,growth)+1)*18);
+    const preScore=Math.round(growthScore+content*.45-safety.riskPenalty);
+    screened.push({name,statement,row,growth,preScore});
   }
-  throw new Error('No safe candidate could be extracted from Shopify trending-product evidence.');
+  if(!screened.length)throw new Error('No safe candidate could be extracted from Shopify trending-product evidence.');
+  screened.sort((a,b)=>b.preScore-a.preScore||(b.growth||0)-(a.growth||0));
+  const winner=screened[0]!;
+  return {
+    candidate:winner.name,
+    discoveryMode:'SHOPIFY_TREND',
+    trendStatement:winner.statement,
+    trendGrowthPct:winner.growth,
+    evidence:[{
+      sourceType:'SHOPIFY',sourceName:'Shopify Trending Products',sourceUrl:'https://www.shopify.com/blog/trending-products',
+      summary:`${winner.name}: ${winner.statement}. Selected after screening ${screened.length} safe trend candidates for acceleration, contentability, and obvious risk.`,
+      rawExcerpt:winner.row,confidence:'HIGH'
+    }]
+  };
 }
 
 export async function validateDemand(candidate:string,discovery?:DiscoveryResult):Promise<DemandResult>{
