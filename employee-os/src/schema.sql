@@ -317,3 +317,100 @@ CREATE TABLE IF NOT EXISTS issue_patterns (
   UNIQUE(company_id,pattern_key)
 );
 CREATE INDEX IF NOT EXISTS issue_patterns_company_idx ON issue_patterns(company_id,last_seen_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS reasoning_profiles (
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  employee_slug text NOT NULL,
+  first_principles boolean NOT NULL DEFAULT true,
+  forward_horizon_steps integer NOT NULL DEFAULT 3,
+  uncertainty_policy text NOT NULL DEFAULT 'NEVER_ASSUME',
+  learning_policy text NOT NULL DEFAULT 'LEARN_FROM_BEST_AVAILABLE_EVIDENCE',
+  operating_principles jsonb NOT NULL DEFAULT '[]'::jsonb,
+  verification_policy jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(company_id,employee_slug)
+);
+
+CREATE TABLE IF NOT EXISTS training_sources (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  employee_slug text,
+  source_type text NOT NULL,
+  title text NOT NULL,
+  source_url text,
+  source_author text,
+  raw_content text NOT NULL,
+  source_quality text NOT NULL DEFAULT 'UNVERIFIED',
+  status text NOT NULL DEFAULT 'ACTIVE',
+  tags jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ingest_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_by uuid NOT NULL REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS training_sources_company_employee_idx ON training_sources(company_id,employee_slug,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS training_lessons (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  source_id uuid NOT NULL REFERENCES training_sources(id) ON DELETE CASCADE,
+  employee_slug text,
+  lesson_type text NOT NULL,
+  principle text NOT NULL,
+  applicability text NOT NULL,
+  confidence text NOT NULL DEFAULT 'LOW',
+  status text NOT NULL DEFAULT 'ACTIVE',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS training_lessons_company_employee_idx ON training_lessons(company_id,employee_slug,status,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS tool_catalog (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  tool_id text NOT NULL,
+  name text NOT NULL,
+  provider text NOT NULL,
+  capability text NOT NULL,
+  verification_grade text NOT NULL DEFAULT 'UNKNOWN',
+  automation_policy text NOT NULL DEFAULT 'REVIEW_REQUIRED',
+  source_url text,
+  status text NOT NULL DEFAULT 'AVAILABLE',
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  discovered_by text NOT NULL DEFAULT 'SYSTEM',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(company_id,tool_id)
+);
+CREATE INDEX IF NOT EXISTS tool_catalog_company_capability_idx ON tool_catalog(company_id,capability,status);
+
+CREATE TABLE IF NOT EXISTS tool_discovery_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  claim_type text NOT NULL,
+  query text NOT NULL,
+  status text NOT NULL,
+  results jsonb NOT NULL DEFAULT '[]'::jsonb,
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS verification_claims (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_id uuid REFERENCES projects(id) ON DELETE SET NULL,
+  work_order_id uuid REFERENCES work_orders(id) ON DELETE SET NULL,
+  employee_slug text NOT NULL,
+  claim_type text NOT NULL,
+  claim_text text NOT NULL,
+  desired_grade text NOT NULL DEFAULT 'VERIFIED_FIRST_PARTY',
+  status text NOT NULL DEFAULT 'PENDING',
+  selected_tool_id text,
+  result_summary text,
+  evidence_refs jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS verification_claims_company_idx ON verification_claims(company_id,status,created_at DESC);
