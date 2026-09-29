@@ -205,7 +205,7 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
   function renderConnections(){
     var connected=shopify&&shopify.connected, meta=(shopify&&shopify.metadata)||{};
     var status=connected?'<div class="success"><b>Shopify connected</b><br>'+esc(meta.storeName||meta.storeDomain||'Store')+' · '+esc((meta.primaryDomain||{}).url||meta.storeDomain||'')+'</div>':'<div class="error"><b>Shopify not connected</b><br>Luca can build the internal store package, but cannot create a live storefront until a dedicated venture store is authorized once.</div>';
-    var scopes='write_products, read_publications, write_publications, read_content, write_content';
+    var scopes='read_products, write_products, read_publications, write_publications, read_content, write_content, read_online_store_pages, write_online_store_pages';
     return '<div class="hero"><h2>Connections</h2><p>Authorize external tools once. Employees can then use them through audited backend adapters without exposing credentials to the browser again.</p></div>'+
       '<div class="grid two"><div class="card"><h3>Shopify execution</h3>'+status+
       (connected?'<p>API version: '+esc(meta.apiVersion||'2026-07')+' · Online Store: '+esc(meta.publicationTitle||'Online Store')+'</p><button id="disconnectShopify" class="danger">Disconnect Shopify</button>':
