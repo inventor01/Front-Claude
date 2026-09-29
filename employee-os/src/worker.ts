@@ -3,6 +3,8 @@ import { processOneManagerMessage } from './manager.js';
 import { pollPaidShopifyOrdersOnce,processApprovedCJPaymentsOnce,syncCJFulfillmentOnce } from './commerce-sync.js';
 
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
+let nextCommerceSyncAt=0;
+const COMMERCE_SYNC_INTERVAL_MS=60_000;
 console.log('employee worker started');
 
 for(;;){
@@ -18,12 +20,15 @@ for(;;){
       if(!m.processed)break;
       processed++;
     }
-    const orders=await pollPaidShopifyOrdersOnce();
-    processed+=orders.processed;
-    const payments=await processApprovedCJPaymentsOnce();
-    processed+=payments.processed;
-    const tracking=await syncCJFulfillmentOnce();
-    processed+=tracking.processed;
+    if(Date.now()>=nextCommerceSyncAt){
+      nextCommerceSyncAt=Date.now()+COMMERCE_SYNC_INTERVAL_MS;
+      const orders=await pollPaidShopifyOrdersOnce();
+      processed+=orders.processed;
+      const payments=await processApprovedCJPaymentsOnce();
+      processed+=payments.processed;
+      const tracking=await syncCJFulfillmentOnce();
+      processed+=tracking.processed;
+    }
     if(!processed)await sleep(3000);
   }catch(e){
     console.error('worker loop error',e);
