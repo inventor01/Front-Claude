@@ -220,6 +220,127 @@ async function executeStep(job:JobRow,step:any){
     return {output:{status:'WAITING_APPROVAL',approvalId:approval.rows[0].id,packageId:p.rows[0].id},evidenceRefs:[]};
   }
 
+  if(job.job_type==='SUPPORT_CASE' && step.step_type==='SUPPORT_CLASSIFY'){
+    const caseId=String(job.payload?.supportCaseId||'');
+    const r=await pool.query('SELECT * FROM support_cases WHERE id=$1 AND company_id=$2',[caseId,job.company_id]);
+    if(!r.rowCount)throw new Error('Support case not found.');
+    const supportCase=r.rows[0];
+    const text=`${supportCase.subject} ${supportCase.customer_message}`.toLowerCase();
+    let category='GENERAL_QUESTION';
+    if(/refund|return|money back/.test(text))category='REFUND_RETURN';
+    else if(/where.*order|tracking|arriv|delivery|shipping/.test(text))category='ORDER_SHIPPING';
+    else if(/broken|damaged|defect|doesn.t work|not working/.test(text))category='PRODUCT_ISSUE';
+    else if(/fit|compatible|work with|size|use on/.test(text))category='COMPATIBILITY';
+    else if(/cancel/.test(text))category='CANCELLATION';
+    const severity=/chargeback|lawyer|legal|fraud|injur|unsafe|bank dispute/.test(text)?'HIGH':/refund|damaged|not working/.test(text)?'MEDIUM':'LOW';
+    await pool.query(`UPDATE support_cases SET category=$2,severity=$3,status='CLASSIFIED',updated_at=now() WHERE id=$1`,[
+      caseId,category,severity
+    ]);
+    return {output:{caseId,category,severity,status:'CLASSIFIED'},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='SUPPORT_CASE' && step.step_type==='SUPPORT_DRAFT'){
+    const caseId=String(job.payload?.supportCaseId||'');
+    const r=await pool.query('SELECT * FROM support_cases WHERE id=$1 AND company_id=$2',[caseId,job.company_id]);
+    if(!r.rowCount)throw new Error('Support case not found for drafting.');
+    const sc=r.rows[0];
+    const responses:Record<string,string>={
+      ORDER_SHIPPING:'Thanks for reaching out. I can help check the order status. Please share the order number or the email used at checkout. I will only give a delivery estimate once it is verified from the order or carrier record.',
+      REFUND_RETURN:'Thanks for reaching out. I can help with the return or refund request. Please share the order number and the reason for the request so I can apply the store policy accurately. I will not promise a refund amount until the order and policy are verified.',
+      PRODUCT_ISSUE:'Thanks for letting us know. I want to get this resolved. Please send the order number and a short description or photo of the issue if available. I will check the product/order details before recommending the next step.',
+      COMPATIBILITY:'Thanks for the question. I can check compatibility for you. Please tell me the exact model, surface, size, or setup you plan to use it with. I will avoid guessing when the product specifications do not verify compatibility.',
+      CANCELLATION:'I can help check whether the order can still be cancelled. Please share the order number. I will confirm its fulfillment state before promising a cancellation.',
+      GENERAL_QUESTION:'Thanks for reaching out. I can help. Please share any order number or product detail that applies, and I will answer from the verified store and order information rather than guess.'
+    };
+    const draft=responses[String(sc.category)]||responses.GENERAL_QUESTION;
+    await pool.query(`UPDATE support_cases SET draft_response=$2,status='DRAFT_READY',updated_at=now() WHERE id=$1`,[caseId,draft]);
+    return {output:{caseId,status:'DRAFT_READY',draftResponse:draft},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='SUPPORT_CASE' && step.step_type==='SUPPORT_FEEDBACK'){
+    const caseId=String(job.payload?.supportCaseId||'');
+    const r=await pool.query('SELECT * FROM support_cases WHERE id=$1 AND company_id=$2',[caseId,job.company_id]);
+    if(!r.rowCount)throw new Error('Support case not found for feedback.');
+    const sc=r.rows[0];
+    const category=String(sc.category||'GENERAL_QUESTION');
+    const patternKey=category.toLowerCase();
+    const pattern=await pool.query(`INSERT INTO issue_patterns(company_id,pattern_key,category,latest_example)
+      VALUES($1,$2,$3,$4)
+      ON CONFLICT(company_id,pattern_key) DO UPDATE SET
+        occurrences=issue_patterns.occurrences+1,
+        latest_example=EXCLUDED.latest_example,
+        last_seen_at=now()
+      RETURNING *`,[
+      job.company_id,patternKey,category,String(sc.customer_message).slice(0,500)
+    ]);
+    const p=pattern.rows[0];
+    if(Number(p.occurrences)>=2){
+      for(const to of ['luca','maya']){
+        const existing=await pool.query(`SELECT id FROM employee_messages WHERE company_id=$1 AND type='INFO_REQUEST'
+          AND from_employee_slug='ellis' AND to_employee_slug=$2
+          AND payload->>'patternId'=$3 AND consumed_at IS NULL LIMIT 1`,[job.company_id,to,String(p.id)]);
+        if(!existing.rowCount){
+          await pool.query(`INSERT INTO employee_messages(
+            company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,
+            authority_context,payload
+          ) VALUES($1,$2,$3,'INFO_REQUEST','ellis',$4,$5,$6,$7,$8)`,[
+            job.company_id,job.project_id,job.work_order_id,to,
+            `Recurring customer issue: ${category}`,
+            to==='luca'?'Review store page/FAQ for a clearer answer':'Consider a truthful content piece that answers this repeated question',
+            JSON.stringify({publishAllowed:false,spendAllowed:false}),
+            JSON.stringify({patternId:p.id,category,occurrences:p.occurrences,latestExample:p.latest_example})
+          ]);
+        }
+      }
+      await emitEvent(job.company_id,'CUSTOMER_ISSUE_PATTERN_DETECTED',{patternId:p.id,category,occurrences:p.occurrences});
+    }
+    return {output:{caseId,patternId:p.id,category,occurrences:p.occurrences,status:'FEEDBACK_RECORDED'},evidenceRefs:[]};
+  }
+
+  if(job.job_type==='SUPPORT_CASE' && step.step_type==='SUPPORT_SEND_HANDOFF'){
+    const caseId=String(job.payload?.supportCaseId||'');
+    const r=await pool.query('SELECT * FROM support_cases WHERE id=$1 AND company_id=$2',[caseId,job.company_id]);
+    if(!r.rowCount)throw new Error('Support case missing for send handoff.');
+    const sc=r.rows[0];
+    const provider=String(sc.channel).toUpperCase()==='LIVE_CHAT'?'LIVE_CHAT':'EMAIL';
+    const connection=await pool.query(`SELECT * FROM tool_connections
+      WHERE company_id=$1 AND provider=$2 AND status='CONNECTED'
+      ORDER BY updated_at DESC LIMIT 1`,[job.company_id,provider]);
+    if(!connection.rowCount){
+      await pool.query(`UPDATE support_cases SET status='READY_NEEDS_SUPPORT_CONNECTION',
+        external_state=$2,updated_at=now() WHERE id=$1`,[
+        caseId,JSON.stringify({provider,status:'NOT_CONNECTED',sent:false,lastCheckedAt:new Date().toISOString()})
+      ]);
+      const existing=await pool.query(`SELECT id FROM employee_messages WHERE company_id=$1 AND work_order_id=$2
+        AND type='BLOCKER' AND from_employee_slug='ellis' AND to_employee_slug='ava'
+        AND payload->>'reason'='SUPPORT_PROVIDER_NOT_CONNECTED' AND consumed_at IS NULL LIMIT 1`,[
+        job.company_id,job.work_order_id
+      ]);
+      if(!existing.rowCount){
+        await pool.query(`INSERT INTO employee_messages(
+          company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,authority_context,payload
+        ) VALUES($1,$2,$3,'BLOCKER','ellis','ava','Customer reply provider connection required','Connect an authorized customer support provider',$4,$5)`,[
+          job.company_id,job.project_id,job.work_order_id,JSON.stringify({customerContactAllowed:false,spendAllowed:false}),
+          JSON.stringify({supportCaseId:caseId,reason:'SUPPORT_PROVIDER_NOT_CONNECTED',provider})
+        ]);
+      }
+      throw new Error(`BLOCKED_EXTERNAL_AUTH: ${provider} support provider is not connected`);
+    }
+    const approval=await pool.query(`INSERT INTO approvals(
+      company_id,project_id,work_order_id,job_id,requested_by_employee_slug,action_type,action_payload,reason,risk,cost_cents,status
+    ) VALUES($1,$2,$3,$4,'ellis','SUPPORT_SEND',$5,$6,'MEDIUM',0,'PENDING') RETURNING id`,[
+      job.company_id,job.project_id,job.work_order_id,job.id,
+      JSON.stringify({supportCaseId:caseId,connectionId:connection.rows[0].id,provider}),
+      'Ellis prepared a customer reply. Owner approval is required before the MVP sends an external customer message.'
+    ]);
+    await pool.query(`UPDATE support_cases SET status='NEEDS_SEND_APPROVAL',
+      external_state=$2,updated_at=now() WHERE id=$1`,[
+      caseId,JSON.stringify({provider,status:'CONNECTED',sent:false,approvalId:approval.rows[0].id})
+    ]);
+    await pool.query(`UPDATE work_orders SET status='NEEDS_APPROVAL',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[job.work_order_id]);
+    return {output:{caseId,status:'WAITING_APPROVAL',approvalId:approval.rows[0].id},evidenceRefs:[]};
+  }
+
   if(job.job_type==='CREATIVE_PRODUCTION' && step.step_type==='CREATIVE_STRATEGY'){
     const candidateId=String(job.payload?.candidateId||'');
     const storePackageId=String(job.payload?.storePackageId||'');
