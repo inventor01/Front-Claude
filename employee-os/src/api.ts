@@ -85,20 +85,157 @@ app.post('/api/company/:companyId/objectives',async(req,reply)=>{
   });
   return reply.code(202).send(result);
 });
+app.get('/api/company/:companyId/briefing',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as any; await requireCompany(userId,companyId);
+  const [projects,approvals,blocked,events,candidates,messages]=await Promise.all([
+    pool.query(`SELECT id,name,phase,status,updated_at FROM projects WHERE company_id=$1 AND status='ACTIVE' ORDER BY updated_at DESC LIMIT 20`,[companyId]),
+    pool.query(`SELECT id,project_id,work_order_id,action_type,reason,risk,cost_cents,status,created_at FROM approvals WHERE company_id=$1 AND status='PENDING' ORDER BY created_at`,[companyId]),
+    pool.query(`SELECT id,project_id,assigned_employee_slug,objective,status,blockers,updated_at FROM work_orders WHERE company_id=$1 AND status IN ('BLOCKED','BLOCKED_EXTERNAL_AUTH','FAILED','NEEDS_APPROVAL','PARTIAL') ORDER BY updated_at DESC LIMIT 30`,[companyId]),
+    pool.query(`SELECT type,payload,created_at FROM events WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20`,[companyId]),
+    pool.query(`SELECT id,project_id,name,status,score,confidence,contentability_score,updated_at FROM product_candidates WHERE company_id=$1 ORDER BY updated_at DESC LIMIT 20`,[companyId]),
+    pool.query(`SELECT id,type,from_employee_slug,to_employee_slug,objective,required_output,created_at FROM employee_messages WHERE company_id=$1 AND consumed_at IS NULL ORDER BY created_at LIMIT 30`,[companyId])
+  ]);
+  return {
+    generatedAt:new Date().toISOString(),
+    activeProjects:projects.rows,
+    decisionsNeeded:approvals.rows,
+    attention:blocked.rows,
+    latestCandidates:candidates.rows,
+    unconsumedMessages:messages.rows,
+    recentEvents:events.rows
+  };
+});
+
+app.get('/api/company/:companyId/memories',async req=>{
+  const userId=await requireUser(req),{companyId}=req.params as any; await requireCompany(userId,companyId);
+  const r=await pool.query(`SELECT * FROM memories WHERE company_id=$1 AND status='ACTIVE' ORDER BY created_at DESC LIMIT 200`,[companyId]);
+  return {memories:r.rows};
+});
+
+app.post('/api/company/:companyId/memories',async(req,reply)=>{
+  const userId=await requireUser(req),{companyId}=req.params as any;
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
+  const body=z.object({
+    type:z.enum(['VERIFIED_FACT','EMPLOYEE_INTERPRETATION','LEARNED_PREFERENCE','HYPOTHESIS','LESSON']),
+    subject:z.string().min(2).max(160),
+    content:z.string().min(2).max(4000),
+    source:z.string().max(500).optional(),
+    confidence:z.enum(['LOW','MEDIUM','HIGH']).default('MEDIUM')
+  }).parse(req.body);
+  if(body.type==='VERIFIED_FACT'&&!body.source)return reply.code(400).send({error:'VERIFIED_FACT requires a source'});
+  const r=await pool.query(`INSERT INTO memories(company_id,type,subject,content,source,confidence,created_by,last_verified_at)
+    VALUES($1,$2,$3,$4,$5,$6,$7,CASE WHEN $2='VERIFIED_FACT' THEN now() ELSE NULL END) RETURNING *`,
+    [companyId,body.type,body.subject,body.content,body.source||null,body.confidence,`user:${userId}`]);
+  await pool.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'MEMORY_CREATED',$2)`,[
+    companyId,JSON.stringify({memoryId:r.rows[0].id,type:body.type,subject:body.subject})
+  ]);
+  return reply.code(201).send(r.rows[0]);
+});
+
 app.post('/api/company/:companyId/approvals/:approvalId/:decision',async(req,reply)=>{
-  const userId=await requireUser(req),{companyId,approvalId,decision}=req.params as any; await requireCompany(userId,companyId);
+  const userId=await requireUser(req),{companyId,approvalId,decision}=req.params as any;
+  const membership=await requireCompany(userId,companyId);
+  if(!['OWNER','ADMIN'].includes(membership.role))return reply.code(403).send({error:'Owner or admin permission required'});
   if(!['approve','reject'].includes(decision))return reply.code(400).send({error:'Invalid decision'});
-  const r=await tx(async c=>{
+
+  const result=await tx(async c=>{
     const a=await c.query('SELECT * FROM approvals WHERE id=$1 AND company_id=$2 FOR UPDATE',[approvalId,companyId]);
     if(!a.rowCount)throw Object.assign(new Error('Approval not found'),{statusCode:404});
-    if(a.rows[0].status!=='PENDING')throw Object.assign(new Error('Approval already resolved'),{statusCode:409});
+    const approval=a.rows[0];
+    if(approval.status!=='PENDING')throw Object.assign(new Error('Approval already resolved'),{statusCode:409});
+
     const status=decision==='approve'?'APPROVED':'REJECTED';
-    const u=await c.query('UPDATE approvals SET status=$3,resolved_at=now(),resolved_by=$4 WHERE id=$1 AND company_id=$2 RETURNING *',[approvalId,companyId,status,userId]);
-    if(a.rows[0].job_id)await c.query(`UPDATE jobs SET status=$2,scheduled_for=now(),updated_at=now() WHERE id=$1`,[a.rows[0].job_id,decision==='approve'?'QUEUED':'CANCELLED']);
-    await c.query('INSERT INTO events(company_id,type,payload) VALUES($1,$2,$3)',[companyId,decision==='approve'?'APPROVAL_GRANTED':'APPROVAL_REJECTED',JSON.stringify({approvalId})]);
-    return u.rows[0];
+    const updated=await c.query(`UPDATE approvals SET status=$3,resolved_at=now(),resolved_by=$4
+      WHERE id=$1 AND company_id=$2 RETURNING *`,[approvalId,companyId,status,userId]);
+
+    let handoff:any=null;
+    if(approval.action_type==='PRODUCT_GATE'){
+      const payload=approval.action_payload||{};
+      const candidateId=String(payload.candidateId||'');
+      const candidateR=await c.query('SELECT * FROM product_candidates WHERE id=$1 AND company_id=$2 FOR UPDATE',[candidateId,companyId]);
+      if(!candidateR.rowCount)throw Object.assign(new Error('Product candidate not found'),{statusCode:409});
+      const candidate=candidateR.rows[0];
+
+      if(decision==='approve'){
+        await c.query(`UPDATE product_candidates SET status='APPROVED',updated_at=now() WHERE id=$1`,[candidate.id]);
+        if(approval.work_order_id){
+          await c.query(`UPDATE work_orders SET status='DONE',blockers='[]'::jsonb,updated_at=now() WHERE id=$1`,[approval.work_order_id]);
+        }
+
+        let storeWork=await c.query(`SELECT * FROM work_orders
+          WHERE company_id=$1 AND project_id=$2 AND assigned_employee_slug='luca'
+          AND objective LIKE 'Build brand and store%' ORDER BY created_at DESC LIMIT 1`,[companyId,approval.project_id]);
+        if(!storeWork.rowCount){
+          storeWork=await c.query(`INSERT INTO work_orders(
+            company_id,project_id,owner_employee_slug,assigned_employee_slug,objective,status,risk_level,success_criteria
+          ) VALUES($1,$2,'ava','luca',$3,'READY','MEDIUM',$4) RETURNING *`,[
+            companyId,approval.project_id,`Build brand and store package for ${candidate.name}`,
+            JSON.stringify(['brand/store brief persisted','mobile-first page architecture','claims trace to evidence','Shopify state is truthful','external publish requires authorization'])
+          ]);
+        }
+        const work=storeWork.rows[0];
+
+        let job=await c.query(`SELECT * FROM jobs WHERE company_id=$1 AND idempotency_key=$2 LIMIT 1`,[
+          companyId,`store-build:${candidate.id}`
+        ]);
+        if(!job.rowCount){
+          job=await c.query(`INSERT INTO jobs(
+            company_id,project_id,work_order_id,employee_slug,job_type,payload,idempotency_key
+          ) VALUES($1,$2,$3,'luca','STORE_BUILD',$4,$5) RETURNING *`,[
+            companyId,approval.project_id,work.id,
+            JSON.stringify({candidateId:candidate.id,candidate:candidate.name,researchWorkOrderId:approval.work_order_id}),
+            `store-build:${candidate.id}`
+          ]);
+          const steps=['BRAND_STRATEGY','STORE_BRIEF','STORE_QA','EXTERNAL_HANDOFF'];
+          for(let i=0;i<steps.length;i++){
+            await c.query(`INSERT INTO job_steps(company_id,job_id,sequence,step_type,input)
+              VALUES($1,$2,$3,$4,$5) ON CONFLICT(job_id,sequence) DO NOTHING`,[
+              companyId,job.rows[0].id,i+1,steps[i],JSON.stringify({candidateId:candidate.id,candidate:candidate.name})
+            ]);
+          }
+          await c.query(`INSERT INTO employee_messages(
+            company_id,project_id,work_order_id,type,from_employee_slug,to_employee_slug,objective,required_output,
+            evidence_refs,authority_context,payload
+          ) VALUES($1,$2,$3,'WORK_ASSIGNMENT','ava','luca',$4,'Complete internal brand/store package',$5,$6,$7)`,[
+            companyId,approval.project_id,work.id,`Build the brand and store system for ${candidate.name}`,
+            JSON.stringify([]),JSON.stringify({risk:'MEDIUM',publishAllowed:false,spendAllowed:false,productGateApproved:true}),
+            JSON.stringify({jobId:job.rows[0].id,candidateId:candidate.id})
+          ]);
+        }
+
+        await c.query(`UPDATE projects SET phase='STORE_BUILD',updated_at=now() WHERE id=$1`,[approval.project_id]);
+        await c.query(`INSERT INTO events(company_id,type,payload) VALUES
+          ($1,'APPROVAL_GRANTED',$2),($1,'WORK_ASSIGNMENT_CREATED',$3)`,[
+          companyId,JSON.stringify({approvalId,candidateId:candidate.id}),
+          JSON.stringify({projectId:approval.project_id,workOrderId:work.id,jobId:job.rows[0].id,from:'ava',to:'luca'})
+        ]);
+        handoff={workOrder:work,job:job.rows[0],candidateId:candidate.id};
+      }else{
+        await c.query(`UPDATE product_candidates SET status='REJECTED',updated_at=now() WHERE id=$1`,[candidate.id]);
+        if(approval.work_order_id){
+          await c.query(`UPDATE work_orders SET status='PARTIAL',blockers=$2,updated_at=now() WHERE id=$1`,[
+            approval.work_order_id,JSON.stringify(['Owner rejected product at product gate; research iteration required.'])
+          ]);
+        }
+        await c.query(`UPDATE projects SET phase='RESEARCH_ITERATION',updated_at=now() WHERE id=$1`,[approval.project_id]);
+        await c.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'APPROVAL_REJECTED',$2)`,[
+          companyId,JSON.stringify({approvalId,candidateId:candidate.id})
+        ]);
+      }
+    }else{
+      if(approval.job_id){
+        await c.query(`UPDATE jobs SET status=$2,scheduled_for=now(),updated_at=now() WHERE id=$1`,[
+          approval.job_id,decision==='approve'?'QUEUED':'CANCELLED'
+        ]);
+      }
+      await c.query(`INSERT INTO events(company_id,type,payload) VALUES($1,$2,$3)`,[
+        companyId,decision==='approve'?'APPROVAL_GRANTED':'APPROVAL_REJECTED',JSON.stringify({approvalId})
+      ]);
+    }
+    return {approval:updated.rows[0],handoff};
   });
-  return r;
+  return result;
 });
 app.setErrorHandler((e:any,_req,reply)=>reply.code(e.statusCode||400).send({error:e.message||'Request failed'}));
 const port=Number(process.env.PORT||3000); await app.listen({host:'0.0.0.0',port});
