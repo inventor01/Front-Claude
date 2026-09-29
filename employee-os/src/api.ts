@@ -438,7 +438,7 @@ app.post('/api/company/:companyId/approvals/:approvalId/:decision',async(req,rep
             JSON.stringify({candidateId:candidate.id,candidate:candidate.name,researchWorkOrderId:approval.work_order_id}),
             `store-build:${candidate.id}`
           ]);
-          const steps=['BRAND_STRATEGY','STORE_BRIEF','STORE_QA','EXTERNAL_HANDOFF'];
+          const steps=['BRAND_STRATEGY','STORE_BRIEF','STORE_QA','EXTERNAL_HANDOFF','SHOPIFY_EXECUTE'];
           for(let i=0;i<steps.length;i++){
             await c.query(`INSERT INTO job_steps(company_id,job_id,sequence,step_type,input)
               VALUES($1,$2,$3,$4,$5) ON CONFLICT(job_id,sequence) DO NOTHING`,[
@@ -476,12 +476,19 @@ app.post('/api/company/:companyId/approvals/:approvalId/:decision',async(req,rep
       }
     }else{
       if(approval.job_id){
-        await c.query(`UPDATE jobs SET status=$2,scheduled_for=now(),updated_at=now() WHERE id=$1`,[
+        await c.query(`UPDATE jobs SET status=$2,scheduled_for=now(),last_error=NULL,updated_at=now() WHERE id=$1`,[
           approval.job_id,decision==='approve'?'QUEUED':'CANCELLED'
         ]);
       }
+      if(approval.work_order_id){
+        await c.query(`UPDATE work_orders SET status=$2,blockers=$3,updated_at=now() WHERE id=$1`,[
+          approval.work_order_id,
+          decision==='approve'?'IN_PROGRESS':'CANCELLED',
+          JSON.stringify(decision==='approve'?[]:['Owner rejected requested external action.'])
+        ]);
+      }
       await c.query(`INSERT INTO events(company_id,type,payload) VALUES($1,$2,$3)`,[
-        companyId,decision==='approve'?'APPROVAL_GRANTED':'APPROVAL_REJECTED',JSON.stringify({approvalId})
+        companyId,decision==='approve'?'APPROVAL_GRANTED':'APPROVAL_REJECTED',JSON.stringify({approvalId,actionType:approval.action_type})
       ]);
     }
     return {approval:updated.rows[0],handoff};
