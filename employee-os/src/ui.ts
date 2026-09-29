@@ -215,10 +215,12 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
       var blocked=/^BLOCKED_/.test(String(l.status||''))||/^BLOCKED_/.test(String(source.status||''));
       var guidance='';
       if(blocked){
-        var missing=String(source.provider||'')==='INSTAGRAM'&&!(front&&front.connected)
-          ? 'Connect Front Intelligence in Connections, then retry this same Reel. Front is the primary social-intelligence gateway; advanced capture fallback is optional.'
+        var missing=String(source.provider||'')==='INSTAGRAM'&&!(apify&&apify.connected)
+          ? ((front&&front.connected)
+              ? 'Front Intelligence is connected. Instagram media capture currently still needs the Advanced Apify fallback until Instagram is added to Front browser capture.'
+              : 'Connect Front Intelligence for the primary social-intelligence layer. For this Instagram Reel, also connect the Advanced Apify fallback until Front gains Instagram browser capture.')
           : String(source.status||'')==='BLOCKED_ANALYSIS'&&!(openai&&openai.connected)
-            ? 'Connect Multimodal reference analysis in Connections, then retry.'
+            ? 'Connect Multimodal reference analysis in Advanced source fallbacks, then retry.'
             : 'The source is recoverable. Retry after the missing connection is available.';
         guidance='<div class="error" style="margin-top:8px"><b>'+esc(source.status||l.status)+'</b><br>'+esc(source.error||missing)+'<br><span class="muted">'+esc(missing)+'</span></div><button class="secondary link-retry" data-project="'+esc(l.project_id)+'">Retry source</button>';
       }
@@ -226,8 +228,9 @@ textarea{min-height:92px;resize:vertical}.form{display:grid;gap:8px}.action{back
     }).join('');
     var blockers=[];
     if(!(front&&front.connected))blockers.push('Front Intelligence');
+    if(!(apify&&apify.connected))blockers.push('Advanced Instagram capture fallback');
     if(!(openai&&openai.connected))blockers.push('multimodal analyzer');
-    var status=blockers.length?'<div class="error">Connect '+esc(blockers.join(' + '))+' in Connections before a blocked Instagram source can be visually analyzed.</div>':'<div class="success">Social capture and multimodal analysis are connected.</div>';
+    var status=blockers.length?'<div class="error">Missing for Instagram Link-to-Launch: '+esc(blockers.join(' + '))+'. Front remains the primary intelligence layer; Apify is only the temporary Instagram retrieval fallback.</div>':'<div class="success">Front intelligence, Instagram source capture fallback, and multimodal analysis are connected.</div>';
     return '<div class="hero"><h2>Link-to-Launch</h2><p>Paste one social-commerce reference. Rowan identifies and sources the product; Luca builds the storefront; Maya models the creative structure into original variants; Nova plans distribution; Ellis owns customer operations.</p></div>'+
       status+
       '<div class="card"><form id="linkLaunchForm" class="form"><input id="linkLaunchUrl" placeholder="https://www.instagram.com/reel/..."/><textarea id="linkLaunchConstraints" placeholder="Optional constraints, one per line">Prefer lowest verified landed cost without sacrificing reasonable U.S. delivery&#10;Avoid regulated, high-return, IP-sensitive, or unsafe products&#10;No publishing or spending without owner approval</textarea><button class="action">Start Link-to-Launch</button></form></div>'+
