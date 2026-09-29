@@ -59,7 +59,7 @@ export async function connectShopify(input:{companyId:string;storeDomain:string;
   }`);
 
   const granted=new Set(data.currentAppInstallation.accessScopes.map((scope)=>scope.handle));
-  const required=['read_products','write_products','read_publications','write_publications','read_content','write_content','read_online_store_pages','write_online_store_pages'];
+  const required=['read_products','write_products','read_orders','read_publications','write_publications','read_content','write_content','read_online_store_pages','write_online_store_pages'];
   const missing=required.filter((scope)=>!granted.has(scope));
   if(missing.length){
     throw new Error(`Shopify connection is missing required scopes: ${missing.join(', ')}`);
