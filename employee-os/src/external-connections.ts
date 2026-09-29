@@ -1,6 +1,9 @@
 import { pool } from './db.js';
 import { readCredential,storeCredential,deleteCredential } from './credentials.js';
 
+const AYRSHARE_BASE=(process.env.AYRSHARE_TEST_BASE_URL||'https://app.ayrshare.com').replace(/\/$/,'');
+const RESEND_BASE=(process.env.RESEND_TEST_BASE_URL||'https://api.resend.com').replace(/\/$/,'');
+
 type StatusRow={id:string;status:string;metadata:any;updated_at:string};
 
 async function latest(companyId:string,provider:string){
@@ -68,7 +71,7 @@ export async function frontCredential(companyId:string){
 
 export async function connectAyrshare(input:{companyId:string;apiKey:string}){
   const apiKey=input.apiKey.trim();
-  const res=await fetch('https://app.ayrshare.com/api/user',{headers:{authorization:`Bearer ${apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.6'}});
+  const res=await fetch(`${AYRSHARE_BASE}/api/user`,{headers:{authorization:`Bearer ${apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.6'}});
   const text=await res.text();
   if(!res.ok)throw new Error(`Ayrshare connection failed (HTTP ${res.status}): ${text.slice(0,500)}`);
   let body:any;try{body=JSON.parse(text);}catch{throw new Error('Ayrshare returned invalid JSON.');}
@@ -83,7 +86,7 @@ export const disconnectSocial=(companyId:string)=>disconnect(companyId,'SOCIAL_P
 export async function connectResend(input:{companyId:string;apiKey:string;fromEmail:string}){
   const apiKey=input.apiKey.trim(),fromEmail=input.fromEmail.trim();
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fromEmail))throw new Error('Provide a valid support from-email address.');
-  const res=await fetch('https://api.resend.com/domains?limit=100',{headers:{authorization:`Bearer ${apiKey}`,'user-agent':'AI-Employee-OS/0.6'}});
+  const res=await fetch(`${RESEND_BASE}/domains?limit=100`,{headers:{authorization:`Bearer ${apiKey}`,'user-agent':'AI-Employee-OS/0.6'}});
   const text=await res.text();
   if(!res.ok)throw new Error(`Resend connection failed (HTTP ${res.status}): ${text.slice(0,500)}`);
   let body:any;try{body=JSON.parse(text);}catch{throw new Error('Resend returned invalid JSON.');}
@@ -130,7 +133,7 @@ export async function publishSocial(input:{
     mediaUrls:input.mediaUrls
   };
   if(input.scheduleDate)body.scheduleDate=input.scheduleDate;
-  const res=await fetch('https://app.ayrshare.com/api/post',{
+  const res=await fetch(`${AYRSHARE_BASE}/api/post`,{
     method:'POST',
     headers:{authorization:`Bearer ${credential.apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.6'},
     body:JSON.stringify(body)
@@ -148,7 +151,7 @@ export async function sendSupportEmail(input:{
   const row=await latest(input.companyId,'EMAIL');
   if(!row||row.status!=='CONNECTED')throw new Error('BLOCKED_EXTERNAL_AUTH: Customer email is not connected');
   const credential=await readCredential<{apiKey:string;fromEmail:string}>(input.companyId,'EMAIL',String(row.id));
-  const res=await fetch('https://api.resend.com/emails',{
+  const res=await fetch(`${RESEND_BASE}/emails`,{
     method:'POST',
     headers:{authorization:`Bearer ${credential.apiKey}`,'content-type':'application/json','user-agent':'AI-Employee-OS/0.6'},
     body:JSON.stringify({from:credential.fromEmail,to:[input.to],subject:input.subject,text:input.text})
