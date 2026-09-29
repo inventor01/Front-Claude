@@ -25,6 +25,7 @@ export async function processOneManagerMessage(){
       ]);
       if(storeR.rowCount && storeR.rows[0].qa_result?.passed===true){
         const store=storeR.rows[0];
+        await c.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${message.company_id}:${message.project_id}:creative-production`]);
         let work=await c.query(`SELECT * FROM work_orders
           WHERE company_id=$1 AND project_id=$2 AND assigned_employee_slug='maya'
           AND objective LIKE 'Create launch creative system%' ORDER BY created_at DESC LIMIT 1`,[
@@ -44,13 +45,22 @@ export async function processOneManagerMessage(){
           message.company_id,`creative-production:${store.id}`
         ]);
         if(!job.rowCount){
+          let createdJob=true;
           job=await c.query(`INSERT INTO jobs(
             company_id,project_id,work_order_id,employee_slug,job_type,payload,idempotency_key
-          ) VALUES($1,$2,$3,'maya','CREATIVE_PRODUCTION',$4,$5) RETURNING *`,[
+          ) VALUES($1,$2,$3,'maya','CREATIVE_PRODUCTION',$4,$5)
+          ON CONFLICT(company_id,idempotency_key) DO NOTHING RETURNING *`,[
             message.company_id,message.project_id,wo.id,
             JSON.stringify({storePackageId:store.id,candidateId:store.candidate_id,candidate:store.candidate_name}),
             `creative-production:${store.id}`
           ]);
+          if(!job.rowCount){
+            createdJob=false;
+            job=await c.query(`SELECT * FROM jobs WHERE company_id=$1 AND idempotency_key=$2 LIMIT 1`,[
+              message.company_id,`creative-production:${store.id}`
+            ]);
+          }
+          if(createdJob){
           const steps=['CREATIVE_STRATEGY','HOOK_LIBRARY','SCRIPT_PACK','STORYBOARDS','CREATIVE_QA','RENDER_HANDOFF','RENDER_EXECUTE'];
           for(let i=0;i<steps.length;i++){
             await c.query(`INSERT INTO job_steps(company_id,job_id,sequence,step_type,input)
@@ -71,6 +81,7 @@ export async function processOneManagerMessage(){
           await c.query(`INSERT INTO events(company_id,type,payload) VALUES($1,'CREATIVE_WORK_ASSIGNED',$2)`,[
             message.company_id,JSON.stringify({projectId:message.project_id,workOrderId:wo.id,jobId:job.rows[0].id,from:'ava',to:'maya'})
           ]);
+          }
         }
       }
     }else if(message.type==='WORK_RESULT' && payload.creativePackageId && message.project_id && message.work_order_id){
@@ -81,6 +92,7 @@ export async function processOneManagerMessage(){
       ]);
       if(creativeR.rowCount && creativeR.rows[0].qa_result?.passed===true){
         const creative=creativeR.rows[0];
+        await c.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${message.company_id}:${message.project_id}:distribution-planning`]);
         let work=await c.query(`SELECT * FROM work_orders
           WHERE company_id=$1 AND project_id=$2 AND assigned_employee_slug='nova'
           AND objective LIKE 'Plan organic distribution%' ORDER BY created_at DESC LIMIT 1`,[
@@ -100,13 +112,22 @@ export async function processOneManagerMessage(){
           message.company_id,`distribution-planning:${creative.id}`
         ]);
         if(!job.rowCount){
+          let createdDistributionJob=true;
           job=await c.query(`INSERT INTO jobs(
             company_id,project_id,work_order_id,employee_slug,job_type,payload,idempotency_key
-          ) VALUES($1,$2,$3,'nova','DISTRIBUTION_PLANNING',$4,$5) RETURNING *`,[
+          ) VALUES($1,$2,$3,'nova','DISTRIBUTION_PLANNING',$4,$5)
+          ON CONFLICT(company_id,idempotency_key) DO NOTHING RETURNING *`,[
             message.company_id,message.project_id,wo.id,
             JSON.stringify({creativePackageId:creative.id,candidateId:creative.candidate_id,candidate:creative.candidate_name}),
             `distribution-planning:${creative.id}`
           ]);
+          if(!job.rowCount){
+            createdDistributionJob=false;
+            job=await c.query(`SELECT * FROM jobs WHERE company_id=$1 AND idempotency_key=$2 LIMIT 1`,[
+              message.company_id,`distribution-planning:${creative.id}`
+            ]);
+          }
+          if(createdDistributionJob){
           const steps=['CHANNEL_PLAN','CONTENT_CALENDAR','DISTRIBUTION_QA','PUBLISH_HANDOFF','SOCIAL_PUBLISH_EXECUTE'];
           for(let i=0;i<steps.length;i++){
             await c.query(`INSERT INTO job_steps(company_id,job_id,sequence,step_type,input)
