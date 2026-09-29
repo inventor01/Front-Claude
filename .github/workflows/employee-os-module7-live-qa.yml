@@ -75,6 +75,7 @@ jobs:
               "employeeSlug":"maya",
               "url":x_url,
               "title":"Seedance AI video prompting tutorial",
+              "text":"Assign every reference asset a clear job before generating: define subject, camera movement, mood, sound, and timing separately.\nFor consistency, lock product silhouette, material details, scene mood, and camera references instead of asking the model to guess.\nTreat transitions as actions: specify what initiates the move, how it travels, and what it resolves into.\nTest prompts as direction, not adjective-heavy creative writing, and measure which structures improve controllability.",
               "tags":["ai-video","seedance","camera","prompting"]
           },token,90)
           assert status==201,training
