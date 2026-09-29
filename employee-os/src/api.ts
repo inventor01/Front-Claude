@@ -237,5 +237,80 @@ app.post('/api/company/:companyId/approvals/:approvalId/:decision',async(req,rep
   });
   return result;
 });
+app.get('/internal/qa/module2',async(req,reply)=>{
+  const q=req.query as any;
+  const expected=process.env.QA_PROBE_TOKEN||'';
+  if(!expected||q?.token!==expected)return reply.code(404).send({error:'Not found'});
+  const base=`http://127.0.0.1:${process.env.PORT||3000}`;
+  const email=`qa-module2-${Date.now()}@example.com`;
+  const password=`Qa!${crypto.randomUUID()}Aa9`;
+  const register=await fetch(`${base}/api/auth/register`,{
+    method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({email,password,companyName:'Module 2 QA'})
+  });
+  const reg:any=await register.json();
+  if(!register.ok)return reply.code(500).send({stage:'register',status:register.status,body:reg});
+  const token=reg.token as string, companyId=reg.company.id as string;
+  const objective=await fetch(`${base}/api/company/${companyId}/objectives`,{
+    method:'POST',
+    headers:{'content-type':'application/json','authorization':`Bearer ${token}`},
+    body:JSON.stringify({
+      statement:'Find a promising organic dropshipping product and start a business around it. Prioritize products capable of supporting large amounts of TikTok and Instagram content. Do not spend money or publish anything without my approval.',
+      constraints:['No spending without owner approval','No publishing without owner approval'],
+      query:'car diffuser'
+    })
+  });
+  const created:any=await objective.json();
+  if(objective.status!==202)return reply.code(500).send({stage:'objective',status:objective.status,body:created});
+  const jobId=created.job.id as string, workOrderId=created.workOrder.id as string;
+  let state:any=null, execution:any=null;
+  for(let i=0;i<15;i++){
+    await new Promise(r=>setTimeout(r,2000));
+    const [s,e]=await Promise.all([
+      fetch(`${base}/api/company/${companyId}/state`,{headers:{authorization:`Bearer ${token}`}}),
+      fetch(`${base}/api/company/${companyId}/execution`,{headers:{authorization:`Bearer ${token}`}})
+    ]);
+    state=await s.json(); execution=await e.json();
+    const job=execution.jobs?.find((x:any)=>x.id===jobId);
+    if(job&&['SUCCEEDED','BLOCKED','FAILED'].includes(job.status))break;
+  }
+  const job=execution?.jobs?.find((x:any)=>x.id===jobId)||null;
+  const steps=(execution?.steps||[]).filter((x:any)=>x.job_id===jobId).sort((a:any,b:any)=>a.sequence-b.sequence);
+  const work=(state?.workOrders||[]).find((x:any)=>x.id===workOrderId)||null;
+  const candidate=(state?.productCandidates||[]).find((x:any)=>x.project_id===created.project.id)||null;
+  const approval=(state?.approvals||[]).find((x:any)=>x.project_id===created.project.id&&x.action_type==='PRODUCT_GATE')||null;
+  const message=(execution?.messages||[]).find((x:any)=>x.project_id===created.project.id&&x.type==='WORK_RESULT'&&x.from_employee_slug==='rowan'&&x.to_employee_slug==='ava')||null;
+  const evidence=(execution?.evidence||[]).filter((x:any)=>x.project_id===created.project.id);
+  const evidenceBySource=evidence.reduce((acc:any,x:any)=>{acc[x.source_type]=(acc[x.source_type]||0)+1;return acc;},{});
+  return {
+    passed:Boolean(
+      objective.status===202 &&
+      steps.length===8 &&
+      steps.every((x:any)=>x.status==='SUCCEEDED') &&
+      job?.status==='SUCCEEDED' &&
+      candidate &&
+      message &&
+      !steps.some((x:any)=>x.status==='BLOCKED') &&
+      ['LAUNCH_REVIEW','VERIFIED_CANDIDATE','INVESTIGATING','REJECTED'].includes(candidate.status)
+    ),
+    created:{objectiveHttp:objective.status,projectId:created.project.id,workOrderId,jobId},
+    job:job&&{status:job.status,attemptCount:job.attempt_count,lastError:job.last_error},
+    steps:steps.map((x:any)=>({sequence:x.sequence,type:x.step_type,status:x.status,lastError:x.last_error,outputStatus:x.output?.status||null})),
+    workOrder:work&&{status:work.status,blockers:work.blockers},
+    project:(state?.projects||[]).find((x:any)=>x.id===created.project.id)||null,
+    candidate:candidate&&{
+      name:candidate.name,status:candidate.status,score:candidate.score,confidence:candidate.confidence,
+      demandScore:candidate.demand_score,marketplaceSeen:candidate.marketplace_seen,supplierSeen:candidate.supplier_seen,
+      observedMarketPrice:candidate.observed_market_price,observedSourcePrice:candidate.observed_source_price,
+      observedGrossMarginPct:candidate.observed_gross_margin_pct,contentabilityScore:candidate.contentability_score,
+      riskFlags:candidate.risk_flags
+    },
+    evidenceBySource,
+    workResult:Boolean(message),
+    approval:approval&&{status:approval.status,actionType:approval.action_type,risk:approval.risk,costCents:approval.cost_cents},
+    frontStep:steps.find((x:any)=>x.step_type==='FRONT_SCAN')||null
+  };
+});
+
 app.setErrorHandler((e:any,_req,reply)=>reply.code(e.statusCode||400).send({error:e.message||'Request failed'}));
 const port=Number(process.env.PORT||3000); await app.listen({host:'0.0.0.0',port});
