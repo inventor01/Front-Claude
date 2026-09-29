@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(company_id, idempotency_key)
 );
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS jobs_runnable_idx ON jobs(status, scheduled_for, priority DESC);
 CREATE TABLE IF NOT EXISTS job_steps (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
