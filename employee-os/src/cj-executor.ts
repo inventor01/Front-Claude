@@ -93,6 +93,22 @@ function freightCost(option:any){
   ].map(Number).filter((x)=>Number.isFinite(x)&&x>=0);
   return candidates.length?Math.min(...candidates):null;
 }
+function deliveryMaxDays(option:any){
+  const value=String(option?.logisticAging||option?.deliveryDay||option?.deliveryDays||option?.deliveryTime||option?.aging||'');
+  const nums=value.match(/\d+(?:\.\d+)?/g)?.map(Number).filter(Number.isFinite)||[];
+  return nums.length?Math.max(...nums):null;
+}
+function chooseFreight(options:any[]){
+  const rows=options.map((option)=>({option,cost:freightCost(option),days:deliveryMaxDays(option)}))
+    .filter((row):row is {option:any;cost:number;days:number|null}=>row.cost!==null&&Number.isFinite(row.cost));
+  if(!rows.length)return null;
+  rows.sort((a,b)=>{
+    const aDays=a.days??30,bDays=b.days??30;
+    const aScore=a.cost+(aDays*.18),bScore=b.cost+(bDays*.18);
+    return aScore-bScore||a.cost-b.cost||aDays-bDays;
+  });
+  return rows[0]!;
+}
 
 export async function connectCJ(input:{companyId:string;apiKey:string}){
   const apiKey=input.apiKey.trim();
@@ -181,65 +197,100 @@ export async function mapCandidateToCJ(companyId:string,candidateId:string){
   if(!c.rowCount)throw new Error('Product candidate not found for CJ mapping.');
   const candidate=c.rows[0];
   const products=await searchCJ(companyId,String(candidate.name));
-  const best=products[0];
-  if(!best)throw new Error('BLOCKED_SUPPLIER_MAPPING: CJ returned no matching products.');
-  const second=products[1];
-  if(best.matchScore<60)throw new Error(`BLOCKED_SUPPLIER_MAPPING: Best CJ match is too weak (${best.matchScore}/100).`);
-  if(second&&best.matchScore-second.matchScore<8&&second.matchScore>=60){
-    return {status:'NEEDS_REVIEW',candidateId,options:products.slice(0,5)};
+  if(!products.length)throw new Error('BLOCKED_SUPPLIER_MAPPING: CJ returned no matching products.');
+
+  const topMatch=Math.max(...products.map((p:any)=>Number(p.matchScore||0)));
+  const contenders=products
+    .filter((p:any)=>Number(p.matchScore||0)>=60 && Number(p.matchScore||0)>=topMatch-20)
+    .slice(0,4);
+  if(!contenders.length)throw new Error(`BLOCKED_SUPPLIER_MAPPING: Best CJ match is too weak (${topMatch}/100).`);
+
+  type Offer={
+    product:any;variant:{vid:string;sku:string;name:string;price:number;image:string};
+    warehouses:any[];verifiedInventory:number;totalInventory:number;origin:string;
+    freightOptions:any[];freightCost:number;deliveryMaxDays:number|null;landedCost:number;
+    offerScore:number;
+  };
+  const rawOffers:Omit<Offer,'offerScore'>[]=[];
+
+  for(const product of contenders){
+    let variants:any[]=[];
+    try{variants=await cjGet<any[]>(companyId,'/product/variant/query',{pid:product.id});}catch{continue;}
+    const candidateVariants=(Array.isArray(variants)?variants:[])
+      .map((v:any)=>({
+        vid:String(v.vid||''),sku:String(v.variantSku||''),name:String(v.variantNameEn||v.variantName||v.variantKey||'Default'),
+        price:Number(v.variantSellPrice||0),image:String(v.variantImage||product.image||'')
+      }))
+      .filter((v:any)=>v.vid&&v.price>0)
+      .sort((a:any,b:any)=>a.price-b.price)
+      .slice(0,3);
+
+    for(const variant of candidateVariants){
+      try{
+        const [stock,variantDetail]=await Promise.all([
+          cjGet<any[]>(companyId,'/product/stock/queryByVid',{vid:variant.vid}),
+          cjGet<any>(companyId,'/product/variant/queryByVid',{vid:variant.vid,features:'enable_inventory'})
+        ]);
+        const warehouses=Array.isArray(stock)?stock:[];
+        const totalInventory=warehouses.reduce((sum:number,w:any)=>sum+Math.max(0,Number(w.totalInventoryNum||0)),0);
+        if(totalInventory<=0)continue;
+
+        const detailInventories=Array.isArray(variantDetail?.inventories)?variantDetail.inventories:[];
+        const verifiedInventory=detailInventories
+          .filter((w:any)=>Number(w.verifiedWarehouse)===1)
+          .reduce((sum:number,w:any)=>sum+Math.max(0,Number(w.totalInventory||w.totalInventoryNum||0)),0);
+        if(verifiedInventory<=0)continue;
+
+        const origin=String(
+          detailInventories.find((w:any)=>Number(w.verifiedWarehouse)===1&&Number(w.totalInventory||w.totalInventoryNum||0)>0)?.countryCode||
+          warehouses.find((w:any)=>Number(w.totalInventoryNum||0)>0)?.countryCode||'CN'
+        );
+        const freight=await cjPost<any>(companyId,'/logistic/freightCalculate',{
+          startCountryCode:origin,endCountryCode:'US',products:[{quantity:1,vid:variant.vid}]
+        });
+        const options=Array.isArray(freight)?freight:Array.isArray(freight?.list)?freight.list:Array.isArray(freight?.logistics)?freight.logistics:[];
+        const selected=chooseFreight(options);
+        if(!selected)continue;
+        rawOffers.push({
+          product,variant,warehouses,verifiedInventory,totalInventory,origin,freightOptions:options,
+          freightCost:selected.cost,deliveryMaxDays:selected.days,landedCost:variant.price+selected.cost
+        });
+      }catch{
+        continue;
+      }
+    }
   }
 
-  const variants=await cjGet<any[]>(companyId,'/product/variant/query',{pid:best.id});
-  const list=Array.isArray(variants)?variants:[];
-  if(!list.length)throw new Error('BLOCKED_SUPPLIER_MAPPING: CJ product has no variants.');
-  const variant=list.map((v:any)=>({
-    vid:String(v.vid||''),
-    sku:String(v.variantSku||''),
-    name:String(v.variantNameEn||v.variantName||v.variantKey||'Default'),
-    price:Number(v.variantSellPrice||0),
-    image:String(v.variantImage||'')
-  })).filter((v:any)=>v.vid&&v.price>0).sort((a:any,b:any)=>a.price-b.price)[0];
-  if(!variant)throw new Error('BLOCKED_SUPPLIER_MAPPING: CJ product has no priced variant.');
+  if(!rawOffers.length)throw new Error('BLOCKED_SUPPLIER_MAPPING: No CJ offer passed verified stock and U.S. freight checks.');
 
-  const [stock,variantDetail]=await Promise.all([
-    cjGet<any[]>(companyId,'/product/stock/queryByVid',{vid:variant.vid}),
-    cjGet<any>(companyId,'/product/variant/queryByVid',{vid:variant.vid,features:'enable_inventory'})
-  ]);
-  const warehouses=Array.isArray(stock)?stock:[];
-  const totalInventory=warehouses.reduce((sum:number,w:any)=>sum+Math.max(0,Number(w.totalInventoryNum||0)),0);
-  if(totalInventory<=0)throw new Error('BLOCKED_SUPPLIER_STOCK: CJ variant currently shows no inventory.');
+  const minLanded=Math.min(...rawOffers.map((o)=>o.landedCost));
+  const maxLanded=Math.max(...rawOffers.map((o)=>o.landedCost));
+  const maxInventory=Math.max(...rawOffers.map((o)=>o.verifiedInventory));
+  const offers:Offer[]=rawOffers.map((offer)=>{
+    const match=Number(offer.product.matchScore||0);
+    const costScore=maxLanded===minLanded?100:100-((offer.landedCost-minLanded)/(maxLanded-minLanded))*100;
+    const days=offer.deliveryMaxDays??30;
+    const speedScore=Math.max(0,100-Math.max(0,days-5)*4);
+    const inventoryScore=maxInventory>0?Math.min(100,(Math.log10(offer.verifiedInventory+1)/Math.log10(maxInventory+1))*100):0;
+    const offerScore=Math.round(match*.40+costScore*.30+speedScore*.20+inventoryScore*.10);
+    return {...offer,offerScore};
+  }).sort((a,b)=>b.offerScore-a.offerScore||a.landedCost-b.landedCost||(a.deliveryMaxDays??99)-(b.deliveryMaxDays??99));
 
-  const detailInventories=Array.isArray(variantDetail?.inventories)?variantDetail.inventories:[];
-  const verifiedInventory=detailInventories
-    .filter((w:any)=>Number(w.verifiedWarehouse)===1)
-    .reduce((sum:number,w:any)=>sum+Math.max(0,Number(w.totalInventory||w.totalInventoryNum||0)),0);
-  if(verifiedInventory<=0){
-    throw new Error('BLOCKED_SUPPLIER_STOCK: CJ variant does not show verified warehouse inventory.');
-  }
-
-  const origin=String(
-    detailInventories.find((w:any)=>Number(w.verifiedWarehouse)===1&&Number(w.totalInventory||w.totalInventoryNum||0)>0)?.countryCode||
-    warehouses.find((w:any)=>Number(w.totalInventoryNum||0)>0)?.countryCode||
-    'CN'
-  );
-  const freight=await cjPost<any>(companyId,'/logistic/freightCalculate',{
-    startCountryCode:origin,endCountryCode:'US',products:[{quantity:1,vid:variant.vid}]
-  });
-  const options=Array.isArray(freight)?freight:Array.isArray(freight?.list)?freight.list:Array.isArray(freight?.logistics)?freight.logistics:[];
-  if(!options.length)throw new Error('BLOCKED_SUPPLIER_FREIGHT: CJ returned no U.S. freight option for this variant.');
-  const costs=options.map(freightCost).filter((x:number|null): x is number => x!==null&&Number.isFinite(x));
-  const minFreight=costs.length?Math.min(...costs):null;
-  if(minFreight===null)throw new Error('BLOCKED_SUPPLIER_FREIGHT: CJ freight options did not include a usable price.');
-
-  const landed=variant.price+minFreight;
+  const best=offers[0]!;
   const market=Number(candidate.observed_market_price||0);
-  const marginPct=market>0?((market-landed)/market)*100:null;
-  const status='VERIFIED';
+  const marginPct=market>0?((market-best.landedCost)/market)*100:null;
+  const auditOffers=offers.slice(0,8).map((o)=>({
+    supplierProductId:o.product.id,productName:o.product.name,matchScore:o.product.matchScore,
+    supplierVariantId:o.variant.vid,variantName:o.variant.name,sourcePrice:o.variant.price,
+    freightCost:o.freightCost,landedCost:o.landedCost,deliveryMaxDays:o.deliveryMaxDays,
+    verifiedInventory:o.verifiedInventory,offerScore:o.offerScore,image:o.variant.image||o.product.image||''
+  }));
+
   const mapping=await pool.query(`INSERT INTO supplier_product_mappings(
     company_id,candidate_id,provider,supplier_product_id,supplier_variant_id,supplier_sku,product_name,variant_name,
     source_price,stock_state,stock_detail,freight_state,freight_options,match_score,status,verified_at,
     freight_cost_estimate,landed_cost_estimate
-  ) VALUES($1,$2,'CJ',$3,$4,$5,$6,$7,$8,$9,$10,'VERIFIED',$11,$12,$13,now(),$14,$15)
+  ) VALUES($1,$2,'CJ',$3,$4,$5,$6,$7,$8,'VERIFIED_IN_STOCK',$9,'VERIFIED',$10,$11,'VERIFIED',now(),$12,$13)
   ON CONFLICT(company_id,candidate_id,provider) DO UPDATE SET
     supplier_product_id=EXCLUDED.supplier_product_id,supplier_variant_id=EXCLUDED.supplier_variant_id,
     supplier_sku=EXCLUDED.supplier_sku,product_name=EXCLUDED.product_name,variant_name=EXCLUDED.variant_name,
@@ -248,17 +299,31 @@ export async function mapCandidateToCJ(companyId:string,candidateId:string){
     status=EXCLUDED.status,verified_at=now(),freight_cost_estimate=EXCLUDED.freight_cost_estimate,
     landed_cost_estimate=EXCLUDED.landed_cost_estimate,updated_at=now()
   RETURNING *`,[
-    companyId,candidateId,best.id,variant.vid,variant.sku,best.name,variant.name,variant.price,
-    'VERIFIED_IN_STOCK',
-    JSON.stringify({warehouses,totalInventory,verifiedInventory,origin}),
-    JSON.stringify(options),best.matchScore,status,minFreight,landed
+    companyId,candidateId,best.product.id,best.variant.vid,best.variant.sku,best.product.name,best.variant.name,best.variant.price,
+    JSON.stringify({
+      warehouses:best.warehouses,totalInventory:best.totalInventory,verifiedInventory:best.verifiedInventory,origin:best.origin,
+      deliveryMaxDays:best.deliveryMaxDays,productImage:best.product.image||'',variantImage:best.variant.image||'',
+      selectedOfferScore:best.offerScore,offersCompared:auditOffers.length,offerAlternatives:auditOffers
+    }),
+    JSON.stringify(best.freightOptions),Number(best.product.matchScore||0),best.freightCost,best.landedCost
   ]);
+
   if(market>0&&marginPct!==null){
     await pool.query(`UPDATE product_candidates SET observed_source_price=$2,observed_gross_margin_pct=$3,
-      analysis=jsonb_set(jsonb_set(analysis,'{supplierProvider}',to_jsonb('CJ'::text),true),'{landedCostEstimate}',to_jsonb($4::numeric),true),
-      updated_at=now() WHERE id=$1`,[candidateId,variant.price,marginPct,landed]);
+      analysis=jsonb_set(
+        jsonb_set(
+          jsonb_set(analysis,'{supplierProvider}',to_jsonb('CJ'::text),true),
+          '{landedCostEstimate}',to_jsonb($4::numeric),true
+        ),
+        '{supplierOfferSelection}', $5::jsonb, true
+      ),updated_at=now() WHERE id=$1`,[
+      candidateId,best.variant.price,marginPct,best.landedCost,JSON.stringify({
+        rankedBy:['product match','landed cost','delivery window','verified inventory'],
+        winner:auditOffers[0],alternatives:auditOffers.slice(1)
+      })
+    ]);
   }
-  return {status:'VERIFIED',mapping:mapping.rows[0],alternatives:products.slice(1,5)};
+  return {status:'VERIFIED',mapping:mapping.rows[0],selected:auditOffers[0],alternatives:auditOffers.slice(1)};
 }
 
 export async function requireVerifiedCJMapping(companyId:string,candidateId:string){
