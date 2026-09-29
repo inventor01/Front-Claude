@@ -43,16 +43,17 @@ app.get('/api/me',async req=>{
 });
 app.get('/api/company/:companyId/state',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as any; await requireCompany(userId,companyId);
-  const [employees,objectives,projects,work,approvals,events,candidates]=await Promise.all([
+  const [employees,objectives,projects,work,approvals,events,candidates,storePackages]=await Promise.all([
     pool.query('SELECT * FROM employees WHERE company_id=$1 ORDER BY created_at',[companyId]),
     pool.query('SELECT * FROM objectives WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
     pool.query('SELECT * FROM projects WHERE company_id=$1 ORDER BY created_at DESC LIMIT 20',[companyId]),
     pool.query('SELECT * FROM work_orders WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT * FROM approvals WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
     pool.query('SELECT * FROM events WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
-    pool.query('SELECT * FROM product_candidates WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId])
+    pool.query('SELECT * FROM product_candidates WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId]),
+    pool.query('SELECT * FROM store_packages WHERE company_id=$1 ORDER BY created_at DESC LIMIT 100',[companyId])
   ]);
-  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows};
+  return {employees:employees.rows,objectives:objectives.rows,projects:projects.rows,workOrders:work.rows,approvals:approvals.rows,events:events.rows,productCandidates:candidates.rows,storePackages:storePackages.rows};
 });
 app.get('/api/company/:companyId/execution',async req=>{
   const userId=await requireUser(req), {companyId}=req.params as any; await requireCompany(userId,companyId);
