@@ -80,8 +80,8 @@ function summarizeRows(rows = []) {
 }
 function requestSummary(body = {}) {
   return {
-    mode: body.mode === 'scout' ? 'scout' : 'deep',
-    targetUniqueFeedItems: Math.max(30, Math.min(180, Number(body.targetUniqueFeedItems || 90))),
+    mode: body.mode === 'deep' ? 'deep' : 'scout',
+    targetUniqueFeedItems: Math.max(10, Math.min(180, Number(body.targetUniqueFeedItems || 90))),
     scanXForYou: body.scanXForYou !== false,
     scanTikTokForYou: body.scanTikTokForYou !== false,
     scanInstagram: body.scanInstagram !== false,
@@ -128,7 +128,7 @@ function livePayload() {
   
   return {
     ...latestLive,
-    observed: latestLive.observed || (xObserved + tiktokObserved),
+    observed: latestLive.observed || (xObserved + tiktokObserved + instagramObserved),
     platformCounts: {
       ...latestLive.platformCounts,
       X: latestLive.platformCounts?.X || xObserved,
@@ -337,7 +337,7 @@ async function collectTikTokFeed(target, maxSeconds = 70) {
   }
 }
 
-async function addOriginResearch(rows, topics, mode) {
+async function addOriginResearch(rows, topics, mode, request) {
   if (mode !== 'deep' || shouldStop()) return rows;
   const merged = [...rows];
   const candidates = topics.slice(0, 3);
@@ -346,11 +346,11 @@ async function addOriginResearch(rows, topics, mode) {
     const q = sanitizeTopic(topic.topic || topic.key || '');
     if (!q || shouldStop()) continue;
     stage('originResearch', { status: 'running', searched, total: candidates.length * 3, current: q });
-    try { merged.push(...await collectSearch('X', q, 24)); } catch (error) { latestLive.errors.push(`X origin ${q}: ${clean(error?.message || error, 240)}`); }
+    if(request.scanXForYou)try { merged.push(...await collectSearch('X', q, 24)); } catch (error) { latestLive.errors.push(`X origin ${q}: ${clean(error?.message || error, 240)}`); }
     searched += 1;
-    try { merged.push(...await collectSearch('TikTok', q, 24)); } catch (error) { latestLive.errors.push(`TikTok origin ${q}: ${clean(error?.message || error, 240)}`); }
+    if(request.scanTikTokForYou)try { merged.push(...await collectSearch('TikTok', q, 24)); } catch (error) { latestLive.errors.push(`TikTok origin ${q}: ${clean(error?.message || error, 240)}`); }
     searched += 1;
-    try { merged.push(...await collectSearch('Instagram', q, 24)); } catch (error) { latestLive.errors.push(`Instagram origin ${q}: ${clean(error?.message || error, 240)}`); }
+    if(request.scanInstagram)try { merged.push(...await collectSearch('Instagram', q, 24)); } catch (error) { latestLive.errors.push(`Instagram origin ${q}: ${clean(error?.message || error, 240)}`); }
     searched += 1;
   }
   stage('originResearch', { status: shouldStop() ? 'stopped' : 'complete', searched, total: candidates.length * 3 });
@@ -503,7 +503,7 @@ async function runScan(body = {}) {
     topics = deriveTopics(resultRows, 24);
     stage('narrativeEngine', { status: 'complete', candidates: topics.length, intelligenceVersion: 26 });
     const beforeOrigin = resultRows;
-    resultRows = await addOriginResearch(resultRows, topics, request.mode);
+    resultRows = await addOriginResearch(resultRows, topics, request.mode, request);
     const newOrigin = newEvidenceRows(beforeOrigin, resultRows);
     if (!shouldStop() && newOrigin.length) {
       let analyzedOrigin = await transcribeAllVideos(newOrigin, 'transcription-origin');
