@@ -8,7 +8,7 @@ export async function POST(request:Request){
     const raw=await bodyJson<any>(request);
     const requestId=clean(raw.requestId,180);
     if(!requestId)return noStore({error:'requestId is required.'},400);
-    const platforms=[...new Set((Array.isArray(raw.platforms)?raw.platforms:[]).map(String).filter(x=>ALLOWED.has(x)))];
+    const platforms=[...new Set((Array.isArray(raw.platforms)?raw.platforms:[]).map(String).filter((x:string)=>ALLOWED.has(x)))];
     if(!platforms.length)return noStore({error:'At least one supported platform is required.'},400);
     const keywords=[...new Set((Array.isArray(raw.keywords)?raw.keywords:[]).map((x:any)=>clean(x,100)).filter((x:string)=>x.length>=2))].slice(0,30);
     const objective=clean(raw.objective,2000);
