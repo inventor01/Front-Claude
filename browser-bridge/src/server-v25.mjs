@@ -475,9 +475,9 @@ async function runScan(body = {}) {
     if (request.keywords.length && !shouldStop()) {
       setPhase('keyword-investigation');
       for (const q of request.keywords) {
-        try { resultRows.push(...await collectSearch('X', q, 18)); } catch (error) { latestLive.errors.push(`X keyword ${q}: ${clean(error?.message || error, 220)}`); }
-        try { resultRows.push(...await collectSearch('TikTok', q, 18)); } catch (error) { latestLive.errors.push(`TikTok keyword ${q}: ${clean(error?.message || error, 220)}`); }
-        try { resultRows.push(...await collectSearch('Instagram', q, 18)); } catch (error) { latestLive.errors.push(`Instagram keyword ${q}: ${clean(error?.message || error, 220)}`); }
+        if(request.scanXForYou) try { resultRows.push(...await collectSearch('X', q, 18)); } catch (error) { latestLive.errors.push(`X keyword ${q}: ${clean(error?.message || error, 220)}`); }
+        if(request.scanTikTokForYou) try { resultRows.push(...await collectSearch('TikTok', q, 18)); } catch (error) { latestLive.errors.push(`TikTok keyword ${q}: ${clean(error?.message || error, 220)}`); }
+        if(request.scanInstagram) try { resultRows.push(...await collectSearch('Instagram', q, 18)); } catch (error) { latestLive.errors.push(`Instagram keyword ${q}: ${clean(error?.message || error, 220)}`); }
       }
       resultRows = mergeRichEvidence(resultRows);
     }

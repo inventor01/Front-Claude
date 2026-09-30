@@ -70,13 +70,24 @@ function compactResult(scan,live){
     videoMeaning:scan?.videoMeaning||null,postUnderstanding:scan?.postUnderstanding||null,at:Date.now()
   };
 }
+function safeEvidence(row){
+  if(!row||typeof row!=='object'||!['X','TikTok','Instagram'].includes(row.platform))return null;
+  const id=clean(row.id,180),url=clean(row.url,2048);
+  if(!id||!url)return null;
+  const number=(v)=>v==null?null:Number.isFinite(Number(v))&&Number(v)>=0?Math.trunc(Number(v)):null;
+  return {id,platform:row.platform,url,author:clean(row.author,120),content:clean(row.content,6000),
+    provenance:clean(row.provenance,240),published:number(row.published),views:number(row.views),
+    likes:number(row.likes),comments:number(row.comments)};
+}
 async function uploadEvidence(job,rows,seen){
-  const fresh=(Array.isArray(rows)?rows:[]).filter(row=>row?.id&&!seen.has(String(row.id)));
-  for(const row of fresh)seen.add(String(row.id));
-  for(let i=0;i<fresh.length;i+=50){
+  const fresh=(Array.isArray(rows)?rows:[]).map(safeEvidence).filter(row=>row&&!seen.has(row.id));
+  for(let i=0;i<fresh.length;i+=12){
+    const chunk=fresh.slice(i,i+12);
     await cloud(`/api/agent/bridge/jobs/${encodeURIComponent(job.id)}/evidence`,{
-      method:'POST',body:JSON.stringify({bridgeId,leaseId:job.leaseId,evidence:fresh.slice(i,i+50)})
+      method:'POST',body:JSON.stringify({bridgeId,leaseId:job.leaseId,evidence:chunk})
     },20000);
+    // Mark only acknowledged IDs: temporary failures must be replayable.
+    for(const row of chunk)seen.add(row.id);
   }
   return fresh.length;
 }
@@ -124,8 +135,12 @@ async function loop(){
   while(true){
     try{
       const health=await localHealth();
+      // Keep work queued until the scanner and dedicated Chrome are reachable.
+      const chromeReady=await request('http://127.0.0.1:43982/json/version',{},4000).then(()=>true).catch(()=>false);
       const claim=await cloud('/api/agent/bridge/claim',{
-        method:'POST',body:JSON.stringify({bridgeId,label:os.hostname(),busy:Boolean(health?.running),capabilities:cloudCapabilities(health)})
+        method:'POST',body:JSON.stringify({bridgeId,label:os.hostname(),
+          busy:!health?.ok||Boolean(health.running)||!chromeReady,
+          capabilities:{...cloudCapabilities(health),chromeReady,scannerReady:Boolean(health?.ok)}})
       },10000);
       if(claim?.job){
         console.log(`[front-cloud-agent] claimed scroll job ${claim.job.id}`);

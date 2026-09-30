@@ -3,12 +3,12 @@ import { bodyJson, clean, db, noStore, requireBridge } from '@/lib/front-agent-a
 const platforms=new Set(['X','TikTok','Instagram']);
 function safeUrl(platform:string,raw:unknown){
   try{
-    const u=new URL(String(raw||''));if(u.protocol!=='https:')return null;
+    const u=new URL(String(raw||''));if(u.protocol!=='https:'||u.username||u.password||u.port)return null;
     const host=u.hostname.toLowerCase();
     if(platform==='X'&&!['x.com','www.x.com','twitter.com','www.twitter.com'].includes(host))return null;
     if(platform==='TikTok'&&!['tiktok.com','www.tiktok.com','ads.tiktok.com'].includes(host))return null;
     if(platform==='Instagram'&&(!['instagram.com','www.instagram.com'].includes(host)||!/^\/(?:p|reel|tv)\/[A-Za-z0-9_-]+\/?$/.test(u.pathname)))return null;
-    u.hash='';return u.toString();
+    u.hash='';u.search='';return u.toString();
   }catch{return null;}
 }
 export async function POST(request:Request,{params}:{params:Promise<{id:string}>}){
@@ -24,7 +24,11 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
       const platform=String(row?.platform||'');if(!platforms.has(platform))continue;
       const url=safeUrl(platform,row?.url);if(!url)continue;
       const evidenceId=clean(row?.id,180);if(!evidenceId)continue;
-      const payload={...row,platform,url};
+      // Only approved evidence fields may leave the bridge; drop scanner internals.
+      const metric=(v:unknown)=>v==null?null:Number.isFinite(Number(v))&&Number(v)>=0?Math.trunc(Number(v)):null;
+      const payload={id:evidenceId,platform,url,author:clean(row?.author,120),
+        content:clean(row?.content,6000),provenance:clean(row?.provenance,240),
+        published:metric(row?.published),views:metric(row?.views),likes:metric(row?.likes),comments:metric(row?.comments)};
       statements.push(db().prepare(`INSERT INTO agent_scroll_evidence(owner,job_id,evidence_id,platform,payload,created,updated)
         VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner,job_id,evidence_id) DO UPDATE SET platform=excluded.platform,payload=excluded.payload,updated=excluded.updated`)
         .bind(owner,id,evidenceId,platform,JSON.stringify(payload),now,now));
