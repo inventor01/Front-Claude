@@ -12,5 +12,8 @@ test('poisoned cache values cannot become video navigation candidates', () => {
 test('supported social posts canonicalize exactly and respect platform', () => {
   assert.equal(canonicalSocialPostUrl('https://twitter.com/alice/status/123/photo/1?s=20', 'X'), 'https://x.com/alice/status/123');
   assert.equal(canonicalSocialPostUrl('https://www.tiktok.com/@alice/video/1234567890123?lang=en', 'TikTok'), 'https://www.tiktok.com/@alice/video/1234567890123');
+  assert.equal(canonicalSocialPostUrl('https://www.instagram.com/reel/C8AbCdEf12_/?utm_source=ig_web_copy_link', 'Instagram'), 'https://www.instagram.com/reel/C8AbCdEf12_/');
+  assert.equal(canonicalSocialPostUrl('https://instagram.com/p/C7xy_Z-91ab/', 'Instagram'), 'https://www.instagram.com/p/C7xy_Z-91ab/');
+  assert.equal(canonicalSocialPostUrl('https://www.instagram.com/explore/', 'Instagram'), null);
   assert.equal(canonicalSocialPostUrl('https://x.com/alice/status/123', 'TikTok'), null);
 });
