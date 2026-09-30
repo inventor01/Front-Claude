@@ -360,16 +360,20 @@ function allowedUrl(platform, rawUrl) {
   const host = url.hostname.toLowerCase();
   if (platform === 'X' && !['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com'].includes(host)) return null;
   if (platform === 'TikTok' && !['tiktok.com', 'www.tiktok.com', 'ads.tiktok.com'].includes(host)) return null;
+  if (platform === 'Instagram') {
+    if (!['instagram.com', 'www.instagram.com'].includes(host)) return null;
+    if (!/^\/(?:p|reel|tv)\/[A-Za-z0-9_-]+\/?$/.test(url.pathname)) return null;
+  }
   url.hash = '';
   return url.toString();
 }
 
 export function normalizeEvidence(raw) {
-  const platform = raw?.platform === 'X' || raw?.platform === 'TikTok' ? raw.platform : null;
+  const platform = raw?.platform === 'X' || raw?.platform === 'TikTok' || raw?.platform === 'Instagram' ? raw.platform : null;
   if (!platform) return null;
   const url = allowedUrl(platform, raw.url);
   if (!url) return null;
-  const author = cleanText(raw.author || (platform === 'X' ? 'X' : 'TikTok'), 120) || platform;
+  const author = cleanText(raw.author || platform, 120) || platform;
   const content = cleanEvidenceContent(platform, raw.content, author);
   if (!content) return null;
   const publishedNumber = Number(raw.published);
