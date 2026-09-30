@@ -9,9 +9,15 @@ function statements(sql){
 
 test('remote scroll queue migration is idempotent and request IDs dedupe',()=>{
   const db=new DatabaseSync(':memory:');
-  const sql=fs.readFileSync(new URL('../../drizzle/0003_silky_the_call.sql',import.meta.url),'utf8');
-  for(const stmt of statements(sql))db.exec(stmt);
-  for(const stmt of statements(sql))db.exec(stmt);
+  const migrations=['../../drizzle/0003_silky_the_call.sql','../../drizzle/0004_dapper_archangel.sql'];
+  for(const migration of migrations){
+    const sql=fs.readFileSync(new URL(migration,import.meta.url),'utf8');
+    for(const stmt of statements(sql))db.exec(stmt);
+  }
+  for(const migration of migrations){
+    const sql=fs.readFileSync(new URL(migration,import.meta.url),'utf8');
+    for(const stmt of statements(sql))db.exec(stmt);
+  }
 
   const now=Date.now();
   db.prepare(`INSERT INTO agent_scroll_jobs(owner,id,caller,request_id,status,phase,request_json,created)
@@ -23,8 +29,10 @@ test('remote scroll queue migration is idempotent and request IDs dedupe',()=>{
 
 test('remote scroll queue only reclaims expired active leases',()=>{
   const db=new DatabaseSync(':memory:');
-  const sql=fs.readFileSync(new URL('../../drizzle/0003_silky_the_call.sql',import.meta.url),'utf8');
-  for(const stmt of statements(sql))db.exec(stmt);
+  for(const migration of ['../../drizzle/0003_silky_the_call.sql','../../drizzle/0004_dapper_archangel.sql']){
+    const sql=fs.readFileSync(new URL(migration,import.meta.url),'utf8');
+    for(const stmt of statements(sql))db.exec(stmt);
+  }
   const now=Date.now();
   const insert=db.prepare(`INSERT INTO agent_scroll_jobs(owner,id,caller,request_id,status,phase,request_json,lease_id,lease_expires_at,created)
     VALUES(?,?,?,?,?,?,?,?,?,?)`);
