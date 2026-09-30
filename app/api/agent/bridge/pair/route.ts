@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- D1 and JSON boundary rows are dynamically validated before use. */
 import { env } from 'cloudflare:workers';
 import { bodyJson, clean, db, frontOwnerId, noStore } from '@/lib/front-agent-auth';
 
