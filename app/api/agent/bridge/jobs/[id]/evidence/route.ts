@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- D1 and JSON boundary rows are dynamically validated before use. */
 import { bodyJson, clean, db, noStore, requireBridge } from '@/lib/front-agent-auth';
 const platforms=new Set(['X','TikTok','Instagram']);
 function safeUrl(platform:string,raw:unknown){
