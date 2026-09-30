@@ -20,6 +20,12 @@ const requestedPersistDir = process.env.RAILWAY_VOLUME_MOUNT_PATH
   : process.env.FRONT_PERSIST_DIR
     ? path.resolve(process.env.FRONT_PERSIST_DIR)
     : path.join(projectRoot, ".wrangler/state");
+if(!hasUsableSpace(requestedPersistDir)&&process.env.RAILWAY_VOLUME_MOUNT_PATH){
+  const report=spawnSync(process.execPath,[path.join(projectRoot,"scripts/report-front-storage.mjs"),requestedPersistDir],{
+    cwd:projectRoot,stdio:"inherit",env:process.env
+  });
+  if(report.error)console.warn("[front] storage diagnostics failed:",report.error.message);
+}
 const persistDir = hasUsableSpace(requestedPersistDir)
   ? requestedPersistDir
   : path.join(tmpdir(), "front-wrangler-runtime");
