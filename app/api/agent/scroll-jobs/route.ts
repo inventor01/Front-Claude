@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- D1 and JSON boundary rows are dynamically validated before use. */
 import { bodyJson, clean, db, noStore, requireService } from '@/lib/front-agent-auth';
 
 const ALLOWED=new Set(['X','TikTok','Instagram']);
