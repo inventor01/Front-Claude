@@ -15,16 +15,23 @@ function hasUsableSpace(directory) {
     return false;
   }
 }
-const requestedPersistDir = process.env.RAILWAY_VOLUME_MOUNT_PATH
-  ? path.resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH)
-  : process.env.FRONT_PERSIST_DIR
-    ? path.resolve(process.env.FRONT_PERSIST_DIR)
+const requestedPersistDir = process.env.FRONT_PERSIST_DIR
+  ? path.resolve(process.env.FRONT_PERSIST_DIR)
+  : process.env.RAILWAY_VOLUME_MOUNT_PATH
+    ? path.resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH)
     : path.join(projectRoot, ".wrangler/state");
-if(!hasUsableSpace(requestedPersistDir)&&process.env.RAILWAY_VOLUME_MOUNT_PATH){
-  const report=spawnSync(process.execPath,[path.join(projectRoot,"scripts/report-front-storage.mjs"),requestedPersistDir],{
+if(process.env.RAILWAY_VOLUME_MOUNT_PATH){
+  if(!hasUsableSpace(requestedPersistDir)){
+    const report=spawnSync(process.execPath,[path.join(projectRoot,"scripts/report-front-storage.mjs"),requestedPersistDir],{
+      cwd:projectRoot,stdio:"inherit",env:process.env
+    });
+    if(report.error)console.warn("[front] storage diagnostics failed:",report.error.message);
+  }
+  const prepare=spawnSync(process.execPath,[path.join(projectRoot,"scripts/prepare-front-persistence.mjs"),requestedPersistDir],{
     cwd:projectRoot,stdio:"inherit",env:process.env
   });
-  if(report.error)console.warn("[front] storage diagnostics failed:",report.error.message);
+  if(prepare.error)console.warn("[front] persistence preparation failed:",prepare.error.message);
+  else if((prepare.status??1)!==0)console.warn(`[front] persistence preparation exited with status ${prepare.status??1}`);
 }
 const persistDir = hasUsableSpace(requestedPersistDir)
   ? requestedPersistDir
