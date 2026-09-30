@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- D1 and JSON boundary rows are dynamically validated before use. */
 import { bodyJson, clean, db, noStore, requireBridge } from '@/lib/front-agent-auth';
 const parse=(v:string|null,f:any)=>{try{return v?JSON.parse(v):f;}catch{return f;}};
 export async function POST(request:Request){
