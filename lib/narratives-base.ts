@@ -7,7 +7,7 @@ const metric = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v :
 
 export type Evidence = {
   id: string;
-  platform: 'X' | 'TikTok';
+  platform: 'X' | 'TikTok' | 'Instagram';
   author: string;
   url: string;
   content: string;
