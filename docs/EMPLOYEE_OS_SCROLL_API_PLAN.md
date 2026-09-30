@@ -2,9 +2,9 @@
 
 ## Goal
 
-Make Front the single intelligence gateway used by AI Employee OS for authenticated X/TikTok scrolling, discovery, evidence capture, and normalized research results.
+Make Front the single intelligence gateway used by AI Employee OS for authenticated X/TikTok/Instagram scrolling, discovery, evidence capture, and normalized research results.
 
-AI Employee OS must never receive X/TikTok cookies, passwords, browser profiles, or platform session tokens.
+AI Employee OS must never receive X/TikTok/Instagram cookies, passwords, browser profiles, or platform session tokens.
 
 ## Phase 0 — persistence and runtime gate
 
@@ -29,7 +29,7 @@ AI Employee OS
       -> durable scroll job in Front D1
           <- local Front browser bridge polls outbound
               -> authenticated Chrome on the user's Mac
-              -> X / TikTok scrolling + extraction
+              -> X / TikTok / Instagram scrolling + extraction
               -> transcripts / visual understanding / narrative analysis
           -> local bridge uploads normalized evidence + progress
       -> Front normalizes/stores result
@@ -65,7 +65,7 @@ Request:
 {
   "requestId": "employee-os-job-or-action-id",
   "mode": "scout",
-  "platforms": ["X", "TikTok"],
+  "platforms": ["X", "TikTok", "Instagram"],
   "objective": "Find emerging products and creative patterns for lightweight hoodies",
   "keywords": ["hoodie", "streetwear", "oversized hoodie"],
   "accounts": [],
@@ -160,6 +160,16 @@ Use the existing v27 scanner rather than a second implementation.
 - Preserve caption, creator, engagement when available, cover/media refs and hashtags.
 - Continue scrolling until the same bounded stop conditions.
 
+### Instagram
+
+- Use the same dedicated authenticated Front Chrome profile.
+- Sample Instagram Home and Reels for broad discovery.
+- Use hashtag pages for keyword investigation.
+- Canonicalize only `/p/`, `/reel/`, and `/tv/` post URLs.
+- Preserve creator, caption/text, hashtags, post/reel URL, publication time and engagement when visible.
+- Treat login redirects, challenge pages, and unavailable content as explicit limitations; never bypass them.
+- Apply the same target/time/scroll/stale-feed bounds used by X and TikTok.
+
 ## Output contract for AI Employee OS
 
 Employee OS should receive normalized intelligence, not raw browser state:
@@ -170,7 +180,7 @@ Employee OS should receive normalized intelligence, not raw browser state:
   "captureMethod": "FRONT_LOCAL_BROWSER",
   "jobId": "front-scroll-job-id",
   "capturedAt": "ISO-8601",
-  "platforms": ["X", "TikTok"],
+  "platforms": ["X", "TikTok", "Instagram"],
   "evidence": [],
   "topics": [],
   "products": [],
@@ -212,11 +222,11 @@ Returns:
   "role": "intelligence-only",
   "launchAuthority": false,
   "scrollJobs": true,
-  "platforms": ["X", "TikTok"],
+  "platforms": ["X", "TikTok", "Instagram"],
   "requiresLocalBridge": true,
   "bridge": {
     "online": true,
-    "authenticatedPlatforms": ["X", "TikTok"]
+    "authenticatedPlatforms": ["X", "TikTok", "Instagram"]
   }
 }
 ```
@@ -304,7 +314,7 @@ Behavior:
 1. Duplicate `POST` with same requestId produces exactly one Front job.
 2. Two bridge workers cannot claim the same job.
 3. Bridge loss returns job to claimable state after lease expiry.
-4. X-only, TikTok-only and combined scans work.
+4. X-only, TikTok-only, Instagram-only, and combined scans work.
 5. Stop/cancel works during scrolling and model analysis.
 6. Zero-result scan returns a truthful completed/degraded result.
 7. No cookies, platform tokens, service keys or browser profile data appear in payloads/logs.
