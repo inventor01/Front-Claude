@@ -11,7 +11,7 @@ const timestamp=(value:unknown)=>{const n=Number(value);return Number.isFinite(n
 const stableObservationAt=(value:unknown,receivedAt:number)=>{const parsed=timestamp(value);if(!parsed)return receivedAt;return parsed>=receivedAt-7*86400000&&parsed<=receivedAt+5*60000?parsed:receivedAt;};
 const safeUrl=(value:unknown)=>{try{const u=new URL(String(value));return u.protocol==='https:'?u.href.slice(0,2048):null;}catch{return null;}};
 const safeArray=(value:unknown,maxItems:number,maxChars:number)=>Array.isArray(value)?[...new Set(value.map((item)=>clean(item,maxChars)).filter(Boolean))].slice(0,maxItems):[];
-const feedSurface=(provenance:string)=>/X For You/i.test(provenance)?'x-for-you':/TikTok For You/i.test(provenance)?'tiktok-for-you':/sentinel/i.test(provenance)?'x-sentinel':/candidate investigation/i.test(provenance)?'candidate-investigation':/origin research/i.test(provenance)?'origin-research':/trend/i.test(provenance)?'trend-seed':null;
+const feedSurface=(provenance:string)=>/X For You/i.test(provenance)?'x-for-you':/TikTok For You/i.test(provenance)?'tiktok-for-you':/Instagram Home/i.test(provenance)?'instagram-home':/Instagram Reels/i.test(provenance)?'instagram-reels':/Instagram hashtag/i.test(provenance)?'instagram-hashtag':/sentinel/i.test(provenance)?'x-sentinel':/candidate investigation/i.test(provenance)?'candidate-investigation':/origin research/i.test(provenance)?'origin-research':/trend/i.test(provenance)?'trend-seed':null;
 
 type RichEvidence={
  id?:unknown;platform?:unknown;provenance?:unknown;replies?:unknown;reposts?:unknown;bookmarks?:unknown;quotes?:unknown;comments?:unknown;shares?:unknown;saves?:unknown;soundId?:unknown;soundTitle?:unknown;soundAuthor?:unknown;mediaType?:unknown;quotedUrl?:unknown;coverUrl?:unknown;hashtags?:unknown;creatorFollowers?:unknown;outboundUrls?:unknown;relationType?:unknown;relatedVideoId?:unknown;visualHash?:unknown;transcript?:unknown;transcriptSource?:unknown;transcriptStatus?:unknown;transcriptDuration?:unknown;videoAbout?:unknown;videoSubject?:unknown;videoEvent?:unknown;videoMeaningConfidence?:unknown;videoMeaningMethod?:unknown;videoMeaningStatus?:unknown;
@@ -52,7 +52,7 @@ export async function POST(r:Request){
   const evidenceStatements:D1PreparedStatement[]=[];
   for(const item of evidence){
    const id=clean(item.id,220),platform=clean(item.platform,12),provenance=clean(item.provenance,500);
-   if(!id||!['X','TikTok'].includes(platform))continue;
+   if(!id||!['X','TikTok','Instagram'].includes(platform))continue;
    const hashtags=JSON.stringify(safeArray(item.hashtags,30,80));
    const outboundUrls=JSON.stringify((Array.isArray(item.outboundUrls)?item.outboundUrls:[]).map(safeUrl).filter((url):url is string=>Boolean(url)).slice(0,12));
    evidenceStatements.push(db().prepare(`INSERT INTO evidence_rich(owner,id,observed,replies,reposts,bookmarks,quotes,comments,shares,saves,sound_id,sound_title,sound_author,media_type,quoted_url,cover_url,hashtags,feed_surface,creator_followers,outbound_urls,relation_type,related_video_id,visual_hash,transcript,transcript_source,transcript_status,transcript_duration,video_about,video_subject,video_event,video_meaning_confidence,video_meaning_method,video_meaning_status)
