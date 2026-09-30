@@ -125,6 +125,7 @@ export FRONT_VIDEO_MEANING_BATCH_SIZE="${FRONT_VIDEO_MEANING_BATCH_SIZE:-4}"
 export FRONT_VIDEO_MEANING_TIMEOUT_MS="${FRONT_VIDEO_MEANING_TIMEOUT_MS:-60000}"
 export FRONT_TIKTOK_OBSERVER_MS="${FRONT_TIKTOK_OBSERVER_MS:-850}"
 export FRONT_BRIDGE_HEADLESS="${FRONT_BRIDGE_HEADLESS:-1}"
+export FRONT_CLOUD_URL="${FRONT_CLOUD_URL:-https://believable-inspiration-production-a68b.up.railway.app}"
 
 if [ -z "$EXPLICIT_MODEL" ] && [ "$FRONT_OLLAMA_MODEL" = "qwen3-vl:8b" ]; then
   echo "Front v27: replacing stale qwen3-vl:8b local default with verified qwen3-vl:4b-instruct."
@@ -190,4 +191,16 @@ elif [ -n "${FRONT_OLLAMA_MODEL:-}" ]; then
 else
   echo "Content/context understanding: deterministic fallback active; semantic model inactive until content.env is configured."
 fi
+CLOUD_AGENT_PID=""
+if [ -n "${FRONT_BRIDGE_API_KEY:-}" ]; then
+  echo "Front remote scrolling: cloud agent enabled."
+  node ./src/cloud-agent.mjs &
+  CLOUD_AGENT_PID=$!
+else
+  echo "Front remote scrolling: cloud agent disabled until FRONT_BRIDGE_API_KEY is configured in content.env."
+fi
+cleanup_cloud_agent() {
+  if [ -n "$CLOUD_AGENT_PID" ]; then kill "$CLOUD_AGENT_PID" 2>/dev/null || true; fi
+}
+trap cleanup_cloud_agent EXIT INT TERM
 npm start
