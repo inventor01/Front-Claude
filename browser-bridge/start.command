@@ -72,7 +72,8 @@ EXPLICIT_TIKTOK_OBSERVER="${FRONT_TIKTOK_OBSERVER_MS-}"
 
 DEFAULT_CONTENT_ENV="$(pwd)/content.env"
 CONTENT_ENV="$FRONT_DATA_DIR/content.env"
-for env_file in "$DEFAULT_CONTENT_ENV" "$CONTENT_ENV"; do
+CLOUD_ENV="$FRONT_DATA_DIR/cloud.env"
+for env_file in "$DEFAULT_CONTENT_ENV" "$CONTENT_ENV" "$CLOUD_ENV"; do
   if [ -f "$env_file" ]; then
     set -a
     source "$env_file"
