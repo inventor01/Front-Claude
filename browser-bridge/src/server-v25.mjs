@@ -20,6 +20,7 @@ import { VideoMeaningEngineV27 } from './video-meaning-v27.mjs';
 import { enhanceNarrativesV26 } from './narrative-intelligence-v26.mjs';
 import { canonicalSocialPostUrl } from './social-post-url.mjs';
 import { BroadTikTokObserver, extractTikTokAnchors } from './tiktok-observer-v21.mjs';
+import { extractInstagramPage, instagramTag } from './instagram-observer-v28.mjs';
 import {
   findSystemChrome,
   frontCdpUrl,
@@ -83,6 +84,7 @@ function requestSummary(body = {}) {
     targetUniqueFeedItems: Math.max(30, Math.min(180, Number(body.targetUniqueFeedItems || 90))),
     scanXForYou: body.scanXForYou !== false,
     scanTikTokForYou: body.scanTikTokForYou !== false,
+    scanInstagram: body.scanInstagram !== false,
     keywords: Array.isArray(body.keywords) ? body.keywords.map((x) => clean(x, 120)).filter(Boolean).slice(0, 12) : [],
   };
 }
@@ -122,6 +124,7 @@ function livePayload() {
   const tiktokSnap = currentTikTokSnapshot(latestLive.stages?.tiktokDiscovery, tiktok.snapshot());
   const xObserved = latestLive.stages?.xDiscovery?.observed || 0;
   const tiktokObserved = tiktokSnap.observed || 0;
+  const instagramObserved = latestLive.stages?.instagramDiscovery?.observed || 0;
   
   return {
     ...latestLive,
@@ -130,6 +133,7 @@ function livePayload() {
       ...latestLive.platformCounts,
       X: latestLive.platformCounts?.X || xObserved,
       TikTok: latestLive.platformCounts?.TikTok || tiktokObserved,
+      Instagram: latestLive.platformCounts?.Instagram || instagramObserved,
     },
     tiktokDiscovery: {
       ...tiktokSnap,
@@ -234,6 +238,7 @@ async function extractTikTokSearch(page, provenance, limit = 40) {
 async function collectSearch(platform, query, limit = 24) {
   const q = sanitizeTopic(query);
   if (!q || shouldStop()) return [];
+  if(platform==='Instagram')return collectInstagramSearch(q,limit);
   const url = platform === 'X'
     ? `https://x.com/search?q=${encodeURIComponent(`"${q}" -filter:replies`)}&src=typed_query&f=live`
     : `https://www.tiktok.com/search?q=${encodeURIComponent(q)}`;
@@ -253,6 +258,52 @@ async function collectSearch(platform, query, limit = 24) {
     }
     return out.slice(0, limit);
   } finally { await page.close().catch(() => {}); }
+}
+
+async function collectInstagramSurface(url,target,maxSeconds=55,provenance='Front v28 · Instagram'){
+  const page=await openOwnedPage(url);
+  const started=Date.now(),rows=new Map();
+  let scrolls=0,stale=0,lastSize=0;
+  const diagnostics=[];
+  try{
+    await page.waitForTimeout(2600);
+    while(!shouldStop()&&Date.now()-started<maxSeconds*1000&&rows.size<target&&scrolls<40){
+      const found=await extractInstagramPage(page,provenance,target);
+      for(const row of found)rows.set(row.id,row);
+      latestLive={...latestLive,evidence:mergeRichEvidence([...latestLive.evidence,...found]).slice(-300),updatedAt:Date.now()};
+      const domIds=await page.locator('a[href*="/p/"],a[href*="/reel/"]').evaluateAll((links)=>links.map((a)=>a.href).filter(Boolean)).catch(()=>[]);
+      const uniqueDomIds=new Set(domIds).size;
+      stale=nextStalePassCount(lastSize,uniqueDomIds,stale);lastSize=uniqueDomIds;
+      stage('instagramDiscovery',{status:'running',observed:rows.size,target,scrolls,sourcePage:page.url(),stalePasses:stale});
+      latestLive={...latestLive,sourcePages:[...new Set([...latestLive.sourcePages.filter((x)=>!/instagram\.com/i.test(x)),page.url()])],updatedAt:Date.now()};
+      if(rows.size>=target)break;
+      const movement=await scrollFeedPage(page,'a[href*="/p/"],a[href*="/reel/"]',1000);
+      diagnostics.push({scroll:scrolls,...movement,accepted:found.length,uniqueDomIds});
+      if(feedExhausted(stale,diagnostics))break;
+      await page.waitForTimeout(1200);scrolls+=1;
+    }
+    return [...rows.values()];
+  }finally{await page.close().catch(()=>{});}
+}
+async function collectInstagramFeed(target,maxSeconds=70){
+  const perSurface=Math.max(10,Math.ceil(target/2));
+  const rows=[];
+  for(const [url,label] of [
+    ['https://www.instagram.com/','Instagram Home'],
+    ['https://www.instagram.com/reels/','Instagram Reels']
+  ]){
+    if(shouldStop())break;
+    try{rows.push(...await collectInstagramSurface(url,perSurface,maxSeconds,label));}
+    catch(error){latestLive.errors.push(`${label}: ${clean(error?.message||error,240)}`);}
+  }
+  const merged=mergeRichEvidence(rows).slice(0,target);
+  stage('instagramDiscovery',{status:shouldStop()?'stopped':'complete',observed:merged.length,target,elapsedMs:null});
+  return merged;
+}
+async function collectInstagramSearch(query,limit=24){
+  const tag=instagramTag(query);
+  if(!tag)return[];
+  return collectInstagramSurface(`https://www.instagram.com/explore/tags/${encodeURIComponent(tag)}/`,limit,40,`Front v28 · Instagram hashtag · #${tag}`);
 }
 
 async function collectTikTokFeed(target, maxSeconds = 70) {
@@ -294,13 +345,15 @@ async function addOriginResearch(rows, topics, mode) {
   for (const topic of candidates) {
     const q = sanitizeTopic(topic.topic || topic.key || '');
     if (!q || shouldStop()) continue;
-    stage('originResearch', { status: 'running', searched, total: candidates.length * 2, current: q });
+    stage('originResearch', { status: 'running', searched, total: candidates.length * 3, current: q });
     try { merged.push(...await collectSearch('X', q, 24)); } catch (error) { latestLive.errors.push(`X origin ${q}: ${clean(error?.message || error, 240)}`); }
     searched += 1;
     try { merged.push(...await collectSearch('TikTok', q, 24)); } catch (error) { latestLive.errors.push(`TikTok origin ${q}: ${clean(error?.message || error, 240)}`); }
     searched += 1;
+    try { merged.push(...await collectSearch('Instagram', q, 24)); } catch (error) { latestLive.errors.push(`Instagram origin ${q}: ${clean(error?.message || error, 240)}`); }
+    searched += 1;
   }
-  stage('originResearch', { status: shouldStop() ? 'stopped' : 'complete', searched, total: candidates.length * 2 });
+  stage('originResearch', { status: shouldStop() ? 'stopped' : 'complete', searched, total: candidates.length * 3 });
   return mergeRichEvidence(merged);
 }
 
@@ -386,6 +439,7 @@ async function runScan(body = {}) {
       chrome: { status: 'starting', updatedAt: Date.now() },
       xDiscovery: { status: request.scanXForYou ? 'pending' : 'disabled', observed: 0, target: request.targetUniqueFeedItems, updatedAt: Date.now() },
       tiktokDiscovery: { status: request.scanTikTokForYou ? 'pending' : 'disabled', active: request.scanTikTokForYou, observed: 0, grounded: 0, target: request.targetUniqueFeedItems, sourcePages: [], errors: [], updatedAt: Date.now() },
+      instagramDiscovery: { status: request.scanInstagram ? 'pending' : 'disabled', observed: 0, target: request.targetUniqueFeedItems, sourcePages: [], errors: [], updatedAt: Date.now() },
       transcription: { status: 'pending', updatedAt: Date.now() },
       visualUnderstanding: { status: 'pending', updatedAt: Date.now() },
       videoMeaning: { status: 'pending', updatedAt: Date.now() },
@@ -408,6 +462,7 @@ async function runScan(body = {}) {
     const feedSeconds = Number(body.maxFeedScanSeconds || config.maxFeedScanSeconds || 70);
     if (request.scanXForYou) jobs.push(() => collectXFeed(request.targetUniqueFeedItems, feedSeconds).then((rows) => ({ platform: 'X', rows })));
     if (request.scanTikTokForYou) jobs.push(() => collectTikTokFeed(request.targetUniqueFeedItems, feedSeconds).then((value) => ({ platform: 'TikTok', rows: value.evidence, tiktok: value.snapshot })));
+    if (request.scanInstagram) jobs.push(() => collectInstagramFeed(request.targetUniqueFeedItems, feedSeconds).then((rows) => ({ platform: 'Instagram', rows })));
     const settled = await collectVisibleFeeds(jobs);
     for (const item of settled) {
       if (item.status === 'fulfilled') resultRows.push(...item.value.rows);
@@ -422,6 +477,7 @@ async function runScan(body = {}) {
       for (const q of request.keywords) {
         try { resultRows.push(...await collectSearch('X', q, 18)); } catch (error) { latestLive.errors.push(`X keyword ${q}: ${clean(error?.message || error, 220)}`); }
         try { resultRows.push(...await collectSearch('TikTok', q, 18)); } catch (error) { latestLive.errors.push(`TikTok keyword ${q}: ${clean(error?.message || error, 220)}`); }
+        try { resultRows.push(...await collectSearch('Instagram', q, 18)); } catch (error) { latestLive.errors.push(`Instagram keyword ${q}: ${clean(error?.message || error, 220)}`); }
       }
       resultRows = mergeRichEvidence(resultRows);
     }
@@ -499,7 +555,7 @@ function health() {
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
     transcription: transcription.status(), contentUnderstanding: understanding.status(), videoMeaning: videoMeaning.status(), postUnderstanding: postUnderstanding.status(),
     contentTargets: { transcriptConcurrency: Number(process.env.FRONT_TRANSCRIPT_CONCURRENCY || 2), deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
-    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
+    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','owned-instagram-page','instagram-feed-scroll','instagram-reels-scroll','instagram-hashtag-investigation','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
     activePorts: { bridge: PORT, chromeCdp: CDP_PORT },
   };
 }
@@ -553,14 +609,14 @@ const server = http.createServer(async (req, res) => {
       return json(req, res, 200, { ok: true, stopped: Boolean(current), scanId: current?.id || null });
     }
     if (req.method === 'POST' && url.pathname === '/open-login') {
-      if (!systemChrome) throw new Error('Google Chrome is required for authenticated X/TikTok scans.');
+      if (!systemChrome) throw new Error('Google Chrome is required for authenticated X/TikTok/Instagram scans.');
       if (browserConnection?.isConnected?.()) await browserConnection.close().catch(() => {});
       browserConnection = null; browserContext = null;
       stopExistingFrontChrome({ dataDir: DATA_DIR });
       await sleep(700);
       const opened = openRegularChromeForLogin({ dataDir: DATA_DIR, chromeExecutable: systemChrome, debuggingPort: CDP_PORT });
       await waitForCdp(opened.cdpUrl, { timeoutMs: 12000 });
-      return json(req, res, 200, { ok: true, message: 'Front Chrome is ready. Sign in to X and TikTok and leave this dedicated profile open.', profileDir: frontLoginProfileDir(DATA_DIR), cdpUrl: opened.cdpUrl });
+      return json(req, res, 200, { ok: true, message: 'Front Chrome is ready. Sign in to X, TikTok, and Instagram and leave this dedicated profile open.', profileDir: frontLoginProfileDir(DATA_DIR), cdpUrl: opened.cdpUrl });
     }
     if (req.method === 'POST' && url.pathname === '/scan') {
       if (current) return json(req, res, 409, { error: 'A scan is already running. Use Stop scan before starting another one.', scanId: current.id });
@@ -575,5 +631,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Front browser bridge v27 listening on http://${HOST}:${PORT}`);
   console.log(`Single-process scanner active. Chrome CDP remains on ${CDP_URL}.`);
-  console.log('Pipeline: browser preflight → X/TikTok discovery → visual understanding → contextual post understanding → semantic narrative ranking → origin research.');
+  console.log('Pipeline: browser preflight → X/TikTok/Instagram discovery → visual understanding → contextual post understanding → semantic narrative ranking → origin research.');
 });
