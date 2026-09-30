@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- D1 and JSON boundary rows are dynamically validated before use. */
 import { db, noStore, requireService } from '@/lib/front-agent-auth';
 const parse=(v:string|null,f:any)=>{try{return v?JSON.parse(v):f;}catch{return f;}};
 export async function GET(request:Request,{params}:{params:Promise<{id:string}>}){
