@@ -1,3 +1,3 @@
-CREATE INDEX `idx_agent_scroll_evidence_job` ON `agent_scroll_evidence` (`owner`,`job_id`,`updated`);--> statement-breakpoint
-CREATE UNIQUE INDEX `idx_agent_scroll_jobs_request` ON `agent_scroll_jobs` (`owner`,`caller`,`request_id`);--> statement-breakpoint
-CREATE INDEX `idx_agent_scroll_jobs_claim` ON `agent_scroll_jobs` (`owner`,`status`,`lease_expires_at`,`created`);
+CREATE INDEX IF NOT EXISTS `idx_agent_scroll_evidence_job` ON `agent_scroll_evidence` (`owner`,`job_id`,`updated`);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS `idx_agent_scroll_jobs_request` ON `agent_scroll_jobs` (`owner`,`caller`,`request_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_agent_scroll_jobs_claim` ON `agent_scroll_jobs` (`owner`,`status`,`lease_expires_at`,`created`);
