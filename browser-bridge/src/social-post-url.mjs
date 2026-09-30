@@ -11,6 +11,10 @@ export function canonicalSocialPostUrl(value, platform) {
       const m = u.pathname.match(/^\/@([A-Za-z0-9_.]+)\/video\/(\d{10,25})\/?$/);
       return m ? `https://www.tiktok.com/@${m[1]}/video/${m[2]}` : null;
     }
+    if ((!platform || platform === 'Instagram') && /^(?:www\.)?instagram\.com$/i.test(u.hostname)) {
+      const m = u.pathname.match(/^\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?$/);
+      return m ? `https://www.instagram.com/${m[1]}/${m[2]}/` : null;
+    }
   } catch {}
   return null;
 }
