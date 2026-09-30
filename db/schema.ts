@@ -1,4 +1,4 @@
-import { sqliteTable, text, real, integer, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, real, integer, primaryKey, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 export const watchlist=sqliteTable('watchlist',{owner:text('owner').notNull(),mint:text('mint').notNull(),name:text('name').notNull(),created:integer('created').notNull()},t=>[primaryKey({columns:[t.owner,t.mint]})]);
 export const trades=sqliteTable('trades',{id:text('id').notNull(),owner:text('owner').notNull(),mint:text('mint').notNull(),name:text('name').notNull(),amount:real('amount').notNull(),quantity:real('quantity').notNull(),entry:real('entry').notNull(),opened:integer('opened').notNull(),exit:real('exit'),closed:integer('closed'),proceeds:real('proceeds')},t=>[primaryKey({columns:[t.owner,t.id]})]);
 export const cache=sqliteTable('cache',{key:text('key').primaryKey(),value:text('value').notNull(),expires:integer('expires').notNull()});
@@ -19,11 +19,18 @@ export const agentScrollJobs=sqliteTable('agent_scroll_jobs',{
   resultJson:text('result_json'),limitations:text('limitations').notNull().default('[]'),error:text('error'),
   cancelRequested:integer('cancel_requested').notNull().default(0),created:integer('created').notNull(),started:integer('started'),
   heartbeat:integer('heartbeat'),completed:integer('completed')
-},t=>[primaryKey({columns:[t.owner,t.id]})]);
+},t=>[
+  primaryKey({columns:[t.owner,t.id]}),
+  uniqueIndex('idx_agent_scroll_jobs_request').on(t.owner,t.caller,t.requestId),
+  index('idx_agent_scroll_jobs_claim').on(t.owner,t.status,t.leaseExpiresAt,t.created)
+]);
 export const agentScrollEvidence=sqliteTable('agent_scroll_evidence',{
   owner:text('owner').notNull(),jobId:text('job_id').notNull(),evidenceId:text('evidence_id').notNull(),
   platform:text('platform').notNull(),payload:text('payload').notNull(),created:integer('created').notNull(),updated:integer('updated').notNull()
-},t=>[primaryKey({columns:[t.owner,t.jobId,t.evidenceId]})]);
+},t=>[
+  primaryKey({columns:[t.owner,t.jobId,t.evidenceId]}),
+  index('idx_agent_scroll_evidence_job').on(t.owner,t.jobId,t.updated)
+]);
 export const bridgeAgents=sqliteTable('bridge_agents',{
   owner:text('owner').notNull(),id:text('id').notNull(),label:text('label').notNull(),status:text('status').notNull(),
   lastSeen:integer('last_seen').notNull(),capabilities:text('capabilities').notNull().default('{}'),created:integer('created').notNull()
