@@ -175,7 +175,7 @@ echo "Balanced profile: transcript-concurrency=${FRONT_TRANSCRIPT_CONCURRENCY}, 
 if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v whisper-cli >/dev/null 2>&1 || [ ! -s "${FRONT_WHISPER_MODEL:-$FRONT_DATA_DIR/models/ggml-base.bin}" ]; then
   echo "WARNING: full video speech-to-text is not ready. Run: bash ./setup-transcription.command"
 else
-  echo "Video transcription: local whisper.cpp ready for every collected X/TikTok video."
+  echo "Video transcription: local whisper.cpp ready for every collected X/TikTok/Instagram video."
 fi
 if [ -n "${FRONT_CONTENT_API_KEY:-${OPENAI_API_KEY:-}}" ]; then
   echo "Content/context understanding: OpenAI provider configured."
