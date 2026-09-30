@@ -1,4 +1,4 @@
-CREATE TABLE `agent_scroll_evidence` (
+CREATE TABLE IF NOT EXISTS `agent_scroll_evidence` (
 	`owner` text NOT NULL,
 	`job_id` text NOT NULL,
 	`evidence_id` text NOT NULL,
@@ -9,7 +9,7 @@ CREATE TABLE `agent_scroll_evidence` (
 	PRIMARY KEY(`owner`, `job_id`, `evidence_id`)
 );
 --> statement-breakpoint
-CREATE TABLE `agent_scroll_jobs` (
+CREATE TABLE IF NOT EXISTS `agent_scroll_jobs` (
 	`owner` text NOT NULL,
 	`id` text NOT NULL,
 	`caller` text NOT NULL,
@@ -34,7 +34,7 @@ CREATE TABLE `agent_scroll_jobs` (
 	PRIMARY KEY(`owner`, `id`)
 );
 --> statement-breakpoint
-CREATE TABLE `bridge_agents` (
+CREATE TABLE IF NOT EXISTS `bridge_agents` (
 	`owner` text NOT NULL,
 	`id` text NOT NULL,
 	`label` text NOT NULL,
