@@ -180,3 +180,5 @@ jobs:
         run: |
           test -f dist/.openai/hosting.json
           test -d dist/.openai/drizzle
+      - name: Front scroll queue HTTP smoke
+        run: node tests/front-scroll-http-smoke.mjs
