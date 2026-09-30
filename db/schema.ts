@@ -10,3 +10,21 @@ export const evidenceLinks=sqliteTable('evidence_links',{owner:text('owner').not
 export const collector=sqliteTable('collector',{owner:text('owner').primaryKey(),state:text('state').notNull(),lockUntil:integer('lock_until').notNull().default(0),lockId:text('lock_id').notNull().default('')});
 export const usage=sqliteTable('usage',{owner:text('owner').notNull(),day:text('day').notNull(),reserved:integer('reserved').notNull().default(0)},t=>[primaryKey({columns:[t.owner,t.day]})]);
 export const narrativeCoins=sqliteTable('narrative_coins',{owner:text('owner').notNull(),narrative:text('narrative').notNull(),mint:text('mint').notNull(),data:text('data').notNull(),observed:integer('observed').notNull()},t=>[primaryKey({columns:[t.owner,t.narrative,t.mint]})]);
+
+export const agentScrollJobs=sqliteTable('agent_scroll_jobs',{
+  owner:text('owner').notNull(),id:text('id').notNull(),caller:text('caller').notNull(),requestId:text('request_id').notNull(),
+  status:text('status').notNull(),phase:text('phase').notNull().default('QUEUED'),requestJson:text('request_json').notNull(),
+  leaseId:text('lease_id'),leaseExpiresAt:integer('lease_expires_at'),bridgeId:text('bridge_id'),scanId:text('scan_id'),
+  observedCount:integer('observed_count').notNull().default(0),platformCounts:text('platform_counts').notNull().default('{}'),
+  resultJson:text('result_json'),limitations:text('limitations').notNull().default('[]'),error:text('error'),
+  cancelRequested:integer('cancel_requested').notNull().default(0),created:integer('created').notNull(),started:integer('started'),
+  heartbeat:integer('heartbeat'),completed:integer('completed')
+},t=>[primaryKey({columns:[t.owner,t.id]})]);
+export const agentScrollEvidence=sqliteTable('agent_scroll_evidence',{
+  owner:text('owner').notNull(),jobId:text('job_id').notNull(),evidenceId:text('evidence_id').notNull(),
+  platform:text('platform').notNull(),payload:text('payload').notNull(),created:integer('created').notNull(),updated:integer('updated').notNull()
+},t=>[primaryKey({columns:[t.owner,t.jobId,t.evidenceId]})]);
+export const bridgeAgents=sqliteTable('bridge_agents',{
+  owner:text('owner').notNull(),id:text('id').notNull(),label:text('label').notNull(),status:text('status').notNull(),
+  lastSeen:integer('last_seen').notNull(),capabilities:text('capabilities').notNull().default('{}'),created:integer('created').notNull()
+},t=>[primaryKey({columns:[t.owner,t.id]})]);
