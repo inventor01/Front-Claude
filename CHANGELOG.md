@@ -1,3 +1,17 @@
+## 2026-10-06 — Social Arb bridge readiness visibility (v36)
+
+### Root cause
+Front already tracked the local browser bridge and active scroll jobs in cloud storage, but that status was only exposed through service-authenticated infrastructure endpoints. The signed-in Social Arb UI therefore could not distinguish a research problem from a physically offline Mac bridge without inspecting Railway logs.
+
+### Permanent fixes
+- Added a signed-in, read-only Social Arb bridge-status endpoint with no bridge key or browser credentials in its response.
+- Reports bridge online/offline from recent polling, Chrome/scanner readiness, last-seen time, and the active queue count.
+- Added visible online/offline readiness messaging directly above Social Arb results.
+- When offline, the UI points to the new macOS autostart installer instead of failing silently.
+
+### Security boundary
+The route exposes operational readiness only. It does not return FRONT_BRIDGE_API_KEY, cookies, passwords, Chrome profile contents, or provider secrets.
+
 ## 2026-10-06 — Front local bridge watchdog + macOS autostart (v35)
 
 ### Root cause
