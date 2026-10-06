@@ -35,8 +35,9 @@ const requiredSocialArb={
   social_arb_company_mappings:['signal_key','mapping_status','ticker_verified','ownership_verified','confidence'],
   social_arb_research_runs:['signal_key','researched','materiality_status','awareness_status','information_gap_state','financial_news_count'],
   social_arb_outcomes:['research_id','signal_key','ticker','provider','baseline_price','baseline_at','status','data'],
+  front_provider_secrets:['owner','provider','secret_ciphertext','created','updated','last_validated','validation_status'],
 };
-const socialSql=files.filter((name)=>/social_(?:arbitrage|arb)/i.test(name)).map((name)=>fs.readFileSync(path.join(migrationsDir,name),'utf8').toLowerCase()).join('\n');
+const socialSql=files.filter((name)=>/(?:social_(?:arbitrage|arb)|front_provider_secrets)/i.test(name)).map((name)=>fs.readFileSync(path.join(migrationsDir,name),'utf8').toLowerCase()).join('\n');
 for(const [table,columns] of Object.entries(requiredSocialArb)){
   if(!socialSql.includes(table)){
     console.error('[schema-migrations] Social Arb migration is missing table '+table);
