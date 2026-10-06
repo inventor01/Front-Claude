@@ -381,11 +381,11 @@ export class SocialArbitrageEngineV30 {
     writeJson(this.historyPath, this.history);
   }
 
-  async analyze(rows = [], { mode = 'scout', maxMappings, timeoutMs = 60000, updateHistory = true } = {}) {
+  async analyze(rows = [], { mode = 'scout', maxMappings, timeoutMs = 60000, updateHistory = true, mapCompanies = true } = {}) {
     const startedAt = Date.now();
     let candidates = deriveSocialArbCandidates(rows, { history: this.history, now: startedAt, limit: 30 });
     const mappingLimit = Math.max(1, Math.min(10, Number(maxMappings || (mode === 'deep' ? 6 : 3))));
-    const selected = candidates.filter((candidate) => candidate.score >= 36 || candidate.behaviorCount >= 2).slice(0, mappingLimit);
+    const selected = mapCompanies ? candidates.filter((candidate) => candidate.score >= 36 || candidate.behaviorCount >= 2).slice(0, mappingLimit) : [];
     let modeled = 0, cached = 0, failed = 0;
     const errors = [];
     const byKey = new Map();
