@@ -130,12 +130,12 @@ async function scrollCommentSurface(page) {
     while(p) {
       if(p.scrollHeight>p.clientHeight+80) {
         const before=p.scrollTop;
-        p.scrollBy({top:Math.max(500,p.clientHeight*.85),behavior:'instant'});
+        p.scrollBy({top:Math.max(500,p.clientHeight*.85),behavior:'auto'});
         return {scrolled:true,before,after:p.scrollTop};
       }
       p=p.parentElement;
     }
-    window.scrollBy({top:700,behavior:'instant'});
+    window.scrollBy({top:700,behavior:'auto'});
     return {scrolled:true,before:null,after:null};
   }).catch(()=>({scrolled:false}));
 }
