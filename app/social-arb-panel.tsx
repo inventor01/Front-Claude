@@ -97,19 +97,29 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
    const data=await response.json() as Feed;
    if(!response.ok)throw new Error(data.error||'Could not load Social Arb.');
    setFeed(data);
+   void refreshResearch();
   }catch(reason){setError((reason as Error).message);}
   finally{setBusy((value)=>value==='refresh'?'':value);}
  }
 
  useEffect(()=>{
   let cancelled=false;
-  void fetch('/api/social-arb',{cache:'no-store'})
-   .then(async(response)=>{
+  void Promise.all([
+   fetch('/api/social-arb',{cache:'no-store'}).then(async(response)=>{
     const data=await response.json() as Feed;
     if(!response.ok)throw new Error(data.error||'Could not load Social Arb.');
-    if(!cancelled){setFeed(data);void refreshResearch();}
-   })
-   .catch((reason)=>{if(!cancelled)setError((reason as Error).message);});
+    return data;
+   }),
+   fetch('/api/social-arb/research',{cache:'no-store'}).then(async(response)=>{
+    const data=await response.json() as ResearchFeed;
+    if(!response.ok)throw new Error(data.error||'Could not load Social Arb research.');
+    return data;
+   }),
+  ]).then(([signalsFeed,researchFeed])=>{
+   if(cancelled)return;
+   setFeed(signalsFeed);
+   setResearch(Object.fromEntries((researchFeed.research||[]).map((item)=>[item.signalKey,item])));
+  }).catch((reason)=>{if(!cancelled)setError((reason as Error).message);});
   return()=>{cancelled=true;};
  },[refreshKey]);
 
