@@ -23,6 +23,11 @@ type SocialArbResearch={
  informationGap?:{note?:string};materiality?:{note?:string};
 };
 type ResearchFeed={research:SocialArbResearch[];error?:string};
+type SocialArbOutcome={
+ researchId:string;signalKey:string;ticker:string;provider:string;captured:number;baselinePrice:number|null;baselineAt:number|null;baselineKind:string|null;status:string;
+ horizons:Record<string,{status?:string;sessions?:number;date?:string;price?:number;return?:number;note?:string}>;note?:string|null;error?:string|null;
+};
+type OutcomeFeed={outcomes:SocialArbOutcome[];provider:{provider:string;configured:boolean;purpose?:string;license?:string};error?:string};
 
 const behaviorNames:Record<string,string>={
  PURCHASED:'Bought',PURCHASE_INTENT:'Wants to buy',REPEAT_PURCHASE:'Repeat buying',SWITCHING:'Switching',STOCKOUT:'Stockout',
@@ -46,6 +51,32 @@ function mappingLabel(signal:SocialArbSignal){
  if(signal.ticker||signal.companyName)return'Company hypothesis';
  return'Needs company mapping';
 }
+function formatOutcomePrice(value:number|null){
+ if(value==null)return 'awaiting provider';
+ return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(value);
+}
+function OutcomeStrip({outcome}:{outcome:SocialArbOutcome}){
+ const horizons=['1','5','20','60'];
+ return <div className={styles.outcome}>
+  <div><span>Point-in-time journal</span><b>{outcome.status.replaceAll('-',' ')}</b></div>
+  <div>
+   <span>Baseline</span>
+   <b>{formatOutcomePrice(outcome.baselinePrice)}</b>
+   <small>{outcome.baselineKind?outcome.baselineKind.replaceAll('-',' '):''}</small>
+  </div>
+  {horizons.map((horizon)=>{
+   const result=outcome.horizons?.[horizon];
+   const measured=result?.status==='measured'&&Number.isFinite(Number(result.return));
+   const pct=measured?Number(result.return)*100:null;
+   const label=pct==null?'pending':(pct>=0?'+':'')+pct.toFixed(1)+'%';
+   return <div key={horizon}>
+    <span>{horizon} session{horizon==='1'?'':'s'}</span>
+    <b>{label}</b>
+    <small>{result?.date||''}</small>
+   </div>;
+  })}
+ </div>;
+}
 function mergeSignals(persisted:SocialArbSignal[],live:SocialArbSignal[]){
  const map=new Map<string,SocialArbSignal>();
  for(const signal of persisted)map.set(signal.key,signal);
@@ -59,10 +90,11 @@ function mergeSignals(persisted:SocialArbSignal[],live:SocialArbSignal[]){
  }
  return[...map.values()].sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(b.authorCount||0)-Number(a.authorCount||0));
 }
-
 export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComplete}:{liveSignals?:SocialArbSignal[];refreshKey?:number;onScanComplete?:()=>void}){
  const [feed,setFeed]=useState<Feed|null>(null);
  const [research,setResearch]=useState<Record<string,SocialArbResearch>>({});
+ const [outcomes,setOutcomes]=useState<Record<string,SocialArbOutcome>>({});
+ const [marketProvider,setMarketProvider]=useState<{provider:string;configured:boolean}|null>(null);
  const [busy,setBusy]=useState('');
  const [message,setMessage]=useState('');
  const [error,setError]=useState('');
@@ -76,6 +108,16 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
   }catch(reason){setError((reason as Error).message);}
  }
 
+ async function refreshOutcomes(){
+  try{
+   const response=await fetch('/api/social-arb/outcomes',{cache:'no-store'});
+   const data=await response.json() as OutcomeFeed;
+   if(!response.ok)throw new Error(data.error||'Could not load Social Arb outcomes.');
+   setOutcomes(Object.fromEntries((data.outcomes||[]).map((item)=>[item.signalKey,item])));
+   setMarketProvider(data.provider||null);
+  }catch(reason){setError((reason as Error).message);}
+ }
+
  async function researchSignal(signalKey:string){
   setBusy('research:'+signalKey);setError('');setMessage('Checking SEC filings and financial-media awareness for this candidate…');
   try{
@@ -85,6 +127,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
    const data=await response.json() as SocialArbResearch&{error?:string};
    if(!response.ok)throw new Error(data.error||'Candidate research failed.');
    setResearch((current)=>({...current,[signalKey]:data}));
+   void refreshOutcomes();
    setMessage('Research check saved point-in-time · '+String(data.informationGapState||'unmeasured').replaceAll('-',' ')+'.');
   }catch(reason){setError((reason as Error).message);}
   finally{setBusy('');}
@@ -98,6 +141,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
    if(!response.ok)throw new Error(data.error||'Could not load Social Arb.');
    setFeed(data);
    void refreshResearch();
+   void refreshOutcomes();
   }catch(reason){setError((reason as Error).message);}
   finally{setBusy((value)=>value==='refresh'?'':value);}
  }
@@ -115,10 +159,17 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
     if(!response.ok)throw new Error(data.error||'Could not load Social Arb research.');
     return data;
    }),
-  ]).then(([signalsFeed,researchFeed])=>{
+   fetch('/api/social-arb/outcomes',{cache:'no-store'}).then(async(response)=>{
+    const data=await response.json() as OutcomeFeed;
+    if(!response.ok)throw new Error(data.error||'Could not load Social Arb outcomes.');
+    return data;
+   }),
+  ]).then(([signalsFeed,researchFeed,outcomeFeed])=>{
    if(cancelled)return;
    setFeed(signalsFeed);
    setResearch(Object.fromEntries((researchFeed.research||[]).map((item)=>[item.signalKey,item])));
+   setOutcomes(Object.fromEntries((outcomeFeed.outcomes||[]).map((item)=>[item.signalKey,item])));
+   setMarketProvider(outcomeFeed.provider||null);
   }).catch((reason)=>{if(!cancelled)setError((reason as Error).message);});
   return()=>{cancelled=true;};
  },[refreshKey]);
@@ -168,6 +219,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
 
   {message&&<div className={styles.notice}>{message}</div>}
   {error&&<div className={styles.error}>{error}</div>}
+  {marketProvider&&!marketProvider.configured&&<div className={styles.marketNotice}>Performance journal is ready, but Tiingo is not connected yet. Front will not invent or scrape a substitute price feed; connect a Tiingo API token before the live 7-day run to freeze exact research-time prices.</div>}
 
   <div className={styles.stats}>
    <div className={styles.stat}><span>World changes</span><strong>{stats.total}</strong><small>ranked social-behavior signals</small></div>
@@ -188,6 +240,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
    const evidence=(signal.evidence||[]).slice(0,5);
    const mapped=Boolean(signal.ticker||signal.companyName);
    const researchRow=research[signal.key];
+   const outcome=outcomes[signal.key];
    const company=(signal.companyName||'company')+(signal.ticker?' ('+signal.ticker+')':'');
    return <article className={styles.card} key={signal.key}>
     <div className={styles.cardHead}>
@@ -230,6 +283,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
       <button className={styles.researchButton} disabled={!signal.tickerVerified||!!busy} onClick={()=>void researchSignal(signal.key)}>{busy==='research:'+signal.key?'Researching…':researchRow?'Re-check gap':'Research gap'}</button>
      </div>
     </div>
+    {outcome?<OutcomeStrip outcome={outcome}/>:null}
     {evidence.length?<div className={styles.evidence}>{evidence.map((item)=><a href={item.url} target="_blank" rel="noreferrer" key={item.id}><span>{item.platform}{item.evidenceType==='comment'?' comment':''} · @{item.author}</span><ExternalLink size={10}/></a>)}</div>:null}
     {researchRow&&(researchRow.awareness?.filings?.evidence?.length||researchRow.awareness?.financialNews?.evidence?.length)?<div className={styles.researchEvidence}>
      {(researchRow.awareness?.filings?.evidence||[]).slice(0,3).map((item,index)=><a href={item.url} target="_blank" rel="noreferrer" key={'sec-'+index}>SEC {item.form||'filing'} {item.filed||''}<ExternalLink size={10}/></a>)}

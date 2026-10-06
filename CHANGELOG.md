@@ -1,3 +1,20 @@
+## 2026-10-06 — Social Arb point-in-time performance journal (v33)
+
+### Root cause
+Front could now detect a social information gap, but it still could not prove whether a candidate actually preceded market movement. Without an immutable price baseline and later outcome measurements, successful-looking alerts could only be judged with hindsight.
+
+### Permanent fixes
+- Added a Tiingo-backed market-data adapter using documented token-header authentication, derived reference prices, and historical EOD bars.
+- Freezes the research-time reference price when Tiingo is connected; if the provider was unavailable at that moment, Front preserves the timestamp and can only backfill the prior completed session close, explicitly labeled as a backfill.
+- Added a persistent outcome journal with 1, 5, 20, and 60-session measurements.
+- Added a bounded daily outcome evaluator to the existing 24/7 Social Arb scheduler.
+- Added UI visibility for baseline method, pending/measured horizons, and provider readiness.
+- Price tracking remains research evidence only and does not emit BUY/SELL instructions.
+- Tiingo remains feature-gated behind `TIINGO_API_KEY`; Front does not silently substitute undocumented or ambiguously licensed feeds.
+
+### QA gate
+Merge and production deployment remain blocked until the full Front CI suite passes.
+
 # Front changelog
 
 ## 2026-10-06 — Social Arb alpha validation pipeline (v32)

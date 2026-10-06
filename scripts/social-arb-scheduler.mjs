@@ -44,6 +44,13 @@ function requestFor(now=Date.now()){
  };
 }
 async function tick(){
+ const b=bucket();
+ if(b%96===0){
+  try{
+   const outcome=await json('/api/social-arb/outcomes',{method:'POST',body:JSON.stringify({action:'refresh',limit:15})});
+   console.log('[social-arb-autoscan] outcome journal refresh checked='+String(outcome.checked||0));
+  }catch(error){console.warn('[social-arb-autoscan] outcome journal refresh failed:',String(error?.message||error).slice(0,300));}
+ }
  const active=await json('/api/agent/scroll-jobs');
  if(Number(active.activeCount)>0){
   console.log('[social-arb-autoscan] backpressure: active job exists; skipping enqueue');

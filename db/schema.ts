@@ -72,3 +72,15 @@ export const socialArbResearchRuns=sqliteTable('social_arb_research_runs',{
   index('social_arb_research_runs_owner_signal_idx').on(t.owner,t.signalKey,t.researched),
   index('social_arb_research_runs_owner_gap_idx').on(t.owner,t.informationGapState,t.researched)
 ]);
+
+export const socialArbOutcomes=sqliteTable('social_arb_outcomes',{
+  owner:text('owner').notNull(),researchId:text('research_id').notNull(),signalKey:text('signal_key').notNull(),ticker:text('ticker').notNull(),
+  provider:text('provider').notNull(),captured:integer('captured').notNull(),baselinePrice:real('baseline_price'),baselineAt:integer('baseline_at'),
+  baselineKind:text('baseline_kind'),status:text('status').notNull().default('provider-unconfigured'),lastEvaluated:integer('last_evaluated'),
+  data:text('data').notNull().default('{}')
+},t=>[
+  primaryKey({columns:[t.owner,t.researchId]}),
+  index('social_arb_outcomes_owner_signal_idx').on(t.owner,t.signalKey,t.captured),
+  index('social_arb_outcomes_owner_status_idx').on(t.owner,t.status,t.captured),
+  index('social_arb_outcomes_owner_ticker_idx').on(t.owner,t.ticker,t.captured)
+]);
