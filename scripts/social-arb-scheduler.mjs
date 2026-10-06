@@ -32,6 +32,7 @@ function requestFor(now=Date.now()){
  const b=bucket(now),deep=b%4===0,pack=packs[b%packs.length];
  return{
   requestId:'social-arb-auto-'+b,
+  caller:'FRONT_SOCIAL_ARB',
   mode:deep?'deep':'scout',
   platforms:['X','TikTok','Instagram'],
   objective:'Observe ordinary consumer and cultural behavior before stock discussion. Detect products, brands, behaviors, shortages, switching, repeat purchase and adoption. Treat finance/ticker chatter only as downstream awareness, never discovery.',
