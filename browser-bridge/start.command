@@ -192,16 +192,19 @@ elif [ -n "${FRONT_OLLAMA_MODEL:-}" ]; then
 else
   echo "Content/context understanding: deterministic fallback active; semantic model inactive until content.env is configured."
 fi
-CLOUD_AGENT_PID=""
+CLOUD_AGENT_SUPERVISOR_PID=""
 if [ -n "${FRONT_BRIDGE_API_KEY:-}" ]; then
-  echo "Front remote scrolling: cloud agent enabled."
-  node ./src/cloud-agent.mjs &
-  CLOUD_AGENT_PID=$!
+  echo "Front remote scrolling: cloud agent watchdog enabled."
+  node ./src/cloud-agent-supervisor.mjs &
+  CLOUD_AGENT_SUPERVISOR_PID=$!
 else
   echo "Front remote scrolling: cloud agent disabled until FRONT_BRIDGE_API_KEY is configured in content.env."
 fi
 cleanup_cloud_agent() {
-  if [ -n "$CLOUD_AGENT_PID" ]; then kill "$CLOUD_AGENT_PID" 2>/dev/null || true; fi
+  if [ -n "$CLOUD_AGENT_SUPERVISOR_PID" ]; then
+    kill "$CLOUD_AGENT_SUPERVISOR_PID" 2>/dev/null || true
+    wait "$CLOUD_AGENT_SUPERVISOR_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup_cloud_agent EXIT INT TERM
 npm start
