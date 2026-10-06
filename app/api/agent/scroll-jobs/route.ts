@@ -68,9 +68,9 @@ export async function POST(request:Request){
 export async function GET(request:Request){
   try{
     const owner=requireService(request);
-    const rows=await db().prepare(\`SELECT id,status,phase,request_id,created,started,heartbeat FROM agent_scroll_jobs
+    const rows=await db().prepare(`SELECT id,status,phase,request_id,created,started,heartbeat FROM agent_scroll_jobs
       WHERE owner=? AND status IN ('QUEUED','CLAIMED','SCROLLING','ANALYZING','UPLOADING')
-      ORDER BY created ASC LIMIT 20\`).bind(owner).all<any>();
+      ORDER BY created ASC LIMIT 20`).bind(owner).all<any>();
     return noStore({active:rows.results,activeCount:rows.results.length,at:Date.now()});
   }catch(error){if(error instanceof Response)return error;return noStore({error:(error as Error).message},500);}
 }
