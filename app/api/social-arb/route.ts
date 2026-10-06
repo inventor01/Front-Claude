@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { samePublicOrigin } from '@/lib/request-origin';
+import { requireBridge } from '@/lib/front-agent-auth';
 
 const db=()=>{if(!env.DB)throw new Error('Database unavailable');return env.DB;};
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
@@ -177,8 +178,13 @@ export async function GET(){
 }
 
 export async function POST(request:Request){
- const user=await getChatGPTUser();if(!user)return json({error:'Please sign in to use Social Arb.'},401);
- if(!samePublicOrigin(request))return json({error:'Invalid request origin.'},403);
+ const user=await getChatGPTUser();
+ let owner=user?.userId||'';
+ let bridgeAuthenticated=false;
+ if(!owner){
+  try{owner=requireBridge(request);bridgeAuthenticated=true;}catch(error){if(error instanceof Response)return error;throw error;}
+ }
+ if(!bridgeAuthenticated&&!samePublicOrigin(request))return json({error:'Invalid request origin.'},403);
  try{
   const body=JSON.parse(await request.text()) as {signals?:unknown[];scanObservedAt?:unknown};
   if(!Array.isArray(body.signals))return json({error:'Social Arb signals must be an array.'},400);
@@ -203,12 +209,12 @@ export async function POST(request:Request){
    statements.push(db().prepare(`INSERT INTO social_arb_observations(owner,signal_key,observed,title,product,brand,company_name,ticker,relation,direction,materiality,mapping_status,ticker_verified,score,status,author_count,evidence_count,platforms,behaviors,change_json,thesis,data)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(owner,signal_key,observed) DO UPDATE SET title=excluded.title,product=excluded.product,brand=excluded.brand,company_name=excluded.company_name,ticker=excluded.ticker,relation=excluded.relation,direction=excluded.direction,materiality=excluded.materiality,mapping_status=excluded.mapping_status,ticker_verified=excluded.ticker_verified,score=excluded.score,status=excluded.status,author_count=excluded.author_count,evidence_count=excluded.evidence_count,platforms=excluded.platforms,behaviors=excluded.behaviors,change_json=excluded.change_json,thesis=excluded.thesis,data=excluded.data`)
-    .bind(user.userId,signal.key,observed,signal.title,signal.product,signal.brand,signal.companyName,signal.ticker,signal.relation,signal.direction,signal.materiality,signal.mappingStatus,signal.tickerVerified?1:0,signal.score,signal.status,signal.authorCount,signal.evidenceCount,JSON.stringify(signal.platforms),JSON.stringify(signal.behaviors),JSON.stringify(signal.change),signal.thesis,data));
+    .bind(owner,signal.key,observed,signal.title,signal.product,signal.brand,signal.companyName,signal.ticker,signal.relation,signal.direction,signal.materiality,signal.mappingStatus,signal.tickerVerified?1:0,signal.score,signal.status,signal.authorCount,signal.evidenceCount,JSON.stringify(signal.platforms),JSON.stringify(signal.behaviors),JSON.stringify(signal.change),signal.thesis,data));
    if(signal.ticker||signal.companyName||signal.brand){
     mappingStatements.push(db().prepare(`INSERT INTO social_arb_company_mappings(owner,signal_key,ticker,company_name,brand,relation,mapping_status,ticker_verified,ownership_verified,confidence,source,updated)
      VALUES(?,?,?,?,?,?,?,?,0,?,?,?)
      ON CONFLICT(owner,signal_key) DO UPDATE SET ticker=excluded.ticker,company_name=excluded.company_name,brand=excluded.brand,relation=excluded.relation,mapping_status=excluded.mapping_status,ticker_verified=excluded.ticker_verified,confidence=excluded.confidence,source=excluded.source,updated=excluded.updated`)
-     .bind(user.userId,signal.key,signal.ticker,signal.companyName,signal.brand,signal.relation,signal.mappingStatus,signal.tickerVerified?1:0,signal.mappingConfidence,signal.tickerVerified?'social-arb-engine+sec':'social-arb-engine',now));
+     .bind(owner,signal.key,signal.ticker,signal.companyName,signal.brand,signal.relation,signal.mappingStatus,signal.tickerVerified?1:0,signal.mappingConfidence,signal.tickerVerified?'social-arb-engine+sec':'social-arb-engine',now));
    }
   }
   if(statements.length)await db().batch(statements);
