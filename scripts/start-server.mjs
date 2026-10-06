@@ -30,8 +30,11 @@ if(process.env.RAILWAY_VOLUME_MOUNT_PATH){
   const prepare=spawnSync(process.execPath,[path.join(projectRoot,"scripts/prepare-front-persistence.mjs"),requestedPersistDir],{
     cwd:projectRoot,stdio:"inherit",env:process.env
   });
-  if(prepare.error)console.warn("[front] persistence preparation failed:",prepare.error.message);
-  else if((prepare.status??1)!==0)console.warn(`[front] persistence preparation exited with status ${prepare.status??1}`);
+  if(prepare.error)throw prepare.error;
+  if((prepare.status??1)!==0){
+    console.error(`[front] persistence preparation failed with status ${prepare.status??1}; refusing to start in an unverified persistence state`);
+    process.exit(prepare.status??1);
+  }
 }
 const persistDir = hasUsableSpace(requestedPersistDir)
   ? requestedPersistDir
