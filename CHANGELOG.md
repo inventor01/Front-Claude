@@ -12,6 +12,7 @@ Front could detect social and consumer change and map a public-company ticker, b
 - Added materiality/exposure states that explicitly refuse to infer product-level financial importance from virality alone.
 - Added bridge-authenticated persistence so remote browser scans save Social Arb results to Railway history without requiring interactive browser-session auth.
 - Added a backpressured 15-minute autoscan scheduler with rotating consumer categories and periodic deep scans.
+- Automatically runs bounded awareness research for the strongest ticker-verified RISING/HIGH_SIGNAL candidates after bridge sync, while preserving a manual re-check control in the UI.
 - Added UI research controls and evidence links.
 - Added regression coverage for the awareness, scheduler, bridge sync, and no-BUY research boundary.
 
