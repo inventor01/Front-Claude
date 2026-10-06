@@ -51,13 +51,33 @@ function mappingLabel(signal:SocialArbSignal){
  if(signal.ticker||signal.companyName)return'Company hypothesis';
  return'Needs company mapping';
 }
+function formatOutcomePrice(value:number|null){
+ if(value==null)return 'awaiting provider';
+ return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(value);
+}
 function OutcomeStrip({outcome}:{outcome:SocialArbOutcome}){
  const horizons=['1','5','20','60'];
  return <div className={styles.outcome}>
   <div><span>Point-in-time journal</span><b>{outcome.status.replaceAll('-',' ')}</b></div>
   <div>
    <span>Baseline</span>
-   <b>{outcome.baselinePrice!=null?'
+   <b>{formatOutcomePrice(outcome.baselinePrice)}</b>
+   <small>{outcome.baselineKind?outcome.baselineKind.replaceAll('-',' '):''}</small>
+  </div>
+  {horizons.map((horizon)=>{
+   const result=outcome.horizons?.[horizon];
+   const measured=result?.status==='measured'&&Number.isFinite(Number(result.return));
+   const pct=measured?Number(result.return)*100:null;
+   const label=pct==null?'pending':(pct>=0?'+':'')+pct.toFixed(1)+'%';
+   return <div key={horizon}>
+    <span>{horizon} session{horizon==='1'?'':'s'}</span>
+    <b>{label}</b>
+    <small>{result?.date||''}</small>
+   </div>;
+  })}
+ </div>;
+}
+function mergeSignals(persisted:SocialArbSignal[],live:SocialArbSignal[]){
  const map=new Map<string,SocialArbSignal>();
  for(const signal of persisted)map.set(signal.key,signal);
  for(const signal of live){
@@ -70,7 +90,6 @@ function OutcomeStrip({outcome}:{outcome:SocialArbOutcome}){
  }
  return[...map.values()].sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(b.authorCount||0)-Number(a.authorCount||0));
 }
-
 export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComplete}:{liveSignals?:SocialArbSignal[];refreshKey?:number;onScanComplete?:()=>void}){
  const [feed,setFeed]=useState<Feed|null>(null);
  const [research,setResearch]=useState<Record<string,SocialArbResearch>>({});
