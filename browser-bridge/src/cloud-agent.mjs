@@ -84,11 +84,25 @@ function safeEvidence(row){
 }
 async function syncSocialArb(scan){
   const signals=Array.isArray(scan?.socialArbSignals)?scan.socialArbSignals.slice(0,80):[];
-  if(!signals.length)return {ok:true,accepted:0,reason:'no-signals'};
-  return cloud('/api/social-arb',{
+  if(!signals.length)return {ok:true,accepted:0,reason:'no-signals',research:[]};
+  const synced=await cloud('/api/social-arb',{
     method:'POST',
     body:JSON.stringify({signals,scanObservedAt:Number(scan?.at)||Date.now()})
   },30000);
+  const keys=Array.isArray(synced?.researchCandidates)?synced.researchCandidates.slice(0,3):[];
+  const research=[];
+  for(const signalKey of keys){
+    try{
+      const result=await cloud('/api/social-arb/research',{
+        method:'POST',
+        body:JSON.stringify({signalKey})
+      },45000);
+      research.push({signalKey,ok:true,informationGapState:result?.informationGap?.state||null,awarenessStatus:result?.awareness?.status||null,materialityStatus:result?.materiality?.status||null});
+    }catch(error){
+      research.push({signalKey,ok:false,error:clean(error?.message||error,300)});
+    }
+  }
+  return {...synced,research};
 }
 
 async function uploadEvidence(job,rows,seen){
