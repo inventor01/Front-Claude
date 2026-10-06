@@ -1,3 +1,19 @@
+## 2026-10-06 — Front local bridge watchdog + macOS autostart (v35)
+
+### Root cause
+The Railway queue and scheduler can now recover stale jobs, but real social scans still depend on the authenticated local Front bridge. Two local failure modes could silently stop collection: the cloud polling child had no restart supervisor, and the whole bridge required a manually kept-open Terminal session after every login or crash.
+
+### Permanent fixes
+- Added a cloud-agent supervisor that restarts Railway polling after unexpected child-process exits.
+- Updated `start.command` to launch the supervisor instead of an unsupervised cloud-agent child and to shut it down cleanly.
+- Added a macOS LaunchAgent installer with `RunAtLoad` and `KeepAlive` so the bridge can start at user login and restart after parent-process failures.
+- The LaunchAgent stores only local paths; API keys, browser cookies, and social credentials remain in the existing local Front data/profile.
+- Added a safe uninstaller that removes only the LaunchAgent and preserves the dedicated Chrome profile, logins, settings, evidence history, and local model configuration.
+- Added shell-syntax and regression coverage for watchdog restart behavior and secret isolation.
+
+### Remaining physical constraint
+A user LaunchAgent cannot collect while the Mac is powered off, asleep, or logged out. The authenticated dedicated Front Chrome session must also remain usable; Front does not bypass platform login or verification challenges.
+
 ## 2026-10-06 — Social Arb stale queue recovery (v34)
 
 ### Root cause
