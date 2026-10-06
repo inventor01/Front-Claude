@@ -84,3 +84,12 @@ export const socialArbOutcomes=sqliteTable('social_arb_outcomes',{
   index('social_arb_outcomes_owner_status_idx').on(t.owner,t.status,t.captured),
   index('social_arb_outcomes_owner_ticker_idx').on(t.owner,t.ticker,t.captured)
 ]);
+
+export const frontProviderSecrets=sqliteTable('front_provider_secrets',{
+  owner:text('owner').notNull(),provider:text('provider').notNull(),secretCiphertext:text('secret_ciphertext').notNull(),
+  created:integer('created').notNull(),updated:integer('updated').notNull(),lastValidated:integer('last_validated'),
+  validationStatus:text('validation_status').notNull().default('unknown')
+},t=>[
+  primaryKey({columns:[t.owner,t.provider]}),
+  index('front_provider_secrets_owner_updated_idx').on(t.owner,t.updated)
+]);
