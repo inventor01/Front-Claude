@@ -37,7 +37,7 @@ export async function collectEbaySold(context,raw={}){
   const url='https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(input.query)+'&LH_Sold=1&LH_Complete=1&rt=nc';
   const page=await openPage(context,url,2600);
   try{
-    const current=page.url(),body=clean(await page.locator('body').innerText().catch(()=>''),50000);
+    const current=page.url(),body=clean(await page.locator('body').innerText().catch(()=>''),50000),soldFilterVerified=/[?&]LH_Sold=1(?:&|$)/.test(current)&&/[?&]LH_Complete=1(?:&|$)/.test(current);
     const authenticated=!/signin|sign in or register|security measure/i.test(current+' '+body);
     if(!authenticated)return {ok:false,source:'ebay-completed-browser',authenticated:false,sold_filter_verified:false,query:input.query,query_basis:input.basis,error:'eBay sold/completed search requires an authenticated eBay session in Front Chrome.',results:[]};
     const rawRows=await page.locator('li.s-item').evaluateAll((cards)=>cards.map((card)=>{
@@ -67,7 +67,7 @@ export async function collectEbaySold(context,raw={}){
       row.identity_verified=input.strict?exact:overlap(input.title,row.title)>=0.7;
       if(row.identity_verified)identityVerified++;
     }
-    if(input.strict)rows=rows.filter((r,i)=>i>=10||r.identity_verified);
+    if(input.strict)rows=rows.filter(r=>r.identity_verified);
     const prices=rows.map(r=>r.item_price).filter(Number.isFinite),now=Date.now();
     for(const r of rows){const d=parseSoldDate(r.dateText+' '+r.text);r.sold_at=d?d.toISOString():null;r.days_ago=daysAgo(d,now)}
     const dated=rows.filter(r=>Number.isFinite(r.days_ago));
@@ -75,7 +75,7 @@ export async function collectEbaySold(context,raw={}){
     const identityRequired=input.strict?Math.min(3,rows.length):0;
     const identityReady=input.strict?identityVerified>=identityRequired&&identityRequired>0:false;
     return {
-      ok:true,source:'ebay-completed-browser',authenticated:true,sold_filter_verified:true,query:input.query,query_basis:input.basis,strict_identity:input.strict,
+      ok:true,source:'ebay-completed-browser',authenticated:true,sold_filter_verified:soldFilterVerified,query:input.query,query_basis:input.basis,strict_identity:input.strict,
       identity_verified:identityReady,identity_verified_count:identityVerified,verified_sold_count:rows.length,dated_sold_count:dated.length,sold_30_observed:sold30,sold_90_observed:sold90,
       conservative_item_price:quantile(prices,.25),median_item_price:quantile(prices,.5),low_item_price:prices.length?Math.min(...prices):null,high_item_price:prices.length?Math.max(...prices):null,
       median_buyer_shipping:quantile(rows.map(r=>r.buyer_shipping).filter(Number.isFinite),.5),price_basis:'completed eBay item price; buyer-paid shipping excluded from resale value',
@@ -99,8 +99,8 @@ async function collectFacebookRows(page){
 async function facebookDetailSold(context,row,input){
   const page=await openPage(context,row.url,900);
   try{
-    const body=clean(await page.locator('body').innerText().catch(()=>''),30000);
-    const sold=/\bSold\b/i.test(body)&&!/mark as sold/i.test(body);
+    const body=clean(await page.locator('body').innerText().catch(()=>''),30000),html=await page.content().catch(()=>''),lead=body.slice(0,6000);
+    const sold=/(?:\"is_sold\":true|is_sold\\\":true)/i.test(html)||(/\bSold\b/i.test(lead)&&!/mark as sold/i.test(lead));
     const price=money(body);
     const identity=input.brand?body.toLowerCase().includes(input.brand.toLowerCase())||overlap(input.title,body.slice(0,5000))>=0.6:overlap(input.title,body.slice(0,5000))>=0.6;
     return {sold,price,identity,text:body.slice(0,1200)};
