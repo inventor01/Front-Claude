@@ -58,3 +58,17 @@ export const socialArbCompanyMappings=sqliteTable('social_arb_company_mappings',
   primaryKey({columns:[t.owner,t.signalKey]}),
   index('social_arb_company_mappings_owner_ticker_idx').on(t.owner,t.ticker)
 ]);
+
+export const socialArbResearchRuns=sqliteTable('social_arb_research_runs',{
+  owner:text('owner').notNull(),id:text('id').notNull(),signalKey:text('signal_key').notNull(),researched:integer('researched').notNull(),
+  socialScore:real('social_score').notNull().default(0),socialStatus:text('social_status').notNull().default('WATCH'),
+  materialityStatus:text('materiality_status').notNull().default('exposure-unquantified'),
+  awarenessStatus:text('awareness_status').notNull().default('insufficient-data'),
+  informationGapState:text('information_gap_state').notNull().default('unmeasured'),
+  filingCount:integer('filing_count').notNull().default(0),financialNewsCount:integer('financial_news_count').notNull().default(0),
+  data:text('data').notNull().default('{}')
+},t=>[
+  primaryKey({columns:[t.owner,t.id]}),
+  index('social_arb_research_runs_owner_signal_idx').on(t.owner,t.signalKey,t.researched),
+  index('social_arb_research_runs_owner_gap_idx').on(t.owner,t.informationGapState,t.researched)
+]);
