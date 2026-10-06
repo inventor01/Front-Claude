@@ -48,6 +48,7 @@ function mapRequest(req){
     targetUniqueFeedItems:Number(req.targetUniqueFeedItems||60),
     maxFeedScanSeconds:Number(req.maxSeconds||120),
     keywords:Array.isArray(req.keywords)?req.keywords:[],
+    seedUrls:Array.isArray(req.seedUrls)?req.seedUrls:[],
     scanXForYou:platforms.has('X'),
     scanTikTokForYou:platforms.has('TikTok'),
     scanInstagram:platforms.has('Instagram'),
