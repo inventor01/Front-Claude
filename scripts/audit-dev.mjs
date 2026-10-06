@@ -27,21 +27,37 @@ const vulnerabilities = report?.vulnerabilities && typeof report.vulnerabilities
 const blocking = [];
 const accepted = [];
 
+function rootAdvisories(name, seen = new Set()) {
+  if (seen.has(name)) return [];
+  seen.add(name);
+  const entry = vulnerabilities[name];
+  if (!entry) return [];
+  const roots = [];
+  for (const via of Array.isArray(entry.via) ? entry.via : []) {
+    if (typeof via === 'string') {
+      roots.push(...rootAdvisories(via, new Set(seen)));
+    } else if (via && typeof via === 'object') {
+      roots.push({
+        url: String(via.url || ''),
+        title: String(via.title || ''),
+        severity: String(via.severity || entry.severity || ''),
+      });
+    }
+  }
+  return roots;
+}
+
 for (const [name, entry] of Object.entries(vulnerabilities)) {
   const severity = String(entry?.severity || '').toLowerCase();
   if (!['high', 'critical'].includes(severity)) continue;
 
-  const advisories = (Array.isArray(entry?.via) ? entry.via : [])
-    .filter((via) => via && typeof via === 'object')
-    .map((via) => ({ url: String(via.url || ''), title: String(via.title || ''), severity: String(via.severity || severity) }));
-
-  const urls = advisories.map((advisory) => advisory.url).filter(Boolean);
-  const isExactBracesException =
-    name === 'braces' &&
+  const advisories = rootAdvisories(name);
+  const urls = [...new Set(advisories.map((advisory) => advisory.url).filter(Boolean))];
+  const isExactBracesChain =
     urls.length > 0 &&
     urls.every((url) => allowed.has(url));
 
-  if (isExactBracesException) {
+  if (isExactBracesChain) {
     accepted.push({ name, severity, advisories });
   } else {
     blocking.push({ name, severity, advisories, fixAvailable: entry?.fixAvailable });
