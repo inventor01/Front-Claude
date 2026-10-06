@@ -24,6 +24,11 @@ export function socialArbMarketDataStatus(){
 function isoDate(value:number){
  return new Date(value).toISOString().slice(0,10);
 }
+export function socialArbMarketDate(value:number){
+ const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(value));
+ const map=Object.fromEntries(parts.map((part)=>[part.type,part.value]));
+ return String(map.year||'')+'-'+String(map.month||'')+'-'+String(map.day||'');
+}
 function addDays(value:number,days:number){
  return isoDate(value+days*86400000);
 }
@@ -80,7 +85,7 @@ export async function fetchSocialArbDailyBars(tickerRaw:string,startMs:number,en
 }
 export async function historicalSocialArbBaseline(ticker:string,researchAt:number){
  const bars=await fetchSocialArbDailyBars(ticker,researchAt-12*86400000,researchAt);
- const researchDate=isoDate(researchAt);
+ const researchDate=socialArbMarketDate(researchAt);
  const candidates=bars.filter((bar)=>bar.date<researchDate);
  const bar=candidates[candidates.length-1];
  if(!bar)throw new Error('No prior completed session was available for baseline backfill.');
