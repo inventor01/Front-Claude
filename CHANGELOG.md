@@ -1,3 +1,17 @@
+## 2026-10-06 — Social Arb bridge-readiness autoscan gate (v37)
+
+### Root cause
+The 24/7 scheduler was correctly recovering stale Social Arb jobs, but it would immediately enqueue another browser scan even when the local authenticated Front bridge was offline. That created avoidable queue churn and repeated 30-minute expirations without producing evidence.
+
+### Permanent fix
+- Queue maintenance now returns a minimal readiness snapshot for the latest bridge: online heartbeat, scanner readiness, and Chrome readiness.
+- The Social Arb scheduler still performs cloud-only outcome refreshes while the bridge is offline, but it will not create a new browser scan until the local bridge is online with both scanner and Chrome ready.
+- No bridge token, browser credential, or secret is exposed by the readiness response.
+- Existing stale-job recovery remains in place as a fallback for interrupted work.
+
+### QA gate
+Merge and production deployment are blocked until the full Front CI suite passes.
+
 ## 2026-10-06 — Social Arb bridge readiness visibility (v36)
 
 ### Root cause
