@@ -178,11 +178,15 @@ export async function GET(){
 }
 
 export async function POST(request:Request){
- const user=await getChatGPTUser();
- let owner=user?.userId||'';
+ const bridgeRequested=Boolean(request.headers.get('x-front-bridge-key'));
+ let owner='';
  let bridgeAuthenticated=false;
- if(!owner){
+ if(bridgeRequested){
   try{owner=requireBridge(request);bridgeAuthenticated=true;}catch(error){if(error instanceof Response)return error;throw error;}
+ }else{
+  const user=await getChatGPTUser();
+  if(!user)return json({error:'Please sign in to use Social Arb.'},401);
+  owner=user.userId;
  }
  if(!bridgeAuthenticated&&!samePublicOrigin(request))return json({error:'Invalid request origin.'},403);
  try{
