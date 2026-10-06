@@ -69,8 +69,8 @@ function compactResult(scan,live){
     errors:Array.isArray(scan?.errors)?scan.errors.slice(-30):Array.isArray(live?.errors)?live.errors.slice(-30):[],
     audit:scan?.audit||null,transcription:scan?.transcription||null,contentUnderstanding:scan?.contentUnderstanding||null,
     videoMeaning:scan?.videoMeaning||null,postUnderstanding:scan?.postUnderstanding||null,
-    socialArbSignals:Array.isArray(scan?.socialArbSignals)?scan.socialArbSignals.slice(0,30):[],
-    socialArbSync:scan?.socialArbSync||null,at:Date.now()
+    socialArbSummary:{count:Array.isArray(scan?.socialArbSignals)?scan.socialArbSignals.length:0,sync:scan?.socialArbSync||null},
+    at:Date.now()
   };
 }
 function safeEvidence(row){
