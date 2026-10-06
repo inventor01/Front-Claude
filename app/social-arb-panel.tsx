@@ -7,13 +7,13 @@ import styles from './social-arb-panel.module.css';
 const BRIDGE='http://127.0.0.1:43981';
 
 export type SocialArbEvidence={
- id:string;platform:string;author:string;url:string;content:string;published:number|null;
+ id:string;platform:string;author:string;url:string;content:string;published:number|null;evidenceType?:'post'|'comment';parentUrl?:string|null;
 };
 export type SocialArbSignal={
  key:string;title:string;product?:string|null;brandCandidate?:string|null;companyName?:string|null;ticker?:string|null;relation?:string|null;
  direction?:'positive'|'negative'|'mixed'|'unknown'|string;materiality?:string|null;mappingStatus?:string;tickerVerified?:boolean;
- mappingConfidence?:number;score:number;status:'WATCH'|'EARLY'|'RISING'|'HIGH_SIGNAL'|string;authorCount:number;evidenceCount:number;
- platforms:string[];behaviors:Record<string,number>;change?:{growthMultiple?:number|null;authorMultiple?:number|null;behaviorMultiple?:number|null;newToBaseline?:boolean};
+ mappingConfidence?:number;score:number;status:'WATCH'|'EARLY'|'RISING'|'HIGH_SIGNAL'|string;authorCount:number;commenterCount?:number;independentVoiceCount?:number;evidenceCount:number;
+ platforms:string[];behaviors:Record<string,number>;change?:{growthMultiple?:number|null;authorMultiple?:number|null;commentMultiple?:number|null;behaviorMultiple?:number|null;newToBaseline?:boolean};
  thesis?:string|null;evidence?:SocialArbEvidence[];observed?:number;informationGap?:{status?:string;score?:number|null;marketAwareness?:number|null;note?:string};
 };
 type Feed={signals:SocialArbSignal[];stats:{total:number;highSignal:number;rising:number;mapped:number;tickerVerified:number};methodology?:string;error?:string};
@@ -153,7 +153,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
      <span className={styles.rank}>{String(index+1).padStart(2,'0')}</span>
      <div className={styles.title}>
       <h2>{signal.title}</h2>
-      <p>{changeLabel(signal)} · {signal.authorCount} independent creator{signal.authorCount===1?'':'s'} · {signal.evidenceCount} observation{signal.evidenceCount===1?'':'s'}{signal.observed?' · '+age(signal.observed):''}</p>
+      <p>{changeLabel(signal)} · {signal.authorCount} creator{signal.authorCount===1?'':'s'}{Number(signal.commenterCount||0)>0?' + '+signal.commenterCount+' commenter'+(signal.commenterCount===1?'':'s'):''} · {signal.evidenceCount} observation{signal.evidenceCount===1?'':'s'}{signal.observed?' · '+age(signal.observed):''}</p>
       <div className={styles.badges}>
        <span className={signal.status==='HIGH_SIGNAL'||signal.status==='RISING'?styles.badgeHot:styles.badge}><Sparkles size={10}/>{signal.status}</span>
        <span className={styles.badge}>{signal.direction||'unknown'} demand</span>
@@ -182,7 +182,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
       {signal.materiality&&<span className={styles.badge}>materiality hypothesis · {signal.materiality}</span>}
      </div>
     </div>
-    {evidence.length?<div className={styles.evidence}>{evidence.map((item)=><a href={item.url} target="_blank" rel="noreferrer" key={item.id}><span>{item.platform} · @{item.author}</span><ExternalLink size={10}/></a>)}</div>:null}
+    {evidence.length?<div className={styles.evidence}>{evidence.map((item)=><a href={item.url} target="_blank" rel="noreferrer" key={item.id}><span>{item.platform}{item.evidenceType==='comment'?' comment':''} · @{item.author}</span><ExternalLink size={10}/></a>)}</div>:null}
    </article>;
   })}</div>:<div className={styles.empty}><b>No Social Arb baseline yet.</b>Run a broad scan. Front needs ordinary consumer/culture evidence before it can detect changes relative to its own history.</div>}
  </section>;

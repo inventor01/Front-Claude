@@ -20,6 +20,7 @@ import { VideoMeaningEngineV27 } from './video-meaning-v27.mjs';
 import { enhanceNarrativesV26 } from './narrative-intelligence-v26.mjs';
 import { canonicalSocialPostUrl } from './social-post-url.mjs';
 import { SocialArbitrageEngineV30 } from './social-arbitrage-v30.mjs';
+import { investigateSocialComments } from './social-comments-v31.mjs';
 import { BroadTikTokObserver, extractTikTokAnchors } from './tiktok-observer-v21.mjs';
 import { extractInstagramPage, instagramTag } from './instagram-observer-v28.mjs';
 import {
@@ -512,6 +513,7 @@ async function runScan(body = {}) {
       videoMeaning: { status: 'pending', updatedAt: Date.now() },
       postUnderstanding: { status: 'pending', updatedAt: Date.now() },
       socialArbEngine: { status: 'pending', updatedAt: Date.now() },
+      socialArbComments: { status: request.scanTikTokForYou ? 'pending' : 'disabled', targets: 0, comments: 0, updatedAt: Date.now() },
       narrativeEngine: { status: 'pending', updatedAt: Date.now() },
       originResearch: { status: request.mode === 'deep' ? 'pending' : 'disabled', updatedAt: Date.now() },
     },
@@ -595,12 +597,33 @@ async function runScan(body = {}) {
     if (!shouldStop() && resultRows.length) {
       setPhase('social-arbitrage');
       stage('socialArbEngine', { status: 'running', totalEvidence: resultRows.length, engine: socialArb.status() });
-      const social = await socialArb.analyze(resultRows, { mode: request.mode, timeoutMs: Math.max(15000, Number(process.env.FRONT_SOCIAL_ARB_TIMEOUT_MS || 60000)) });
+      const timeoutMs=Math.max(15000, Number(process.env.FRONT_SOCIAL_ARB_TIMEOUT_MS || 60000));
+      const detection = await socialArb.analyze(resultRows, { mode: request.mode, timeoutMs, updateHistory: false, mapCompanies: false });
+      let socialRows=resultRows;
+      if (request.scanTikTokForYou && detection.signals.length && !shouldStop()) {
+        setPhase('social-arb-comments');
+        stage('socialArbComments', { status: 'running', targets: 0, comments: 0 });
+        const context = await ensureContext();
+        const comments = await investigateSocialComments(context, detection.signals, {
+          mode: request.mode,
+          maxSignals: Math.max(1, Math.min(6, Number(process.env.FRONT_SOCIAL_ARB_COMMENT_SIGNALS || (request.mode === 'deep' ? 3 : 1)))),
+          maxPostsPerSignal: Math.max(1, Math.min(3, Number(process.env.FRONT_SOCIAL_ARB_COMMENT_POSTS || 2))),
+          maxComments: Math.max(10, Math.min(160, Number(process.env.FRONT_SOCIAL_ARB_COMMENTS_PER_POST || 60))),
+          scrollPasses: Math.max(1, Math.min(8, Number(process.env.FRONT_SOCIAL_ARB_COMMENT_SCROLLS || 4))),
+          timeoutMs: Math.max(10000, Math.min(45000, Number(process.env.FRONT_SOCIAL_ARB_COMMENT_TIMEOUT_MS || 25000))),
+        });
+        stage('socialArbComments', { status: comments.stats.errors.length ? 'degraded' : 'complete', ...comments.stats });
+        socialRows=[...resultRows,...comments.rows];
+      } else {
+        stage('socialArbComments', { status: request.scanTikTokForYou ? (shouldStop() ? 'stopped' : 'skipped-no-candidates') : 'disabled', targets: 0, comments: 0 });
+      }
+      const social = await socialArb.analyze(socialRows, { mode: request.mode, timeoutMs, updateHistory: true, mapCompanies: true });
       socialArbSignals = social.signals;
-      stage('socialArbEngine', { status: social.stats.failed ? 'degraded' : 'complete', ...social.stats, engine: socialArb.status() });
+      stage('socialArbEngine', { status: social.stats.failed ? 'degraded' : 'complete', ...social.stats, socialOnlyEvidence: Math.max(0, socialRows.length-resultRows.length), engine: socialArb.status() });
       latestLive = { ...latestLive, socialArbSignals: socialArbSignals.slice(0, 30), updatedAt: Date.now() };
     } else {
       stage('socialArbEngine', { status: shouldStop() ? 'stopped' : 'skipped-no-evidence', engine: socialArb.status() });
+      stage('socialArbComments', { status: shouldStop() ? 'stopped' : 'skipped-no-evidence', targets: 0, comments: 0 });
     }
 
     summary = summarizeRows(resultRows);
@@ -649,7 +672,7 @@ function health() {
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
     transcription: transcription.status(), contentUnderstanding: understanding.status(), videoMeaning: videoMeaning.status(), postUnderstanding: postUnderstanding.status(), socialArbitrage: socialArb.status(),
     contentTargets: { transcriptConcurrency: Number(process.env.FRONT_TRANSCRIPT_CONCURRENCY || 2), deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
-    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','owned-instagram-page','exact-social-seed-navigation','instagram-feed-scroll','instagram-reels-scroll','instagram-hashtag-investigation','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','social-arbitrage-world-change-detection','consumer-behavior-classification','product-company-hypothesis-mapping','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
+    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','owned-instagram-page','exact-social-seed-navigation','instagram-feed-scroll','instagram-reels-scroll','instagram-hashtag-investigation','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','social-arbitrage-world-change-detection','consumer-behavior-classification','product-company-hypothesis-mapping','social-arb-tiktok-comment-investigation','comment-evidence-isolation','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
     activePorts: { bridge: PORT, chromeCdp: CDP_PORT },
   };
 }

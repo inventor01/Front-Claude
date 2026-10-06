@@ -56,6 +56,7 @@ function contentPhrase(text) {
 
 function rowSubject(row) {
   const candidates = [
+    row.socialArbSubject,
     row.semanticNarrativeKey,
     row.postObject,
     row.postSubject,
@@ -83,9 +84,10 @@ function evidenceText(row) {
   return clean([row.content, row.transcript, row.videoAbout, row.postEvent, row.postContext].filter(Boolean).join(' '), 6000);
 }
 
-function candidateStatus(score, authors, behaviors) {
-  if (score >= 80 && authors >= 3 && behaviors >= 3) return 'HIGH_SIGNAL';
-  if (score >= 64 && authors >= 2) return 'RISING';
+function candidateStatus(score, creators, commenters, behaviors) {
+  const independentVoices = creators + Math.min(commenters, 12);
+  if (score >= 80 && independentVoices >= 4 && behaviors >= 3) return 'HIGH_SIGNAL';
+  if (score >= 64 && independentVoices >= 2) return 'RISING';
   if (score >= 45) return 'EARLY';
   return 'WATCH';
 }
@@ -101,9 +103,10 @@ function baselineFor(history, key) {
   const rows = Array.isArray(history?.[key]) ? history[key].filter((row) => Date.now() - Number(row.at || 0) <= HISTORY_TTL_MS) : [];
   return {
     samples: rows.length,
-    evidence: median(rows.map((row) => Number(row.evidenceCount || 0))),
+    evidence: median(rows.map((row) => Number(row.postEvidenceCount ?? row.evidenceCount ?? 0))),
     authors: median(rows.map((row) => Number(row.authorCount || 0))),
     behaviors: median(rows.map((row) => Number(row.behaviorCount || 0))),
+    comments: median(rows.map((row) => Number(row.commenterCount || 0))),
   };
 }
 
@@ -130,13 +133,16 @@ export function deriveSocialArbCandidates(rows = [], { history = {}, now = Date.
     const evidence = [];
     const evidenceIds = new Set();
     const authors = new Set();
+    const commenters = new Set();
     const platforms = new Set();
     let confidenceTotal = 0;
     let confidenceCount = 0;
     for (const row of group.rows) {
       if (evidenceIds.has(row.id)) continue;
       evidenceIds.add(row.id);
-      authors.add(String(row.author).replace(/^@/, '').toLowerCase());
+      const voice=String(row.author).replace(/^@/, '').toLowerCase();
+      if (row.evidenceType === 'comment') commenters.add(voice);
+      else authors.add(voice);
       platforms.add(row.platform);
       const c = Number(row.postUnderstandingConfidence ?? row.videoMeaningConfidence);
       if (Number.isFinite(c)) { confidenceTotal += c; confidenceCount++; }
@@ -147,22 +153,28 @@ export function deriveSocialArbCandidates(rows = [], { history = {}, now = Date.
         url: clean(row.url, 2048),
         content: clean(row.content, 900),
         published: Number.isFinite(Number(row.published)) ? Number(row.published) : null,
+        evidenceType: row.evidenceType === 'comment' ? 'comment' : 'post',
+        parentUrl: row.parentUrl ? clean(row.parentUrl, 2048) : null,
       });
     }
+    const postEvidenceCount = evidence.filter((item) => item.evidenceType !== 'comment').length;
+    const commentEvidenceCount = evidence.length - postEvidenceCount;
     const behaviorCount = Object.values(group.behaviorCounts).reduce((sum, value) => sum + Number(value || 0), 0);
     const positive = [...POSITIVE].reduce((sum, key) => sum + Number(group.behaviorCounts[key] || 0), 0);
     const negative = [...NEGATIVE].reduce((sum, key) => sum + Number(group.behaviorCounts[key] || 0), 0);
     const baseline = baselineFor(history, group.key);
-    const current = evidence.length;
+    const current = postEvidenceCount;
     const growthMultiple = baseline.samples && baseline.evidence > 0 ? current / baseline.evidence : null;
     const authorMultiple = baseline.samples && baseline.authors > 0 ? authors.size / baseline.authors : null;
+    const commentMultiple = baseline.samples && baseline.comments > 0 ? commenters.size / baseline.comments : null;
     const behaviorMultiple = baseline.samples && baseline.behaviors > 0 ? behaviorCount / baseline.behaviors : null;
     const novelty = baseline.samples ? Math.max(0, Math.min(1, ((growthMultiple || 1) - 1) / 3)) : Math.min(1, current / 3);
     const modeledConfidence = confidenceCount ? confidenceTotal / confidenceCount : 0.35;
     const score = clamp(
-      Math.min(28, authors.size * 9) +
-      Math.min(16, evidence.length * 4) +
-      Math.min(20, behaviorCount * 5) +
+      Math.min(26, authors.size * 9) +
+      Math.min(18, commenters.size * 2.25) +
+      Math.min(14, evidence.filter((item) => item.evidenceType !== 'comment').length * 3.5) +
+      Math.min(20, behaviorCount * 4.5) +
       (platforms.size >= 2 ? 10 : 0) +
       novelty * 16 +
       modeledConfidence * 10
@@ -178,16 +190,21 @@ export function deriveSocialArbCandidates(rows = [], { history = {}, now = Date.
       behaviors: group.behaviorCounts,
       behaviorCount,
       evidenceCount: evidence.length,
+      postEvidenceCount,
+      commentEvidenceCount,
       authorCount: authors.size,
+      commenterCount: commenters.size,
+      independentVoiceCount: authors.size + commenters.size,
       platforms: [...platforms],
       evidenceIds: [...evidenceIds],
       evidence: evidence.slice(0, 8),
       score: Number(score.toFixed(1)),
-      status: candidateStatus(score, authors.size, behaviorCount),
+      status: candidateStatus(score, authors.size, commenters.size, behaviorCount),
       baseline,
       change: {
         growthMultiple: growthMultiple == null ? null : Number(growthMultiple.toFixed(2)),
         authorMultiple: authorMultiple == null ? null : Number(authorMultiple.toFixed(2)),
+        commentMultiple: commentMultiple == null ? null : Number(commentMultiple.toFixed(2)),
         behaviorMultiple: behaviorMultiple == null ? null : Number(behaviorMultiple.toFixed(2)),
         newToBaseline: baseline.samples === 0,
       },
@@ -362,17 +379,17 @@ export class SocialArbitrageEngineV30 {
   updateHistory(candidates, at) {
     for (const candidate of candidates) {
       const prior = Array.isArray(this.history[candidate.key]) ? this.history[candidate.key] : [];
-      prior.push({ at, evidenceCount: candidate.evidenceCount, authorCount: candidate.authorCount, behaviorCount: candidate.behaviorCount, score: candidate.score });
+      prior.push({ at, evidenceCount: candidate.evidenceCount, postEvidenceCount: candidate.postEvidenceCount ?? candidate.evidenceCount, commentEvidenceCount: candidate.commentEvidenceCount || 0, authorCount: candidate.authorCount, commenterCount: candidate.commenterCount || 0, behaviorCount: candidate.behaviorCount, score: candidate.score });
       this.history[candidate.key] = prior.filter((row) => at - Number(row.at || 0) <= HISTORY_TTL_MS).slice(-120);
     }
     writeJson(this.historyPath, this.history);
   }
 
-  async analyze(rows = [], { mode = 'scout', maxMappings, timeoutMs = 60000 } = {}) {
+  async analyze(rows = [], { mode = 'scout', maxMappings, timeoutMs = 60000, updateHistory = true, mapCompanies = true } = {}) {
     const startedAt = Date.now();
     let candidates = deriveSocialArbCandidates(rows, { history: this.history, now: startedAt, limit: 30 });
     const mappingLimit = Math.max(1, Math.min(10, Number(maxMappings || (mode === 'deep' ? 6 : 3))));
-    const selected = candidates.filter((candidate) => candidate.score >= 36 || candidate.behaviorCount >= 2).slice(0, mappingLimit);
+    const selected = mapCompanies ? candidates.filter((candidate) => candidate.score >= 36 || candidate.behaviorCount >= 2).slice(0, mappingLimit) : [];
     let modeled = 0, cached = 0, failed = 0;
     const errors = [];
     const byKey = new Map();
@@ -406,7 +423,7 @@ export class SocialArbitrageEngineV30 {
     }
 
     candidates = candidates.map((candidate) => byKey.get(candidate.key) || candidate);
-    this.updateHistory(candidates, startedAt);
+    if (updateHistory) this.updateHistory(candidates, startedAt);
     this.lastStats = {
       version: SOCIAL_ARB_VERSION,
       totalEvidence: rows.length,
