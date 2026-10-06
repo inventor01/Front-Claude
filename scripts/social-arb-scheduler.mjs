@@ -44,6 +44,10 @@ function requestFor(now=Date.now()){
  };
 }
 async function tick(){
+ try{
+  const maintenance=await json('/api/agent/scroll-jobs/maintenance',{method:'POST',body:'{}'});
+  if(Number(maintenance.expired)>0)console.log('[social-arb-autoscan] expired stale jobs='+String(maintenance.expired));
+ }catch(error){console.warn('[social-arb-autoscan] queue maintenance failed:',String(error?.message||error).slice(0,300));}
  const b=bucket();
  if(b%96===0){
   try{
