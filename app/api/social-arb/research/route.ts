@@ -2,6 +2,7 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { db, noStore, requireBridge } from '@/lib/front-agent-auth';
 import { samePublicOrigin } from '@/lib/request-origin';
+import { captureSocialArbReference, socialArbMarketDataStatus } from '@/lib/social-arb-market-data';
 
 const clean=(value:unknown,max=500)=>String(value??'').normalize('NFKC').replace(/\s+/g,' ').trim().slice(0,max);
 const generic=new Set(['product','products','brand','brands','company','companies','item','items','store','stores','trend','trending','viral','thing','things']);
@@ -190,7 +191,28 @@ export async function POST(request:Request){
   };
   await db().prepare('INSERT INTO social_arb_research_runs(owner,id,signal_key,researched,social_score,social_status,materiality_status,awareness_status,information_gap_state,filing_count,financial_news_count,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
    .bind(owner,id,signalKey,researched,Number(row.score)||0,String(row.status||'WATCH'),materialityStatus,awarenessStatus,informationGapState,Number((filings as any).count)||0,Number((news as any).count)||0,JSON.stringify(result)).run();
-  return noStore(result);
+
+  let outcome:{status:string;provider:string;baselinePrice:number|null;baselineAt:number|null;baselineKind:string|null;error?:string|null}|null=null;
+  if(ticker){
+   const market=socialArbMarketDataStatus();
+   let status=market.configured?'capture-failed':'provider-unconfigured';
+   let baselinePrice:number|null=null,baselineAt:number|null=null,baselineKind:string|null=null,sourceTimestamp:string|null=null,error:string|null=null;
+   if(market.configured){
+    try{
+     const baseline=await captureSocialArbReference(ticker,researched);
+     baselinePrice=baseline.price;baselineAt=baseline.at;baselineKind=baseline.kind;sourceTimestamp=baseline.sourceTimestamp;status='tracking';
+    }catch(reason){error=clean((reason as Error).message,300);}
+   }
+   const outcomeData={
+    horizons:{},sourceTimestamp,
+    note:market.configured?'Point-in-time price capture created with Tiingo.':'Tiingo is not connected. Front will preserve this research timestamp and may backfill only the prior completed session close later; it will never invent a live price.',
+    error,
+   };
+   await db().prepare('INSERT INTO social_arb_outcomes(owner,research_id,signal_key,ticker,provider,captured,baseline_price,baseline_at,baseline_kind,status,last_evaluated,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(owner,id,signalKey,ticker,market.provider,researched,baselinePrice,baselineAt,baselineKind,status,null,JSON.stringify(outcomeData)).run();
+   outcome={status,provider:market.provider,baselinePrice,baselineAt,baselineKind,error};
+  }
+  return noStore({...result,outcome});
  }catch(error){
   return noStore({error:error instanceof SyntaxError?'Invalid request.':(error as Error).message},502);
  }
