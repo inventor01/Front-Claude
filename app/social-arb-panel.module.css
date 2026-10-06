@@ -25,3 +25,10 @@
 .researchButton:disabled{opacity:.4;cursor:not-allowed}
 .researchMeta{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0;color:#8892a1;font-size:10px}.researchMeta b{color:#eef3fa}
 .researchEvidence{display:flex;gap:7px;flex-wrap:wrap;padding:0 17px 16px}.researchEvidence a{display:inline-flex;align-items:center;gap:5px;max-width:420px;text-decoration:none;color:#d9ff72;font-size:10px;border:1px solid #d5ff4824;border-radius:9px;padding:6px 8px;background:#10150d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.marketNotice{margin:12px 0;padding:11px 13px;border-radius:11px;border:1px solid #ffd16635;background:#ffd16610;color:#e8d8a3;font-size:12px;line-height:1.45}
+.outcome{display:grid;grid-template-columns:1.4fr repeat(5,minmax(90px,1fr));gap:7px;padding:0 17px 14px}
+.outcome>div{min-width:0;padding:9px 10px;border:1px solid #ffffff10;border-radius:11px;background:#0f141b}
+.outcome span{display:block;color:#747f90;text-transform:uppercase;letter-spacing:.07em;font-size:9px}
+.outcome b{display:block;margin-top:4px;font-size:12px;color:#eef3fa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.outcome small{display:block;margin-top:2px;color:#697485;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:900px){.outcome{grid-template-columns:repeat(2,minmax(0,1fr))}}
