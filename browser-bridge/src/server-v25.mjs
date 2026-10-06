@@ -19,6 +19,7 @@ import { VideoTranscriptEngineV27, isVideoRow, transcriptTerminal } from './vide
 import { VideoMeaningEngineV27 } from './video-meaning-v27.mjs';
 import { enhanceNarrativesV26 } from './narrative-intelligence-v26.mjs';
 import { canonicalSocialPostUrl } from './social-post-url.mjs';
+import { SocialArbitrageEngineV30 } from './social-arbitrage-v30.mjs';
 import { BroadTikTokObserver, extractTikTokAnchors } from './tiktok-observer-v21.mjs';
 import { extractInstagramPage, instagramTag } from './instagram-observer-v28.mjs';
 import {
@@ -39,6 +40,7 @@ const DATA_DIR = process.env.FRONT_BRIDGE_DATA || path.join(os.homedir(), '.fron
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const LEDGER_PATH = path.join(DATA_DIR, 'scan-ledger-v26.json');
 const PENDING_PATH = path.join(DATA_DIR, 'pending-evidence-v26.json');
+const PENDING_SOCIAL_ARB_PATH = path.join(DATA_DIR, 'pending-social-arb-v30.json');
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://believable-inspiration-production-a68b.up.railway.app',
   'https://front-narrative-desk.austinrock2000.chatgpt.site',
@@ -97,21 +99,26 @@ scans = scans.slice(-100);
 let pendingEvidence = readJson(PENDING_PATH, []);
 if (!Array.isArray(pendingEvidence)) pendingEvidence = [];
 pendingEvidence = pendingEvidence.slice(-500);
+let pendingSocialArb = readJson(PENDING_SOCIAL_ARB_PATH, []);
+if (!Array.isArray(pendingSocialArb)) pendingSocialArb = [];
+pendingSocialArb = pendingSocialArb.slice(-120);
 let browserConnection = null;
 let browserContext = null;
 let current = null;
 let latestLive = {
   ok: true, version: V25_VERSION, active: false, status: 'idle', phase: 'idle', scanId: null,
-  observed: 0, candidateTopics: 0, platformCounts: {}, sourcePages: [], errors: [], evidence: [], inferredTopics: [], stages: {},
+  observed: 0, candidateTopics: 0, platformCounts: {}, sourcePages: [], errors: [], evidence: [], inferredTopics: [], socialArbSignals: [], stages: {},
 };
 const understanding = new ContentUnderstandingEngine({ dataDir: DATA_DIR });
 const postUnderstanding = new PostUnderstandingEngineV26({ dataDir: DATA_DIR });
 const transcription = new VideoTranscriptEngineV27({ dataDir: DATA_DIR });
 const videoMeaning = new VideoMeaningEngineV27({ dataDir: DATA_DIR });
+const socialArb = new SocialArbitrageEngineV30({ dataDir: DATA_DIR });
 const tiktok = new BroadTikTokObserver({ cdpUrl: CDP_URL, intervalMs: Number(process.env.FRONT_TIKTOK_OBSERVER_MS || 850) });
 
 function saveLedger() { writeJson(LEDGER_PATH, scans.slice(-100)); }
 function savePending() { writeJson(PENDING_PATH, pendingEvidence.slice(-500)); }
+function savePendingSocialArb() { writeJson(PENDING_SOCIAL_ARB_PATH, pendingSocialArb.slice(-120)); }
 function stage(name, patch = {}) {
   latestLive = {
     ...latestLive,
@@ -504,6 +511,7 @@ async function runScan(body = {}) {
       visualUnderstanding: { status: 'pending', updatedAt: Date.now() },
       videoMeaning: { status: 'pending', updatedAt: Date.now() },
       postUnderstanding: { status: 'pending', updatedAt: Date.now() },
+      socialArbEngine: { status: 'pending', updatedAt: Date.now() },
       narrativeEngine: { status: 'pending', updatedAt: Date.now() },
       originResearch: { status: request.mode === 'deep' ? 'pending' : 'disabled', updatedAt: Date.now() },
     },
@@ -511,6 +519,7 @@ async function runScan(body = {}) {
 
   let resultRows = [];
   let topics = [];
+  let socialArbSignals = [];
   let finalStatus = 'failed';
   try {
     setPhase('browser-preflight');
@@ -583,23 +592,40 @@ async function runScan(body = {}) {
       stage('narrativeEngine', { status: 'complete', candidates: topics.length, rerankedAfterOrigin: true, intelligenceVersion: 26 });
     }
 
+    if (!shouldStop() && resultRows.length) {
+      setPhase('social-arbitrage');
+      stage('socialArbEngine', { status: 'running', totalEvidence: resultRows.length, engine: socialArb.status() });
+      const social = await socialArb.analyze(resultRows, { mode: request.mode, timeoutMs: Math.max(15000, Number(process.env.FRONT_SOCIAL_ARB_TIMEOUT_MS || 60000)) });
+      socialArbSignals = social.signals;
+      stage('socialArbEngine', { status: social.stats.failed ? 'degraded' : 'complete', ...social.stats, engine: socialArb.status() });
+      latestLive = { ...latestLive, socialArbSignals: socialArbSignals.slice(0, 30), updatedAt: Date.now() };
+    } else {
+      stage('socialArbEngine', { status: shouldStop() ? 'stopped' : 'skipped-no-evidence', engine: socialArb.status() });
+    }
+
     summary = summarizeRows(resultRows);
     const outcome = scanOutcome({stopped:shouldStop(), evidenceCount:resultRows.length, stages:latestLive.stages, errors:latestLive.errors});
     latestLive = {
       ...latestLive, ...summary, active: false, status: outcome.status,
       phase: outcome.status === 'zero' ? 'complete' : outcome.status, completedAt: Date.now(), updatedAt: Date.now(),
-      candidateTopics: topics.length, evidence: resultRows, inferredTopics: topics.slice(0, 50), errors: outcome.errors.slice(-30),
+      candidateTopics: topics.length, evidence: resultRows, inferredTopics: topics.slice(0, 50), socialArbSignals: socialArbSignals.slice(0, 30), errors: outcome.errors.slice(-30),
     };
     finalStatus = latestLive.status;
     pendingEvidence = mergeRichEvidence([...pendingEvidence, ...resultRows]).slice(-500);
     savePending();
+    if (socialArbSignals.length) {
+      const byKey = new Map(pendingSocialArb.map((signal) => [signal.key, signal]));
+      for (const signal of socialArbSignals) byKey.set(signal.key, signal);
+      pendingSocialArb = [...byKey.values()].sort((a,b)=>Number(b.score||0)-Number(a.score||0)).slice(0,120);
+      savePendingSocialArb();
+    }
     return {
-      ok: finalStatus === 'complete', version: V25_VERSION, scanId: id, evidence: resultRows, inferredTopics: topics, errors: latestLive.errors,
+      ok: finalStatus === 'complete', version: V25_VERSION, scanId: id, evidence: resultRows, inferredTopics: topics, socialArbSignals, errors: latestLive.errors,
       audit: { singleProcess: true, intelligenceVersion: 26, stages: latestLive.stages, sourcePages: latestLive.sourcePages, ...summary },
       transcription: { ...transcription.status(), terminalVideos: resultRows.filter((row) => isVideoRow(row) && transcriptTerminal(row.transcriptStatus)).length },
       contentUnderstanding: { ...understanding.status(), visuallyUnderstood: resultRows.filter((row) => row.contentSummary).length },
       videoMeaning: { ...videoMeaning.status(), understoodVideos: resultRows.filter((row) => isVideoRow(row) && row.videoAbout).length },
-      postUnderstanding: postUnderstanding.status(), at: Date.now(),
+      postUnderstanding: postUnderstanding.status(), socialArbitrage: socialArb.status(), at: Date.now(),
     };
   } catch (error) {
     latestLive = {
@@ -621,9 +647,9 @@ function health() {
     ok: true, service: 'front-browser-bridge', version: V25_VERSION, scanner: 'front-single-process-v26', architecture: 'single-process', intelligenceVersion: 26,
     running: Boolean(current), scanId: current?.id || null, scanPhase: current?.phase || 'idle', scanLedger: { current, retained: scans.length },
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
-    transcription: transcription.status(), contentUnderstanding: understanding.status(), videoMeaning: videoMeaning.status(), postUnderstanding: postUnderstanding.status(),
+    transcription: transcription.status(), contentUnderstanding: understanding.status(), videoMeaning: videoMeaning.status(), postUnderstanding: postUnderstanding.status(), socialArbitrage: socialArb.status(),
     contentTargets: { transcriptConcurrency: Number(process.env.FRONT_TRANSCRIPT_CONCURRENCY || 2), deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
-    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','owned-instagram-page','exact-social-seed-navigation','instagram-feed-scroll','instagram-reels-scroll','instagram-hashtag-investigation','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
+    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','owned-instagram-page','exact-social-seed-navigation','instagram-feed-scroll','instagram-reels-scroll','instagram-hashtag-investigation','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','social-arbitrage-world-change-detection','consumer-behavior-classification','product-company-hypothesis-mapping','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
     activePorts: { bridge: PORT, chromeCdp: CDP_PORT },
   };
 }
@@ -662,14 +688,17 @@ const server = http.createServer(async (req, res) => {
       writeJson(CONFIG_PATH, config);
       return json(req, res, 200, { ok: true, config });
     }
-    if (req.method === 'GET' && url.pathname === '/pending') return json(req, res, 200, { evidence: pendingEvidence.slice(-250), count: pendingEvidence.length });
+    if (req.method === 'GET' && url.pathname === '/pending') return json(req, res, 200, { evidence: pendingEvidence.slice(-250), socialArbSignals: pendingSocialArb.slice(0,60), count: pendingEvidence.length, socialArbCount: pendingSocialArb.length });
     if (req.method === 'POST' && url.pathname === '/ack') {
       const body = JSON.parse(await readBody(req) || '{}');
       const ids = new Set(Array.isArray(body.ids) ? body.ids.map(String) : []);
       const before = pendingEvidence.length;
       pendingEvidence = pendingEvidence.filter((row) => !ids.has(String(row.id)));
       savePending();
-      return json(req, res, 200, { ok: true, removed: before - pendingEvidence.length, remaining: pendingEvidence.length });
+      const socialKeys = new Set(Array.isArray(body.socialArbKeys) ? body.socialArbKeys.map(String) : []);
+      const socialBefore = pendingSocialArb.length;
+      if (socialKeys.size) { pendingSocialArb = pendingSocialArb.filter((signal) => !socialKeys.has(String(signal.key))); savePendingSocialArb(); }
+      return json(req, res, 200, { ok: true, removed: before - pendingEvidence.length, remaining: pendingEvidence.length, socialArbRemoved: socialBefore - pendingSocialArb.length, socialArbRemaining: pendingSocialArb.length });
     }
     if (req.method === 'POST' && url.pathname === '/stop') {
       if (current) current.stopRequested = true;
@@ -699,5 +728,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Front browser bridge v27 listening on http://${HOST}:${PORT}`);
   console.log(`Single-process scanner active. Chrome CDP remains on ${CDP_URL}.`);
-  console.log('Pipeline: browser preflight → X/TikTok/Instagram discovery → visual understanding → contextual post understanding → semantic narrative ranking → origin research.');
+  console.log('Pipeline: browser preflight → X/TikTok/Instagram discovery → visual understanding → contextual post understanding → semantic narrative ranking → origin research → Social Arb change detection.');
 });
