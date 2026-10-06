@@ -32,6 +32,17 @@ export async function POST(request:Request){
   }
   const offline=await db().prepare("UPDATE bridge_agents SET status='OFFLINE' WHERE owner=? AND status='ONLINE' AND last_seen<?")
    .bind(owner,now-90_000).run();
-  return noStore({ok:true,expired,bridgeAgentsMarkedOffline:Number(offline.meta?.changes||0),at:now,policy:{socialArbQueuedMinutes:30,externalQueuedHours:6,socialArbActiveMinutes:45,externalActiveHours:8}});
+  const bridge=await db().prepare('SELECT status,last_seen,capabilities FROM bridge_agents WHERE owner=? ORDER BY last_seen DESC LIMIT 1').bind(owner).first<any>();
+  let capabilities:any={};
+  try{capabilities=typeof bridge?.capabilities==='string'?JSON.parse(bridge.capabilities):bridge?.capabilities||{};}catch{}
+  const bridgeLastSeen=Number(bridge?.last_seen)||0;
+  const bridgeOnline=Boolean(bridgeLastSeen&&now-bridgeLastSeen<45_000);
+  const scannerReady=Boolean(capabilities?.scannerReady);
+  const chromeReady=Boolean(capabilities?.chromeReady);
+  return noStore({
+   ok:true,expired,bridgeAgentsMarkedOffline:Number(offline.meta?.changes||0),at:now,
+   bridge:{online:bridgeOnline,lastSeen:bridgeLastSeen||null,scannerReady,chromeReady,ready:bridgeOnline&&scannerReady&&chromeReady},
+   policy:{socialArbQueuedMinutes:30,externalQueuedHours:6,socialArbActiveMinutes:45,externalActiveHours:8}
+  });
  }catch(error){if(error instanceof Response)return error;return noStore({error:(error as Error).message},500);}
 }

@@ -44,9 +44,15 @@ function requestFor(now=Date.now()){
  };
 }
 async function tick(){
+ let bridgeReady=false;
  try{
   const maintenance=await json('/api/agent/scroll-jobs/maintenance',{method:'POST',body:'{}'});
   if(Number(maintenance.expired)>0)console.log('[social-arb-autoscan] expired stale jobs='+String(maintenance.expired));
+  bridgeReady=maintenance?.bridge?.ready===true;
+  if(!bridgeReady){
+   const reason=!maintenance?.bridge?.online?'bridge offline':!maintenance?.bridge?.scannerReady?'scanner not ready':!maintenance?.bridge?.chromeReady?'chrome not ready':'bridge not ready';
+   console.log('[social-arb-autoscan] '+reason+'; skipping enqueue');
+  }
  }catch(error){console.warn('[social-arb-autoscan] queue maintenance failed:',String(error?.message||error).slice(0,300));}
  const b=bucket();
  if(b%96===0){
@@ -55,6 +61,7 @@ async function tick(){
    console.log('[social-arb-autoscan] outcome journal refresh checked='+String(outcome.checked||0));
   }catch(error){console.warn('[social-arb-autoscan] outcome journal refresh failed:',String(error?.message||error).slice(0,300));}
  }
+ if(!bridgeReady)return;
  const active=await json('/api/agent/scroll-jobs');
  if(Number(active.activeCount)>0){
   console.log('[social-arb-autoscan] backpressure: active job exists; skipping enqueue');
