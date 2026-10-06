@@ -501,7 +501,7 @@ async function runScan(body = {}) {
   latestLive = {
     ok: true, version: V25_VERSION, active: true, status: 'running', phase: 'starting', scanId: id,
     startedAt: current.startedAt, updatedAt: Date.now(), completedAt: null, observed: 0, candidateTopics: 0,
-    platformCounts: {}, sourcePages: [], errors: [], request, evidence: [], inferredTopics: [], stages: {
+    platformCounts: {}, sourcePages: [], errors: [], request, evidence: [], inferredTopics: [], socialArbSignals: [], stages: {
       chrome: { status: 'starting', updatedAt: Date.now() },
       xDiscovery: { status: request.scanXForYou ? 'pending' : 'disabled', observed: 0, target: request.targetUniqueFeedItems, updatedAt: Date.now() },
       tiktokDiscovery: { status: request.scanTikTokForYou ? 'pending' : 'disabled', active: request.scanTikTokForYou, observed: 0, grounded: 0, target: request.targetUniqueFeedItems, sourcePages: [], errors: [], updatedAt: Date.now() },
@@ -645,7 +645,7 @@ async function runScan(body = {}) {
 function health() {
   return {
     ok: true, service: 'front-browser-bridge', version: V25_VERSION, scanner: 'front-single-process-v26', architecture: 'single-process', intelligenceVersion: 26,
-    running: Boolean(current), scanId: current?.id || null, scanPhase: current?.phase || 'idle', scanLedger: { current, retained: scans.length },
+    running: Boolean(current), scanId: current?.id || null, scanPhase: current?.phase || 'idle', scanLedger: { current, retained: scans.length }, pendingCount: pendingEvidence.length, pendingSocialArbCount: pendingSocialArb.length,
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
     transcription: transcription.status(), contentUnderstanding: understanding.status(), videoMeaning: videoMeaning.status(), postUnderstanding: postUnderstanding.status(), socialArbitrage: socialArb.status(),
     contentTargets: { transcriptConcurrency: Number(process.env.FRONT_TRANSCRIPT_CONCURRENCY || 2), deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
