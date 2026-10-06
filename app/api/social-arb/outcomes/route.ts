@@ -2,6 +2,7 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { db, noStore, requireService } from '@/lib/front-agent-auth';
 import { samePublicOrigin } from '@/lib/request-origin';
+import { getProviderSecret } from '@/lib/front-provider-secrets';
 import {
  calculateSocialArbHorizons,fetchSocialArbDailyBars,historicalSocialArbBaseline,
  socialArbMarketDataStatus,socialArbMarketDate,
@@ -29,10 +30,10 @@ function publicRow(row:any){
   note:clean(data.note,500)||null,error:clean(data.error,300)||null,
  };
 }
-async function refreshOne(owner:string,row:any,now:number){
+async function refreshOne(owner:string,row:any,now:number,providerToken:string|null){
  let baselinePrice=finite(row.baseline_price),baselineAt=Number(row.baseline_at)||null,baselineKind=clean(row.baseline_kind,80)||null;
  let data=parse(row.data,{});
- const configured=socialArbMarketDataStatus().configured;
+ const configured=socialArbMarketDataStatus(providerToken).configured;
  if(!configured){
   if(String(row.status)!=='provider-unconfigured'){
    await db().prepare('UPDATE social_arb_outcomes SET status=?,last_evaluated=?,data=? WHERE owner=? AND research_id=?')
@@ -42,7 +43,7 @@ async function refreshOne(owner:string,row:any,now:number){
  }
  if(!baselinePrice){
   try{
-   const baseline=await historicalSocialArbBaseline(String(row.ticker),Number(row.captured));
+   const baseline=await historicalSocialArbBaseline(String(row.ticker),Number(row.captured),providerToken);
    baselinePrice=baseline.price;baselineAt=baseline.at;baselineKind=baseline.kind;
    data={...data,baselineSourceTimestamp:baseline.sourceTimestamp,baselineBackfilled:true};
   }catch(error){
@@ -57,7 +58,7 @@ async function refreshOne(owner:string,row:any,now:number){
  const baselineDate=baselineKind==='prior-session-close'
   ?clean(data.baselineSourceTimestamp,20)
   :socialArbMarketDate(Number(row.captured));
- const bars=await fetchSocialArbDailyBars(String(row.ticker),Number(row.captured),now);
+ const bars=await fetchSocialArbDailyBars(String(row.ticker),Number(row.captured),now,providerToken);
  const horizons=calculateSocialArbHorizons(Number(baselinePrice),baselineDate,bars);
  const complete=HORIZONS.every((key)=>(horizons as any)?.[key]?.status==='measured');
  data={...data,horizons,baselineDate,priceMethod:'point-in-time reference with raw EOD follow-up',error:null};
@@ -70,13 +71,14 @@ export async function GET(){
  const user=await getChatGPTUser();
  if(!user)return noStore({error:'Please sign in to view Social Arb outcomes.'},401);
  try{
+  const providerToken=await getProviderSecret(user.userId,'tiingo').catch(()=>null);
   const rows=await db().prepare('SELECT * FROM social_arb_outcomes WHERE owner=? ORDER BY captured DESC LIMIT 400').bind(user.userId).all<any>();
   const latest=new Map<string,any>();
   for(const row of rows.results)if(!latest.has(String(row.signal_key)))latest.set(String(row.signal_key),publicRow(row));
   const outcomes=[...latest.values()];
   return noStore({
    outcomes,
-   provider:socialArbMarketDataStatus(),
+   provider:socialArbMarketDataStatus(providerToken),
    stats:{
     total:outcomes.length,
     tracking:outcomes.filter((row)=>row.status==='tracking').length,
@@ -95,10 +97,11 @@ export async function POST(request:Request){
   if(body.action!=='refresh')return noStore({error:'Unsupported outcome action.'},400);
   const limit=Math.max(1,Math.min(25,Math.trunc(Number(body.limit)||10)));
   const sql="SELECT * FROM social_arb_outcomes WHERE owner=? AND status IN ('provider-unconfigured','capture-failed','baseline-failed','tracking') ORDER BY CASE WHEN last_evaluated IS NULL THEN 0 ELSE 1 END,last_evaluated ASC,captured ASC LIMIT ?";
+  const providerToken=await getProviderSecret(owner,'tiingo').catch(()=>null);
   const rows=await db().prepare(sql).bind(owner,limit).all<any>();
   const now=Date.now(),results=[];
   for(const row of rows.results){
-   try{results.push({researchId:row.research_id,...await refreshOne(owner,row,now)});}
+   try{results.push({researchId:row.research_id,...await refreshOne(owner,row,now,providerToken)});}
    catch(error){
     const message=clean((error as Error).message,300);
     await db().prepare('UPDATE social_arb_outcomes SET last_evaluated=?,data=? WHERE owner=? AND research_id=?')
@@ -106,6 +109,6 @@ export async function POST(request:Request){
     results.push({researchId:row.research_id,changed:false,status:'error',error:message});
    }
   }
-  return noStore({ok:true,provider:socialArbMarketDataStatus(),checked:rows.results.length,results,at:now});
+  return noStore({ok:true,provider:socialArbMarketDataStatus(providerToken),checked:rows.results.length,results,at:now});
  }catch(error){if(error instanceof Response)return error;return noStore({error:error instanceof SyntaxError?'Invalid request.':(error as Error).message},502);}
 }

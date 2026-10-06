@@ -1,3 +1,23 @@
+## 2026-10-06 — Secure in-Front Tiingo connection (v38)
+
+### Root cause
+The point-in-time outcome journal was production-ready but still depended on an operator manually adding `TIINGO_API_KEY` in Railway. That is unnecessary infrastructure friction and makes the Social Arb workflow incomplete from the Front UI.
+
+### Permanent fix
+- Added generic encrypted provider-secret storage in D1.
+- Provider secrets are sealed server-side with AES-GCM using a key derived from `FRONT_SETTINGS_KEY`; a fresh random IV is generated for every save.
+- Added a same-origin authenticated Tiingo connection endpoint that validates the token against Tiingo's official API test endpoint before saving it.
+- The API never returns the token or encrypted ciphertext after save.
+- Added Tiingo connect / replace / disconnect controls to Front Settings using a password field with no localStorage persistence.
+- Social Arb research-time price capture and later outcome refresh now resolve the signed-in owner's encrypted Tiingo credential, while retaining the environment variable as an operator fallback.
+- The local social-browser bridge never receives the Tiingo credential.
+
+### Security boundary
+Front stores the user's Tiingo API token only as encrypted server-side ciphertext. It never asks for a Tiingo password, never places the token in a URL, and never logs the token.
+
+### QA gate
+Merge and Railway deployment are blocked until the full Front CI suite passes.
+
 ## 2026-10-06 — Social Arb bridge-readiness autoscan gate (v37)
 
 ### Root cause

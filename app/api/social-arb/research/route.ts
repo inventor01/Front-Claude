@@ -3,6 +3,7 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { db, noStore, requireBridge } from '@/lib/front-agent-auth';
 import { samePublicOrigin } from '@/lib/request-origin';
 import { captureSocialArbReference, socialArbMarketDataStatus } from '@/lib/social-arb-market-data';
+import { getProviderSecret } from '@/lib/front-provider-secrets';
 
 const clean=(value:unknown,max=500)=>String(value??'').normalize('NFKC').replace(/\s+/g,' ').trim().slice(0,max);
 const generic=new Set(['product','products','brand','brands','company','companies','item','items','store','stores','trend','trending','viral','thing','things']);
@@ -194,12 +195,13 @@ export async function POST(request:Request){
 
   let outcome:{status:string;provider:string;baselinePrice:number|null;baselineAt:number|null;baselineKind:string|null;error?:string|null}|null=null;
   if(ticker){
-   const market=socialArbMarketDataStatus();
+   const providerToken=await getProviderSecret(owner,'tiingo').catch(()=>null);
+   const market=socialArbMarketDataStatus(providerToken);
    let status=market.configured?'capture-failed':'provider-unconfigured';
    let baselinePrice:number|null=null,baselineAt:number|null=null,baselineKind:string|null=null,sourceTimestamp:string|null=null,error:string|null=null;
    if(market.configured){
     try{
-     const baseline=await captureSocialArbReference(ticker,researched);
+     const baseline=await captureSocialArbReference(ticker,researched,providerToken);
      baselinePrice=baseline.price;baselineAt=baseline.at;baselineKind=baseline.kind;sourceTimestamp=baseline.sourceTimestamp;status='tracking';
     }catch(reason){error=clean((reason as Error).message,300);}
    }

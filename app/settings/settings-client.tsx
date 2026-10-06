@@ -2,7 +2,7 @@
 
 import {useEffect,useRef,useState} from 'react';
 import Link from 'next/link';
-import {Activity,ArrowLeft,Bell,CheckCircle2,LogIn,Play,Plus,Radio,RefreshCw,Save,Square,Trash2,TriangleAlert} from 'lucide-react';
+import {Activity,ArrowLeft,Bell,CheckCircle2,KeyRound,LogIn,Play,Plus,Radio,RefreshCw,Save,Square,Trash2,TriangleAlert,Unplug} from 'lucide-react';
 import styles from './settings-client.module.css';
 
 const BRIDGE='http://127.0.0.1:43981';
@@ -48,6 +48,7 @@ type ScanResult={evidence:Evidence[];errors:string[];inferredTopics?:InferredTop
 type StoredResult={accepted?:number;newEvidence?:number;replayed?:number;inferredNarratives?:number;error?:string};
 type Watch={id:string;name:string;created:number};
 type Hit={mint:string;name:string;symbol?:string;seen:number;event:'create'|'migrate';poolId?:string;pool?:string};
+type ProviderStatus={provider:string;configured:boolean;source:'front-encrypted-store'|'environment'|'none'|string;lastValidated?:number|null;validationStatus?:string|null;secretVisible?:boolean;error?:string};
 
 const DEFAULT_CONFIG:BridgeConfig={
   enabled:true,
@@ -120,6 +121,8 @@ export default function SettingsClient(){
   const [listening,setListening]=useState(false);
   const [listenStatus,setListenStatus]=useState('Off');
   const [hits,setHits]=useState<Hit[]>([]);
+  const [tiingo,setTiingo]=useState<ProviderStatus|null>(null);
+  const [tiingoToken,setTiingoToken]=useState('');
   const hydrated=useRef(false);
   const configHydrated=useRef(false);
   const stopRequested=useRef(false);
@@ -128,6 +131,47 @@ export default function SettingsClient(){
   const deepVisual=health?.contentTargets?.deepVideos??4;
   const scoutVisual=health?.contentTargets?.scoutVideos??2;
 
+  async function refreshTiingoStatus(silent=true){
+    try{
+      const response=await fetch('/api/social-arb/provider',{cache:'no-store'});
+      const data=await response.json() as ProviderStatus;
+      if(!response.ok)throw new Error(data.error||'Could not load Tiingo connection status.');
+      setTiingo(data);
+      if(!silent)setMessage(data.configured?'Tiingo market data is connected.':'Tiingo is not connected.');
+      return data;
+    }catch(e){
+      if(!silent)setError((e as Error).message);
+      return null;
+    }
+  }
+
+  async function connectTiingo(){
+    setBusy('tiingo');setMessage('');setError('');
+    try{
+      const token=tiingoToken.trim();
+      if(token.length<8)throw new Error('Paste your Tiingo API token first.');
+      const response=await fetch('/api/social-arb/provider',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'connect',token})
+      });
+      const data=await response.json() as ProviderStatus&{error?:string};
+      if(!response.ok)throw new Error(data.error||'Could not connect Tiingo.');
+      setTiingo(data);setTiingoToken('');
+      setMessage('Tiingo connected and validated. Social Arb can now freeze research-time prices and measure outcomes.');
+    }catch(e){setError((e as Error).message);}finally{setBusy('');}
+  }
+
+  async function disconnectTiingo(){
+    setBusy('tiingo-disconnect');setMessage('');setError('');
+    try{
+      const response=await fetch('/api/social-arb/provider',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'disconnect'})
+      });
+      const data=await response.json() as ProviderStatus&{error?:string};
+      if(!response.ok)throw new Error(data.error||'Could not disconnect Tiingo.');
+      setTiingo(data);setTiingoToken('');
+      setMessage(data.configured?'Stored Tiingo token removed. An environment-level Tiingo key is still active.':'Tiingo disconnected.');
+    }catch(e){setError((e as Error).message);}finally{setBusy('');}
+  }
   async function ping(silent=false,hydrateConfig=false){
     try{
       const status=await local<BridgeHealth>('/health');
@@ -256,6 +300,7 @@ export default function SettingsClient(){
     window.addEventListener(STATE_EVENT,onState as EventListener);
     const kickoff=window.setTimeout(()=>{
       void ping(true,true);
+      void refreshTiingoStatus(true);
       const storedWatches=readArray<Watch>(WATCH_KEY).filter((item)=>item&&typeof item.name==='string').slice(0,100);
       const storedHits=readArray<Hit>(HIT_KEY).slice(0,30);
       const enabled=localStorage.getItem(LISTENER_KEY)==='true';
@@ -290,9 +335,19 @@ export default function SettingsClient(){
       <div className={styles.statusCard}><span>Browser bridge</span><b data-ok={connected}>{connected?'Connected':'Offline'}</b><small>{connected?`v${health?.version||'—'}${health?.scanner?` · ${health.scanner}`:''}`:'Start the local bridge on this Mac'}</small></div>
       <div className={styles.statusCard}><span>Scanner</span><b>{!connected?'Offline':health?.running?'Running':config.enabled?'Scheduled':'Paused'}</b><small>{connected?`${health?.pendingCount||0} pending · next ${nextRun}`:'Connect the local bridge to read scanner state'}</small></div>
       <div className={styles.statusCard}><span>Launch alerts</span><b>{listening?'Listening':'Off'}</b><small>{listenStatus} · {watches.length} exact-name watch{watches.length===1?'':'es'}</small></div>
+      <div className={styles.statusCard}><span>Market outcomes</span><b data-ok={Boolean(tiingo?.configured)}>{tiingo?.configured?'Tiingo connected':'Not connected'}</b><small>{tiingo?.configured?('validated'+(tiingo.lastValidated?' · '+new Date(tiingo.lastValidated).toLocaleDateString():'')):'Needed for point-in-time stock outcome tracking'}</small></div>
     </section>
 
     <div className={styles.grid}>
+      <section className={`${styles.card} ${styles.span2}`}>
+        <div className={styles.cardHead}><div><KeyRound size={18}/><div><h2>Social Arb market data</h2><p>Connect Tiingo for immutable research-time stock prices and 1 / 5 / 20 / 60-session outcome tracking.</p></div></div><span className={tiingo?.configured?styles.good:styles.muted}>{tiingo?.configured?'● connected':'○ not connected'}</span></div>
+        <div className={styles.providerRow}>
+          <input type="password" autoComplete="off" spellCheck={false} value={tiingoToken} onChange={(e)=>setTiingoToken(e.target.value)} placeholder={tiingo?.configured?'Paste a replacement Tiingo token':'Paste Tiingo API token'}/>
+          <button className={styles.primary} onClick={()=>void connectTiingo()} disabled={!!busy||tiingoToken.trim().length<8}><KeyRound size={14}/> {busy==='tiingo'?'Validating…':tiingo?.configured?'Replace token':'Connect Tiingo'}</button>
+          {tiingo?.configured&&<button className={styles.danger} onClick={()=>void disconnectTiingo()} disabled={!!busy}><Unplug size={14}/> {busy==='tiingo-disconnect'?'Disconnecting…':'Disconnect'}</button>}
+        </div>
+        <small className={styles.help}>Front validates the token against Tiingo before saving it. The token is encrypted server-side with AES-GCM using Front&apos;s settings key, never returned to the browser after save, never placed in a URL, and never sent to the local social-browser bridge. Tiingo remains optional; without it Front still detects social change but leaves price outcomes unmeasured.</small>
+      </section>
       <section className={`${styles.card} ${styles.span2}`}>
         <div className={styles.cardHead}><div><Activity size={18}/><div><h2>Browser scanner</h2><p>X + TikTok discovery and investigation settings</p></div></div><span className={connected?styles.good:styles.muted}>{connected?'● connected':'○ offline'}</span></div>
         <div className={styles.actions}>
