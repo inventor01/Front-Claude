@@ -86,6 +86,7 @@ function requestSummary(body = {}) {
     scanTikTokForYou: body.scanTikTokForYou !== false,
     scanInstagram: body.scanInstagram !== false,
     keywords: Array.isArray(body.keywords) ? body.keywords.map((x) => clean(x, 120)).filter(Boolean).slice(0, 12) : [],
+    seedUrls: [...new Set((Array.isArray(body.seedUrls) ? body.seedUrls : []).map((x) => canonicalSocialPostUrl(x)).filter(Boolean))].slice(0, 12),
   };
 }
 
@@ -168,6 +169,64 @@ async function openOwnedPage(url) {
     await page.close().catch(() => {});
     throw error;
   }
+}
+
+
+function seedPlatform(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (/^(?:www\.)?(?:x|twitter)\.com$/.test(host)) return 'X';
+    if (/^(?:www\.)?tiktok\.com$/.test(host)) return 'TikTok';
+    if (/^(?:www\.)?instagram\.com$/.test(host)) return 'Instagram';
+  } catch {}
+  return null;
+}
+async function collectSeedUrl(rawUrl) {
+  const canonical = canonicalSocialPostUrl(rawUrl);
+  const platform = canonical && seedPlatform(canonical);
+  if (!canonical || !platform || shouldStop()) return [];
+  const page = await openOwnedPage(canonical);
+  try {
+    await page.waitForTimeout(platform === 'Instagram' ? 2400 : 1900);
+    if (platform === 'X') await ensureOwnedPageVisible(page);
+    let rows = [];
+    if (platform === 'X') rows = await extractX(page, 'Front direct seed · X', 12);
+    else if (platform === 'TikTok') rows = await extractTikTokSearch(page, 'Front direct seed · TikTok', 12);
+    else rows = await extractInstagramPage(page, 'Front direct seed · Instagram', 12);
+    const exact = rows.filter((row) => canonicalSocialPostUrl(row?.url, platform) === canonical);
+    const accepted = mergeRichEvidence(exact);
+    latestLive = {
+      ...latestLive,
+      evidence: mergeRichEvidence([...latestLive.evidence, ...accepted]).slice(-300),
+      sourcePages: [...new Set([...latestLive.sourcePages, canonical])],
+      updatedAt: Date.now(),
+    };
+    return accepted;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+async function collectSeedUrls(seedUrls = []) {
+  const rows = [];
+  let inspected = 0;
+  stage('seedUrlDiscovery', { status: 'running', requested: seedUrls.length, inspected, accepted: 0 });
+  for (const url of seedUrls) {
+    if (shouldStop()) break;
+    try {
+      const found = await collectSeedUrl(url);
+      rows.push(...found);
+      inspected += 1;
+      stage('seedUrlDiscovery', { status: 'running', requested: seedUrls.length, inspected, accepted: mergeRichEvidence(rows).length, current: url });
+      if (!found.length) latestLive.errors.push(`Direct seed returned no accepted evidence: ${url}`);
+    } catch (error) {
+      inspected += 1;
+      latestLive.errors.push(`Direct seed ${url}: ${clean(error?.message || error, 300)}`);
+      stage('seedUrlDiscovery', { status: 'running', requested: seedUrls.length, inspected, accepted: mergeRichEvidence(rows).length, current: url });
+    }
+  }
+  const merged = mergeRichEvidence(rows);
+  stage('seedUrlDiscovery', { status: shouldStop() ? 'stopped' : merged.length ? 'complete' : 'degraded', requested: seedUrls.length, inspected, accepted: merged.length });
+  return merged;
 }
 
 
@@ -440,6 +499,7 @@ async function runScan(body = {}) {
       xDiscovery: { status: request.scanXForYou ? 'pending' : 'disabled', observed: 0, target: request.targetUniqueFeedItems, updatedAt: Date.now() },
       tiktokDiscovery: { status: request.scanTikTokForYou ? 'pending' : 'disabled', active: request.scanTikTokForYou, observed: 0, grounded: 0, target: request.targetUniqueFeedItems, sourcePages: [], errors: [], updatedAt: Date.now() },
       instagramDiscovery: { status: request.scanInstagram ? 'pending' : 'disabled', observed: 0, target: request.targetUniqueFeedItems, sourcePages: [], errors: [], updatedAt: Date.now() },
+      seedUrlDiscovery: { status: request.seedUrls.length ? 'pending' : 'disabled', requested: request.seedUrls.length, inspected: 0, accepted: 0, updatedAt: Date.now() },
       transcription: { status: 'pending', updatedAt: Date.now() },
       visualUnderstanding: { status: 'pending', updatedAt: Date.now() },
       videoMeaning: { status: 'pending', updatedAt: Date.now() },
@@ -456,6 +516,14 @@ async function runScan(body = {}) {
     setPhase('browser-preflight');
     await ensureContext();
     stage('chrome', { status: 'connected', cdpUrl: CDP_URL });
+
+    if (request.seedUrls.length && !shouldStop()) {
+      setPhase('seed-url-discovery');
+      resultRows.push(...await collectSeedUrls(request.seedUrls));
+      resultRows = mergeRichEvidence(resultRows);
+      const seedSummary = summarizeRows(resultRows);
+      latestLive = { ...latestLive, ...seedSummary, evidence: resultRows.slice(-300), updatedAt: Date.now() };
+    }
 
     setPhase('discovery');
     const jobs = [];
@@ -555,7 +623,7 @@ function health() {
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
     transcription: transcription.status(), contentUnderstanding: understanding.status(), videoMeaning: videoMeaning.status(), postUnderstanding: postUnderstanding.status(),
     contentTargets: { transcriptConcurrency: Number(process.env.FRONT_TRANSCRIPT_CONCURRENCY || 2), deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
-    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','owned-instagram-page','instagram-feed-scroll','instagram-reels-scroll','instagram-hashtag-investigation','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
+    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','owned-instagram-page','exact-social-seed-navigation','instagram-feed-scroll','instagram-reels-scroll','instagram-hashtag-investigation','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
     activePorts: { bridge: PORT, chromeCdp: CDP_PORT },
   };
 }
