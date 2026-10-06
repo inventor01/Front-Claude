@@ -1,3 +1,19 @@
+## 2026-10-06 — Social Arb stale queue recovery (v34)
+
+### Root cause
+The 24/7 Social Arb scheduler correctly applied backpressure whenever any scroll job was active, but queued jobs had no age limit. Lease reclamation only happens while a local bridge is polling, so one abandoned queued or leased job could block autonomous scanning indefinitely when the bridge was offline.
+
+### Permanent fixes
+- Added authenticated queue maintenance before every Social Arb autoscan backpressure check.
+- Social Arb queued jobs expire after 30 minutes and stale leased Social Arb jobs after 45 minutes.
+- AI Employee OS/external jobs receive much longer 6-hour queued and 8-hour stale-active TTLs so Social Arb cannot aggressively cancel downstream work.
+- Only non-terminal queue states are eligible for expiry; completed/failed/cancelled history is preserved.
+- Stale bridge-agent presence is marked OFFLINE after 90 seconds without polling.
+- Active-job diagnostics now expose caller, lease expiry, and queue age.
+
+### Release gate
+Merge and Railway deployment are blocked until the full Front CI suite passes. A connected local authenticated browser bridge is still required to execute social scans; queue recovery prevents deadlock but does not fabricate browser availability.
+
 ## 2026-10-06 — Social Arb point-in-time performance journal (v33)
 
 ### Root cause
