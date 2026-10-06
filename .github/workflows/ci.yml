@@ -33,10 +33,11 @@ jobs:
       - name: Production dependency security audit
         run: npm audit --omit=dev --audit-level=high
 
-      # Build tooling currently has one documented Drizzle Kit/esbuild moderate
-      # chain with no safe in-range fix. High/critical tooling regressions fail.
+      # Production must remain completely clean. Development tooling currently
+      # has one exact, documented, unpatched braces advisory; the helper rejects
+      # every other high/critical finding.
       - name: Full dependency high-severity audit
-        run: npm audit --audit-level=high
+        run: node scripts/audit-dev.mjs
 
       - name: Install browser bridge dependencies
         run: npm install --prefix browser-bridge --no-audit --no-fund
