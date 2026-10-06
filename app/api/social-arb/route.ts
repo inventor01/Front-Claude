@@ -72,6 +72,7 @@ function parseEvidence(value:unknown){
   out.push({
    id:clean(row.id,180),platform:clean(row.platform,20),author:clean(row.author,120),url,
    content:clean(row.content,1200),published:Number.isFinite(Number(row.published))?Number(row.published):null,
+   evidenceType:row.evidenceType==='comment'?'comment':'post',parentUrl:safeUrl(row.parentUrl),
   });
  }
  return out;
@@ -87,7 +88,7 @@ function safeChange(value:unknown){
  const row=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
  const finite=(v:unknown)=>Number.isFinite(Number(v))?Math.max(0,Math.min(1000,Number(v))):null;
  return{
-  growthMultiple:finite(row.growthMultiple),authorMultiple:finite(row.authorMultiple),behaviorMultiple:finite(row.behaviorMultiple),
+  growthMultiple:finite(row.growthMultiple),authorMultiple:finite(row.authorMultiple),commentMultiple:finite(row.commentMultiple),behaviorMultiple:finite(row.behaviorMultiple),
   newToBaseline:row.newToBaseline===true,
  };
 }
@@ -127,7 +128,7 @@ async function normalizeSignal(raw:IncomingSignal,secRows:SecRow[]){
  const status=['WATCH','EARLY','RISING','HIGH_SIGNAL'].includes(String(raw.status))?String(raw.status):score>=64?'RISING':score>=45?'EARLY':'WATCH';
  return{
   key,title,product,brand,companyName,ticker,relation,direction,materiality,mappingStatus,tickerVerified,
-  mappingConfidence,score,status,authorCount:integer(raw.authorCount),evidenceCount:integer(raw.evidenceCount),
+  mappingConfidence,score,status,authorCount:integer(raw.authorCount),commenterCount:integer(raw.commenterCount),independentVoiceCount:integer(raw.independentVoiceCount),evidenceCount:integer(raw.evidenceCount),
   platforms,behaviors,change,thesis:clean(raw.thesis,500)||null,evidence,
   baseline:raw.baseline&&typeof raw.baseline==='object'?raw.baseline:null,
   modelStatus:clean(raw.mappingStatus,60)||null,
@@ -196,6 +197,7 @@ export async function POST(request:Request){
   for(const signal of normalized){
    const data=JSON.stringify({
     evidence:signal.evidence,baseline:signal.baseline,mappingConfidence:signal.mappingConfidence,modelStatus:signal.modelStatus,
+    commenterCount:signal.commenterCount,independentVoiceCount:signal.independentVoiceCount,
     version:signal.version,informationGap:signal.informationGap,
    });
    statements.push(db().prepare(`INSERT INTO social_arb_observations(owner,signal_key,observed,title,product,brand,company_name,ticker,relation,direction,materiality,mapping_status,ticker_verified,score,status,author_count,evidence_count,platforms,behaviors,change_json,thesis,data)
