@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- external SEC/RSS payloads are validated at the boundary. */
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { db, noStore } from '@/lib/front-agent-auth';
+import { db, noStore, requireBridge } from '@/lib/front-agent-auth';
 import { samePublicOrigin } from '@/lib/request-origin';
 
 const clean=(value:unknown,max=500)=>String(value??'').normalize('NFKC').replace(/\s+/g,' ').trim().slice(0,max);
@@ -55,20 +55,26 @@ async function filingAwareness(ticker:string,terms:string[]){
   const forms=Array.isArray(recent.form)?recent.form:[];
   const docs=Array.isArray(recent.primaryDocument)?recent.primaryDocument:[];
   const dates=Array.isArray(recent.filingDate)?recent.filingDate:[];
-  const evidence:any[]=[];
-  for(let i=0;i<accession.length&&evidence.length<4;i++){
+  const candidates:any[]=[];
+  for(let i=0;i<accession.length&&candidates.length<4;i++){
    if(!FORMS.has(String(forms[i]||'')))continue;
    const doc=String(docs[i]||'').replace(/[^A-Za-z0-9._-]/g,'');
    const acc=String(accession[i]||'').replace(/-/g,'');
    if(!doc||!acc)continue;
-   const url='https://www.sec.gov/Archives/edgar/data/'+String(Number(identity.cik))+'/'+acc+'/'+doc;
-   try{
-    const body=textOnly(await boundedText(url,{'User-Agent':SEC_HEADERS['User-Agent'],'Accept':'text/html,*/*'}));
-    const matched=terms.filter((term)=>body.includes(term.toLowerCase()));
-    if(matched.length)evidence.push({source:'SEC filing',form:String(forms[i]),filed:String(dates[i]||''),matchedTerms:matched,url});
-   }catch{}
+   candidates.push({
+    form:String(forms[i]),filed:String(dates[i]||''),
+    url:'https://www.sec.gov/Archives/edgar/data/'+String(Number(identity.cik))+'/'+acc+'/'+doc
+   });
   }
-  return{ok:true,count:evidence.length,evidence,cik:identity.cik,company:identity.name};
+  const checked=await Promise.all(candidates.map(async(candidate)=>{
+   try{
+    const body=textOnly(await boundedText(candidate.url,{'User-Agent':SEC_HEADERS['User-Agent'],'Accept':'text/html,*/*'},1_500_000));
+    const matched=terms.filter((term)=>body.includes(term.toLowerCase()));
+    return matched.length?{source:'SEC filing',form:candidate.form,filed:candidate.filed,matchedTerms:matched,url:candidate.url}:null;
+   }catch{return null;}
+  }));
+  const evidence=checked.filter(Boolean);
+  return{ok:true,count:evidence.length,evidence,cik:identity.cik,company:identity.name,checked:candidates.length};
  }catch(error){
   return{ok:false,count:0,evidence:[],error:clean((error as Error).message,180)};
  }
@@ -146,14 +152,22 @@ export async function GET(){
 }
 
 export async function POST(request:Request){
- const user=await getChatGPTUser();
- if(!user)return noStore({error:'Please sign in to research a Social Arb candidate.'},401);
- if(!samePublicOrigin(request))return noStore({error:'Invalid request origin.'},403);
+ const bridgeRequested=Boolean(request.headers.get('x-front-bridge-key'));
+ let owner='';
+ let bridgeAuthenticated=false;
+ if(bridgeRequested){
+  try{owner=requireBridge(request);bridgeAuthenticated=true;}catch(error){if(error instanceof Response)return error;throw error;}
+ }else{
+  const user=await getChatGPTUser();
+  if(!user)return noStore({error:'Please sign in to research a Social Arb candidate.'},401);
+  owner=user.userId;
+ }
+ if(!bridgeAuthenticated&&!samePublicOrigin(request))return noStore({error:'Invalid request origin.'},403);
  try{
   const body=await request.json() as {signalKey?:unknown};
   const signalKey=clean(body.signalKey,180).toLowerCase();
   if(signalKey.length<3)return noStore({error:'signalKey is required.'},400);
-  const row=await db().prepare('SELECT * FROM social_arb_observations WHERE owner=? AND signal_key=? ORDER BY observed DESC LIMIT 1').bind(user.userId,signalKey).first<any>();
+  const row=await db().prepare('SELECT * FROM social_arb_observations WHERE owner=? AND signal_key=? ORDER BY observed DESC LIMIT 1').bind(owner,signalKey).first<any>();
   if(!row)return noStore({error:'Social Arb signal not found.'},404);
   const data=parseJson(row.data,{});
   const terms=researchTerms(row,data);
@@ -175,7 +189,7 @@ export async function POST(request:Request){
    informationGap:{state:informationGapState,note:informationGapState==='high-information-gap-candidate'?'Strong social change with little detected filing or financial-media awareness. This is a research candidate, not a trade instruction.':informationGapState==='parity-likely'?'The trend appears broadly represented in company filings and/or financial media; the informational edge may be substantially reduced.':'Front is still gathering evidence; do not treat this state as a trading signal.'},
   };
   await db().prepare('INSERT INTO social_arb_research_runs(owner,id,signal_key,researched,social_score,social_status,materiality_status,awareness_status,information_gap_state,filing_count,financial_news_count,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
-   .bind(user.userId,id,signalKey,researched,Number(row.score)||0,String(row.status||'WATCH'),materialityStatus,awarenessStatus,informationGapState,Number((filings as any).count)||0,Number((news as any).count)||0,JSON.stringify(result)).run();
+   .bind(owner,id,signalKey,researched,Number(row.score)||0,String(row.status||'WATCH'),materialityStatus,awarenessStatus,informationGapState,Number((filings as any).count)||0,Number((news as any).count)||0,JSON.stringify(result)).run();
   return noStore(result);
  }catch(error){
   return noStore({error:error instanceof SyntaxError?'Invalid request.':(error as Error).message},502);
