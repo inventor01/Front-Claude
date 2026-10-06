@@ -28,6 +28,7 @@ type SocialArbOutcome={
  horizons:Record<string,{status?:string;sessions?:number;date?:string;price?:number;return?:number;note?:string}>;note?:string|null;error?:string|null;
 };
 type OutcomeFeed={outcomes:SocialArbOutcome[];provider:{provider:string;configured:boolean;purpose?:string;license?:string};error?:string};
+type BridgeFeed={bridge:{online:boolean;lastSeen:number|null;status:string;scannerReady:boolean;chromeReady:boolean;authenticatedPlatforms:string[];scannerVersion?:string|null};queue:{activeCount:number;active:Array<{id:string;caller:string;status:string;phase:string;requestId:string;created:number;ageMs:number}>};error?:string};
 
 const behaviorNames:Record<string,string>={
  PURCHASED:'Bought',PURCHASE_INTENT:'Wants to buy',REPEAT_PURCHASE:'Repeat buying',SWITCHING:'Switching',STOCKOUT:'Stockout',
@@ -95,6 +96,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
  const [research,setResearch]=useState<Record<string,SocialArbResearch>>({});
  const [outcomes,setOutcomes]=useState<Record<string,SocialArbOutcome>>({});
  const [marketProvider,setMarketProvider]=useState<{provider:string;configured:boolean}|null>(null);
+ const [bridgeStatus,setBridgeStatus]=useState<BridgeFeed|null>(null);
  const [busy,setBusy]=useState('');
  const [message,setMessage]=useState('');
  const [error,setError]=useState('');
@@ -115,6 +117,15 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
    if(!response.ok)throw new Error(data.error||'Could not load Social Arb outcomes.');
    setOutcomes(Object.fromEntries((data.outcomes||[]).map((item)=>[item.signalKey,item])));
    setMarketProvider(data.provider||null);
+  }catch(reason){setError((reason as Error).message);}
+ }
+
+ async function refreshBridgeStatus(){
+  try{
+   const response=await fetch('/api/social-arb/bridge-status',{cache:'no-store'});
+   const data=await response.json() as BridgeFeed;
+   if(!response.ok)throw new Error(data.error||'Could not load Front bridge status.');
+   setBridgeStatus(data);
   }catch(reason){setError((reason as Error).message);}
  }
 
@@ -142,6 +153,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
    setFeed(data);
    void refreshResearch();
    void refreshOutcomes();
+   void refreshBridgeStatus();
   }catch(reason){setError((reason as Error).message);}
   finally{setBusy((value)=>value==='refresh'?'':value);}
  }
@@ -164,12 +176,18 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
     if(!response.ok)throw new Error(data.error||'Could not load Social Arb outcomes.');
     return data;
    }),
-  ]).then(([signalsFeed,researchFeed,outcomeFeed])=>{
+   fetch('/api/social-arb/bridge-status',{cache:'no-store'}).then(async(response)=>{
+    const data=await response.json() as BridgeFeed;
+    if(!response.ok)throw new Error(data.error||'Could not load Front bridge status.');
+    return data;
+   }),
+  ]).then(([signalsFeed,researchFeed,outcomeFeed,bridgeFeed])=>{
    if(cancelled)return;
    setFeed(signalsFeed);
    setResearch(Object.fromEntries((researchFeed.research||[]).map((item)=>[item.signalKey,item])));
    setOutcomes(Object.fromEntries((outcomeFeed.outcomes||[]).map((item)=>[item.signalKey,item])));
    setMarketProvider(outcomeFeed.provider||null);
+   setBridgeStatus(bridgeFeed);
   }).catch((reason)=>{if(!cancelled)setError((reason as Error).message);});
   return()=>{cancelled=true;};
  },[refreshKey]);
@@ -220,6 +238,12 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
   {message&&<div className={styles.notice}>{message}</div>}
   {error&&<div className={styles.error}>{error}</div>}
   {marketProvider&&!marketProvider.configured&&<div className={styles.marketNotice}>Performance journal is ready, but Tiingo is not connected yet. Front will not invent or scrape a substitute price feed; connect a Tiingo API token before the live 7-day run to freeze exact research-time prices.</div>}
+  {bridgeStatus&&<div className={bridgeStatus.bridge.online?styles.bridgeOnline:styles.bridgeOffline}>
+   <b>{bridgeStatus.bridge.online?'Local bridge online':'Local bridge offline'}</b>
+   <span>{bridgeStatus.bridge.online
+    ?'Railway polling is live'+(bridgeStatus.bridge.chromeReady?' · Chrome ready':' · Chrome not ready')+(bridgeStatus.bridge.lastSeen?' · seen '+age(bridgeStatus.bridge.lastSeen):'')
+    :'No bridge claim is reaching Railway. '+bridgeStatus.queue.activeCount+' job'+(bridgeStatus.queue.activeCount===1?' is':'s are')+' waiting. Run browser-bridge/install-autostart.command from the current Front-Claude checkout on the Mac.'}</span>
+  </div>}
 
   <div className={styles.stats}>
    <div className={styles.stat}><span>World changes</span><strong>{stats.total}</strong><small>ranked social-behavior signals</small></div>
