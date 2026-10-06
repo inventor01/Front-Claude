@@ -64,3 +64,24 @@ test('commenters strengthen Social Arb without inflating creator counts',()=>{
   assert.ok(signal.behaviorCount>=4);
   assert.ok(signal.score>45);
 });
+
+test('comment depth does not inflate post-growth baseline',()=>{
+  const now=Date.now();
+  const post={
+    id:'post-baseline',platform:'TikTok',author:'creator',url:'https://www.tiktok.com/@creator/video/4234567890123456789',
+    content:'Glow Bottle review',published:now-1000,postSubject:'Glow Bottle',semanticNarrativeKey:'glow bottle',postUnderstandingConfidence:.9,
+  };
+  const comments=['I bought one.','Where can I buy this?','Sold out near me.','Everyone at work has one now.']
+    .map((content,index)=>normalizeSocialComment({author:'voice'+index,content},{platform:'TikTok',parentUrl:post.url,parentEvidenceId:post.id,subject:'Glow Bottle'}))
+    .filter(Boolean);
+  const history={'glow bottle':[
+    {at:now-86400000,evidenceCount:1,postEvidenceCount:1,authorCount:1,commenterCount:0,behaviorCount:0},
+    {at:now-2*86400000,evidenceCount:1,postEvidenceCount:1,authorCount:1,commenterCount:0,behaviorCount:0},
+  ]};
+  const [signal]=deriveSocialArbCandidates([post,...comments],{history,now});
+  assert.equal(signal.postEvidenceCount,1);
+  assert.equal(signal.commentEvidenceCount,4);
+  assert.equal(signal.change.growthMultiple,1);
+  assert.equal(signal.authorCount,1);
+  assert.equal(signal.commenterCount,4);
+});
