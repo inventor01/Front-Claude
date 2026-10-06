@@ -68,6 +68,7 @@ Request:
   "platforms": ["X", "TikTok", "Instagram"],
   "objective": "Find emerging products and creative patterns for lightweight hoodies",
   "keywords": ["hoodie", "streetwear", "oversized hoodie"],
+  "seedUrls": ["https://x.com/example/status/1234567890123456789"],
   "accounts": [],
   "surfaces": ["FOR_YOU", "SEARCH"],
   "targetUniqueFeedItems": 90,
@@ -315,9 +316,10 @@ Behavior:
 2. Two bridge workers cannot claim the same job.
 3. Bridge loss returns job to claimable state after lease expiry.
 4. X-only, TikTok-only, Instagram-only, and combined scans work.
-5. Stop/cancel works during scrolling and model analysis.
-6. Zero-result scan returns a truthful completed/degraded result.
-7. No cookies, platform tokens, service keys or browser profile data appear in payloads/logs.
+5. Exact X/TikTok/Instagram post URLs are canonicalized, opened first in the authenticated Front browser, and then analyzed through the same pipeline.
+6. Stop/cancel works during scrolling and model analysis.
+7. Zero-result scan returns a truthful completed/degraded result.
+8. No cookies, platform tokens, service keys or browser profile data appear in payloads/logs.
 8. Employee OS receives at least one fresh Front evidence record in an end-to-end scrolling test.
 9. Existing Front interactive scans continue working unchanged.
 10. Front remains intelligence-only and cannot publish, buy, spend or launch.
