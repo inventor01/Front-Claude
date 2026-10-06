@@ -128,7 +128,7 @@ async function normalizeSignal(raw:IncomingSignal,secRows:SecRow[]){
  const status=['WATCH','EARLY','RISING','HIGH_SIGNAL'].includes(String(raw.status))?String(raw.status):score>=64?'RISING':score>=45?'EARLY':'WATCH';
  return{
   key,title,product,brand,companyName,ticker,relation,direction,materiality,mappingStatus,tickerVerified,
-  mappingConfidence,score,status,authorCount:integer(raw.authorCount),commenterCount:integer(raw.commenterCount),independentVoiceCount:integer(raw.independentVoiceCount),evidenceCount:integer(raw.evidenceCount),
+  mappingConfidence,score,status,authorCount:integer(raw.authorCount),commenterCount:integer(raw.commenterCount),independentVoiceCount:integer(raw.independentVoiceCount),evidenceCount:integer(raw.evidenceCount),postEvidenceCount:integer(raw.postEvidenceCount),commentEvidenceCount:integer(raw.commentEvidenceCount),
   platforms,behaviors,change,thesis:clean(raw.thesis,500)||null,evidence,
   baseline:raw.baseline&&typeof raw.baseline==='object'?raw.baseline:null,
   modelStatus:clean(raw.mappingStatus,60)||null,
@@ -197,7 +197,7 @@ export async function POST(request:Request){
   for(const signal of normalized){
    const data=JSON.stringify({
     evidence:signal.evidence,baseline:signal.baseline,mappingConfidence:signal.mappingConfidence,modelStatus:signal.modelStatus,
-    commenterCount:signal.commenterCount,independentVoiceCount:signal.independentVoiceCount,
+    commenterCount:signal.commenterCount,independentVoiceCount:signal.independentVoiceCount,postEvidenceCount:signal.postEvidenceCount,commentEvidenceCount:signal.commentEvidenceCount,
     version:signal.version,informationGap:signal.informationGap,
    });
    statements.push(db().prepare(`INSERT INTO social_arb_observations(owner,signal_key,observed,title,product,brand,company_name,ticker,relation,direction,materiality,mapping_status,ticker_verified,score,status,author_count,evidence_count,platforms,behaviors,change_json,thesis,data)
