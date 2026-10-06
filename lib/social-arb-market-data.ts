@@ -115,9 +115,9 @@ export function calculateSocialArbHorizons(baselinePrice:number,baselineDate:str
 export async function validateTiingoToken(token:string){
  const value=resolvedToken(token);
  if(value.length<8)throw new Error('Enter a Tiingo API token.');
- const payload=await tiingo('/tiingo/daily/AAPL',12000,value);
+ const payload=await tiingo('/api/test/',12000,value);
  const row=payload&&typeof payload==='object'?payload as Record<string,unknown>:null;
- const ticker=clean(row?.ticker,12).toUpperCase();
- if(ticker&&ticker!=='AAPL')throw new Error('Tiingo validation returned an unexpected instrument.');
+ const message=clean(row?.message,200).toLowerCase();
+ if(!message.includes('success'))throw new Error('Tiingo did not confirm the API token.');
  return{ok:true,provider:'tiingo' as const};
 }
