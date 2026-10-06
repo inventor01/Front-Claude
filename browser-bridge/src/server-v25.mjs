@@ -20,6 +20,7 @@ import { VideoMeaningEngineV27 } from './video-meaning-v27.mjs';
 import { enhanceNarrativesV26 } from './narrative-intelligence-v26.mjs';
 import { canonicalSocialPostUrl } from './social-post-url.mjs';
 import { SocialArbitrageEngineV30 } from './social-arbitrage-v30.mjs';
+import { verifyResaleMarkets } from './market-verifier.mjs';
 import { investigateSocialComments } from './social-comments-v31.mjs';
 import { BroadTikTokObserver, extractTikTokAnchors } from './tiktok-observer-v21.mjs';
 import { extractInstagramPage, instagramTag } from './instagram-observer-v28.mjs';
@@ -44,6 +45,7 @@ const PENDING_PATH = path.join(DATA_DIR, 'pending-evidence-v26.json');
 const PENDING_SOCIAL_ARB_PATH = path.join(DATA_DIR, 'pending-social-arb-v30.json');
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://believable-inspiration-production-a68b.up.railway.app',
+  'https://detroit-deal-radar-production.up.railway.app',
   'https://front-narrative-desk.austinrock2000.chatgpt.site',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -672,7 +674,7 @@ function health() {
     scanConnection: browserConnection?.isConnected?.() ? 'attached' : 'waiting-for-front-chrome', cdpUrl: CDP_URL,
     transcription: transcription.status(), contentUnderstanding: understanding.status(), videoMeaning: videoMeaning.status(), postUnderstanding: postUnderstanding.status(), socialArbitrage: socialArb.status(),
     contentTargets: { transcriptConcurrency: Number(process.env.FRONT_TRANSCRIPT_CONCURRENCY || 2), deepVideos: Number(process.env.FRONT_CONTENT_DEEP_VIDEOS || 2), scoutVideos: Number(process.env.FRONT_CONTENT_SCOUT_VIDEOS || 1), contextualPosts: Number(process.env.FRONT_CONTEXT_MAX_POSTS || 12) },
-    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','owned-instagram-page','exact-social-seed-navigation','instagram-feed-scroll','instagram-reels-scroll','instagram-hashtag-investigation','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','social-arbitrage-world-change-detection','consumer-behavior-classification','product-company-hypothesis-mapping','social-arb-tiktok-comment-investigation','comment-evidence-isolation','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics'],
+    capabilities: ['single-process-orchestrator','owned-x-page','owned-tiktok-page','owned-instagram-page','exact-social-seed-navigation','instagram-feed-scroll','instagram-reels-scroll','instagram-hashtag-investigation','broad-tiktok-observation','caption-light-tiktok-discovery','all-video-transcription','local-whisper-asr','all-video-meaning','visual-understanding','contextual-post-understanding','semantic-subject-event-clustering','social-arbitrage-world-change-detection','consumer-behavior-classification','product-company-hypothesis-mapping','social-arb-tiktok-comment-investigation','comment-evidence-isolation','generic-word-rejection','narrative-age','lifecycle-stage','velocity-scoring','pre-coin-classification','narrative-ranking','origin-research','single-scan-ledger','explicit-stage-diagnostics','authenticated-ebay-sold-verification','facebook-marketplace-sold-state-verification','deal-radar-market-evidence'],
     activePorts: { bridge: PORT, chromeCdp: CDP_PORT },
   };
 }
@@ -736,7 +738,13 @@ const server = http.createServer(async (req, res) => {
       await sleep(700);
       const opened = openRegularChromeForLogin({ dataDir: DATA_DIR, chromeExecutable: systemChrome, debuggingPort: CDP_PORT });
       await waitForCdp(opened.cdpUrl, { timeoutMs: 12000 });
-      return json(req, res, 200, { ok: true, message: 'Front Chrome is ready. Sign in to X, TikTok, and Instagram and leave this dedicated profile open.', profileDir: frontLoginProfileDir(DATA_DIR), cdpUrl: opened.cdpUrl });
+      return json(req, res, 200, { ok: true, message: 'Front Chrome is ready. Sign in to eBay and Facebook for Deal Radar verification; X, TikTok, and Instagram remain available for Front scans. Leave this dedicated profile open.', profileDir: frontLoginProfileDir(DATA_DIR), cdpUrl: opened.cdpUrl });
+    }
+    if (req.method === 'POST' && url.pathname === '/market-verify') {
+      const body = JSON.parse(await readBody(req) || '{}');
+      const context = await ensureContext();
+      try { return json(req, res, 200, await verifyResaleMarkets(context, body)); }
+      catch (error) { return json(req, res, 500, { ok: false, error: clean(error?.message || error, 500) }); }
     }
     if (req.method === 'POST' && url.pathname === '/scan') {
       if (current) return json(req, res, 409, { error: 'A scan is already running. Use Stop scan before starting another one.', scanId: current.id });
