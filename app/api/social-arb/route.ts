@@ -227,6 +227,11 @@ export async function POST(request:Request){
    ok:true,accepted:normalized.length,rejected:body.signals.length-normalized.length,observed,
    mapped:normalized.filter((s)=>Boolean(s.ticker||s.companyName)).length,
    tickerVerified:normalized.filter((s)=>s.tickerVerified).length,
+   researchCandidates:normalized
+    .filter((s)=>s.tickerVerified&&s.score>=64&&(s.status==='RISING'||s.status==='HIGH_SIGNAL'))
+    .sort((a,b)=>b.score-a.score)
+    .slice(0,3)
+    .map((s)=>s.key),
    secDirectoryAvailable:secRows.length>0,
   });
  }catch(error){return json({error:error instanceof SyntaxError?'Invalid request.':(error as Error).message},502);}
