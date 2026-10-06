@@ -18,12 +18,32 @@ const v3=path.join(persistDir,'v3');
 const observability=path.join(v3,'observability');
 const ephemeralRoot=path.join(os.tmpdir(),'front-miniflare-observability');
 fs.mkdirSync(v3,{recursive:true});
-const reclaimed=sizeOf(observability);
-try{
-  const existing=fs.lstatSync(observability);
-  if(existing.isSymbolicLink()||existing.isDirectory()||existing.isFile())fs.rmSync(observability,{recursive:true,force:true});
-}catch{}
-fs.rmSync(ephemeralRoot,{recursive:true,force:true});
 fs.mkdirSync(ephemeralRoot,{recursive:true});
-fs.symlinkSync(ephemeralRoot,observability,'dir');
+
+function symlinkTarget(p){
+  try{return fs.lstatSync(p).isSymbolicLink()?fs.readlinkSync(p):null;}catch{return null;}
+}
+function sameTarget(target){
+  if(!target)return false;
+  const resolved=path.resolve(path.dirname(observability),target);
+  return resolved===path.resolve(ephemeralRoot);
+}
+
+const existingTarget=symlinkTarget(observability);
+if(sameTarget(existingTarget)){
+  console.log('[front-storage] observability symlink already points to ephemeral storage; leaving shared volume entry untouched');
+  process.exit(0);
+}
+
+const reclaimed=sizeOf(observability);
+try{fs.rmSync(observability,{recursive:true,force:true});}catch{}
+try{
+  fs.symlinkSync(ephemeralRoot,observability,'dir');
+}catch(error){
+  if(error&&error.code==='EEXIST'&&sameTarget(symlinkTarget(observability))){
+    console.log('[front-storage] observability symlink was repaired concurrently; continuing with verified target');
+    process.exit(0);
+  }
+  throw error;
+}
 console.log(`[front-storage] observability redirected to ephemeral storage; reclaimedBytes=${reclaimed}`);
