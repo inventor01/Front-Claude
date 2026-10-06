@@ -17,6 +17,12 @@ export type SocialArbSignal={
  thesis?:string|null;evidence?:SocialArbEvidence[];observed?:number;informationGap?:{status?:string;score?:number|null;marketAwareness?:number|null;note?:string};
 };
 type Feed={signals:SocialArbSignal[];stats:{total:number;highSignal:number;rising:number;mapped:number;tickerVerified:number};methodology?:string;error?:string};
+type SocialArbResearch={
+ signalKey:string;researched?:number;materialityStatus?:string;awarenessStatus?:string;informationGapState?:string;filingCount?:number;financialNewsCount?:number;
+ awareness?:{filings?:{evidence?:Array<{source:string;form?:string;filed?:string;url:string}>};financialNews?:{evidence?:Array<{source:string;title:string;url:string;published?:string|null}>}};
+ informationGap?:{note?:string};materiality?:{note?:string};
+};
+type ResearchFeed={research:SocialArbResearch[];error?:string};
 
 const behaviorNames:Record<string,string>={
  PURCHASED:'Bought',PURCHASE_INTENT:'Wants to buy',REPEAT_PURCHASE:'Repeat buying',SWITCHING:'Switching',STOCKOUT:'Stockout',
@@ -56,9 +62,33 @@ function mergeSignals(persisted:SocialArbSignal[],live:SocialArbSignal[]){
 
 export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComplete}:{liveSignals?:SocialArbSignal[];refreshKey?:number;onScanComplete?:()=>void}){
  const [feed,setFeed]=useState<Feed|null>(null);
+ const [research,setResearch]=useState<Record<string,SocialArbResearch>>({});
  const [busy,setBusy]=useState('');
  const [message,setMessage]=useState('');
  const [error,setError]=useState('');
+
+ async function refreshResearch(){
+  try{
+   const response=await fetch('/api/social-arb/research',{cache:'no-store'});
+   const data=await response.json() as ResearchFeed;
+   if(!response.ok)throw new Error(data.error||'Could not load Social Arb research.');
+   setResearch(Object.fromEntries((data.research||[]).map((item)=>[item.signalKey,item])));
+  }catch(reason){setError((reason as Error).message);}
+ }
+
+ async function researchSignal(signalKey:string){
+  setBusy('research:'+signalKey);setError('');setMessage('Checking SEC filings and financial-media awareness for this candidate…');
+  try{
+   const response=await fetch('/api/social-arb/research',{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({signalKey})
+   });
+   const data=await response.json() as SocialArbResearch&{error?:string};
+   if(!response.ok)throw new Error(data.error||'Candidate research failed.');
+   setResearch((current)=>({...current,[signalKey]:data}));
+   setMessage('Research check saved point-in-time · '+String(data.informationGapState||'unmeasured').replaceAll('-',' ')+'.');
+  }catch(reason){setError((reason as Error).message);}
+  finally{setBusy('');}
+ }
 
  async function refresh(){
   setBusy((value)=>value||'refresh');setError('');
@@ -77,7 +107,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
    .then(async(response)=>{
     const data=await response.json() as Feed;
     if(!response.ok)throw new Error(data.error||'Could not load Social Arb.');
-    if(!cancelled)setFeed(data);
+    if(!cancelled){setFeed(data);void refreshResearch();}
    })
    .catch((reason)=>{if(!cancelled)setError((reason as Error).message);});
   return()=>{cancelled=true;};
@@ -147,6 +177,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
    const behaviors=Object.entries(signal.behaviors||{}).filter(([,count])=>Number(count)>0).sort((a,b)=>Number(b[1])-Number(a[1]));
    const evidence=(signal.evidence||[]).slice(0,5);
    const mapped=Boolean(signal.ticker||signal.companyName);
+   const researchRow=research[signal.key];
    const company=(signal.companyName||'company')+(signal.ticker?' ('+signal.ticker+')':'');
    return <article className={styles.card} key={signal.key}>
     <div className={styles.cardHead}>
@@ -177,12 +208,23 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
      </div>
      <div className={styles.block}>
       <span className={styles.label}><Building2 size={11}/> Information gap</span>
-      <b>Not measured yet</b>
-      <p className={styles.thesis}>Front has detected the social side. Financial-media and analyst awareness must be checked before calling this an information imbalance.</p>
-      {signal.materiality&&<span className={styles.badge}>materiality hypothesis · {signal.materiality}</span>}
+      {researchRow?<>
+       <b>{String(researchRow.informationGapState||'unmeasured').replaceAll('-',' ')}</b>
+       <p className={styles.thesis}>{researchRow.informationGap?.note||'Point-in-time awareness check saved.'}</p>
+       <div className={styles.researchMeta}><span>SEC filing matches <b>{researchRow.filingCount||0}</b></span><span>financial-media matches <b>{researchRow.financialNewsCount||0}</b></span></div>
+       <span className={styles.badge}>materiality · {String(researchRow.materialityStatus||'unquantified').replaceAll('-',' ')}</span>
+      </>:<>
+       <b>Not measured yet</b>
+       <p className={styles.thesis}>Social change alone is not enough. Check company filings and financial-media awareness before calling this an information imbalance.</p>
+      </>}
+      <button className={styles.researchButton} disabled={!signal.tickerVerified||!!busy} onClick={()=>void researchSignal(signal.key)}>{busy==='research:'+signal.key?'Researching…':researchRow?'Re-check gap':'Research gap'}</button>
      </div>
     </div>
     {evidence.length?<div className={styles.evidence}>{evidence.map((item)=><a href={item.url} target="_blank" rel="noreferrer" key={item.id}><span>{item.platform}{item.evidenceType==='comment'?' comment':''} · @{item.author}</span><ExternalLink size={10}/></a>)}</div>:null}
+    {researchRow&&(researchRow.awareness?.filings?.evidence?.length||researchRow.awareness?.financialNews?.evidence?.length)?<div className={styles.researchEvidence}>
+     {(researchRow.awareness?.filings?.evidence||[]).slice(0,3).map((item,index)=><a href={item.url} target="_blank" rel="noreferrer" key={'sec-'+index}>SEC {item.form||'filing'} {item.filed||''}<ExternalLink size={10}/></a>)}
+     {(researchRow.awareness?.financialNews?.evidence||[]).slice(0,3).map((item,index)=><a href={item.url} target="_blank" rel="noreferrer" key={'news-'+index}>{item.source||'Financial media'} · {item.title}<ExternalLink size={10}/></a>)}
+    </div>:null}
    </article>;
   })}</div>:<div className={styles.empty}><b>No Social Arb baseline yet.</b>Run a broad scan. Front needs ordinary consumer/culture evidence before it can detect changes relative to its own history.</div>}
  </section>;
