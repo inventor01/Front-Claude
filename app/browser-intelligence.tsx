@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, ExternalLink, ShieldCheck, X } from 'lucide-react';
+import type { SocialArbSignal } from './social-arb-panel';
 
 const BRIDGE = 'http://127.0.0.1:43981';
 const LOCAL_TIMEOUT_MS = 30_000;
@@ -35,7 +36,7 @@ type BridgeConfig = {
 
 type Evidence = {
   id:string;
-  platform:'X'|'TikTok';
+  platform:'X'|'TikTok'|'Instagram';
   author:string;
   url:string;
   content:string;
@@ -96,7 +97,7 @@ type ScanAudit = {
   sentinelsScanned?:string[];
   errors?:number;
 };
-type ScanResult = {evidence:Evidence[];errors:string[];inferredTopics?:InferredTopic[];audit?:ScanAudit;at:number;config:BridgeConfig};
+type ScanResult = {evidence:Evidence[];errors:string[];inferredTopics?:InferredTopic[];socialArbSignals?:SocialArbSignal[];audit?:ScanAudit;at:number;config:BridgeConfig};
 type Narrative = {id:string;title:string;stage:string;authors:number;firstSeen:number;lastSeen:number;platforms:string[]};
 type StoredResult = {accepted?:number;rejected?:number;freshNarratives?:number;matchedNarratives?:number;freshCoins?:number;inferredNarratives?:number;relationshipsSaved?:number;error?:string};
 type BridgeHealth = {config:BridgeConfig;version:number;scanner?:string;capabilities?:string[];running:boolean;pendingCount?:number;nextScheduledRun?:number|null;scanConnection?:string;lastError?:string|null;lastAudit?:ScanAudit|null};
@@ -156,6 +157,14 @@ async function saveEvidence(evidence:Evidence[],inferredTopics:InferredTopic[]=[
   return data;
 }
 
+async function saveSocialArb(signals:SocialArbSignal[],scanObservedAt?:number){
+  if(!signals.length)return{accepted:0};
+  const response=await fetch('/api/social-arb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({signals,scanObservedAt})});
+  const data=await response.json() as {accepted?:number;error?:string};
+  if(!response.ok)throw new Error(data.error||'Could not save Social Arb findings.');
+  return data;
+}
+
 async function fetchNarratives():Promise<Narrative[]>{
   const response=await fetch('/api/desk?action=narratives',{cache:'no-store'});
   const data=await response.json() as {cards?:Narrative[];error?:string};
@@ -174,6 +183,9 @@ function sourceLabel(item:Evidence){
   if(/TikTok Creative Center/i.test(p))return'TikTok Trend seeds';
   if(/X Latest search/i.test(p))return'X Search';
   if(/TikTok search/i.test(p))return'TikTok Search';
+  if(/Instagram Home/i.test(p))return'Instagram Home';
+  if(/Instagram Reels/i.test(p))return'Instagram Reels';
+  if(/Instagram hashtag/i.test(p))return'Instagram hashtag';
   return item.platform;
 }
 function metric(value:number|null|undefined,label:string){return Number.isFinite(value)?`${label} ${Number(value).toLocaleString()}`:'';}
@@ -218,13 +230,16 @@ export default function BrowserIntelligence(){
     if(flushing.current)return;
     flushing.current=true;
     try{
-      const pending=await local<{evidence:Evidence[];count:number;lastTopics?:InferredTopic[]}>('/pending');
-      if(!pending.evidence.length)return;
-      const stored=await saveEvidence(pending.evidence,pending.lastTopics||[]);
-      await local('/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:pending.evidence.map((row)=>row.id)})});
+      const pending=await local<{evidence:Evidence[];socialArbSignals?:SocialArbSignal[];count:number;socialArbCount?:number;lastTopics?:InferredTopic[]}>('/pending');
+      const socialSignals=pending.socialArbSignals||[];
+      if(!pending.evidence.length&&!socialSignals.length)return;
+      const stored=pending.evidence.length?await saveEvidence(pending.evidence,pending.lastTopics||[]):{accepted:0,inferredNarratives:0};
+      const social=await saveSocialArb(socialSignals);
+      await local('/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:pending.evidence.map((row)=>row.id),socialArbKeys:socialSignals.map((signal)=>signal.key)})});
       setNarratives((await fetchNarratives()).slice(0,8));
       window.dispatchEvent(new CustomEvent('front-browser-evidence-saved'));
-      if(!silent)setMessage(`Synced ${stored.accepted||0} background evidence record(s) and ${stored.inferredNarratives||0} inferred narrative(s) into Front.`);
+      window.dispatchEvent(new CustomEvent('front-social-arb-saved'));
+      if(!silent)setMessage(`Synced ${stored.accepted||0} background evidence record(s), ${stored.inferredNarratives||0} inferred narrative(s), and ${social.accepted||0} Social Arb signal(s) into Front.`);
     }catch(e){if(!silent)setError((e as Error).message);}finally{flushing.current=false;}
   }
 
@@ -280,6 +295,7 @@ export default function BrowserIntelligence(){
       setLastScan(result);
       setMessage(`Collection finished: ${result.evidence.length} evidence record(s), ${result.inferredTopics?.length||0} topic(s). Saving evidence and candidates…`);
       const stored=await saveEvidence(result.evidence,result.inferredTopics||[]);
+      const social=await saveSocialArb(result.socialArbSignals||[],result.at);
       setNarratives((await fetchNarratives()).slice(0,8));
       setConnected(true);
       window.dispatchEvent(new CustomEvent('front-browser-evidence-saved'));
@@ -287,7 +303,8 @@ export default function BrowserIntelligence(){
       const promoted=stored.freshNarratives?` ${stored.freshNarratives} narrative${stored.freshNarratives===1?'':'s'} promoted.`:'';
       const coins=stored.freshCoins?` ${stored.freshCoins} related coin candidate${stored.freshCoins===1?'':'s'} stored.`:'';
       const early=!stored.freshNarratives&&result.evidence.length?' No strict narrative promoted yet; review Early Candidates.':'';
-      setMessage(`Scan complete. Saved ${stored.accepted||0} evidence records. X ${evidenceByPlatform.x||result.evidence.filter((x)=>x.platform==='X').length} · TikTok ${evidenceByPlatform.tiktok||result.evidence.filter((x)=>x.platform==='TikTok').length}.${promoted}${coins}${early}${warning}`);
+      const instagram=result.evidence.filter((x)=>x.platform==='Instagram').length;
+      setMessage(`Scan complete. Saved ${stored.accepted||0} evidence records and ${social.accepted||0} Social Arb signal(s). X ${evidenceByPlatform.x||result.evidence.filter((x)=>x.platform==='X').length} · TikTok ${evidenceByPlatform.tiktok||result.evidence.filter((x)=>x.platform==='TikTok').length} · Instagram ${instagram}.${promoted}${coins}${early}${warning}`);
       void ping(true);
     }catch(e){setError((e as Error).message);}finally{setBusy('');}
   }
@@ -299,11 +316,11 @@ export default function BrowserIntelligence(){
         <div><strong>For You narrative intelligence</strong><div style={{fontSize:12,opacity:.7}}>{connected?`● Bridge connected${health?.version?` · v${health.version}`:''}${health?.running?' · scanning':''}${health?.pendingCount?` · ${health.pendingCount} pending`:''}`:'○ Local bridge offline'}</div></div>
         <button onClick={()=>setOpen(false)} aria-label="Close" style={{background:'none',border:0,color:'inherit'}}><X/></button>
       </div>
-      <p style={{fontSize:13,opacity:.78}}>X For You and TikTok For You are the primary discovery surfaces. Front adaptively samples new unique posts/videos, uses trend pages only as seeds, then deep-searches both platforms when a repeated candidate appears.</p>
+      <p style={{fontSize:13,opacity:.78}}>X For You, TikTok For You, and Instagram are discovery surfaces. Front samples ordinary social behavior broadly, then uses the same evidence for crypto narrative detection and the separate Social Arb world-change engine.</p>
       <div style={{padding:9,borderRadius:9,background:'#d5ff4810',fontSize:12,marginBottom:10}}>Best results: use the dedicated Front Chrome profile as a broad internet-culture observer. Avoid training it only on crypto; the goal is to see the meme before crypto Twitter does.</div>
       <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
         <button onClick={()=>void ping()} disabled={!!busy}>Reconnect</button>
-        <button onClick={()=>void openLogin()} disabled={!!busy}>{busy==='login'?'Opening…':'Open X + TikTok login'}</button>
+        <button onClick={()=>void openLogin()} disabled={!!busy}>{busy==='login'?'Opening…':'Open social logins'}</button>
         <button onClick={()=>void scan()} disabled={!!busy||!connected}>{busy==='scan'?'Investigating…':'Run deep investigation'}</button>
         <button onClick={()=>void flushPending(false)} disabled={!!busy||!connected}>Sync background finds</button>
       </div>
