@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, Eye, Filter, Radio, Sparkles } from 'lucide-react';
 import EmergingTrends, { buildEmergingSignals, type ScanTopic } from './emerging-trends';
 import FrontDesk from './front-desk';
+import SocialArbPanel, { type SocialArbSignal } from './social-arb-panel';
 import styles from './front-live-shell.module.css';
 
 const BRIDGE = 'http://127.0.0.1:43981';
@@ -12,7 +13,7 @@ const VIEW_SESSION_KEY='front.dashboardViewSession.v1';
 
 type LiveEvidence = {
   id:string;
-  platform:'X'|'TikTok';
+  platform:'X'|'TikTok'|'Instagram';
   author:string;
   url:string;
   content:string;
@@ -72,15 +73,18 @@ type LiveState = {
   errors:string[];
   evidence:LiveEvidence[];
   inferredTopics:LiveTopic[];
+  socialArbSignals?:SocialArbSignal[];
   stages?:Record<string,LiveStage>;
   tiktokDiscovery?:LiveStage;
 };
 
-type LiveFilter='all'|'X'|'TikTok'|'early'|'qualified'|'synced';
+type LiveFilter='all'|'X'|'TikTok'|'Instagram'|'early'|'qualified'|'synced';
+type Workspace='crypto'|'social-arb';
 type PersistedSync={scanAt:number;ids:string[];topics:string};
 
 const topicName=(topic:LiveTopic|ScanTopic)=>String(topic.topic||topic.key||'').replace(/\s+/g,' ').trim();
 const topicFingerprint=(topics:LiveTopic[])=>topics.slice(0,30).map((topic)=>`${topic.key||topic.topic}:${topic.evidenceCount||0}:${topic.authorCount||0}:${topic.score||0}:${topic.tier||''}:${topic.corroborated===true?'1':'0'}`).join('|');
+const socialArbFingerprint=(signals:SocialArbSignal[])=>signals.slice(0,30).map((signal)=>`${signal.key}:${signal.score||0}:${signal.authorCount||0}:${signal.evidenceCount||0}:${signal.status||''}:${signal.ticker||''}`).join('|');
 const compact=(value:number|null|undefined)=>value==null?'—':new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1}).format(value);
 const ago=(value:number|null|undefined)=>{
   if(!value)return 'time unknown';
@@ -131,7 +135,7 @@ function writePersistedSync(scanAt:number,ids:Set<string>,topics:string){
   try{localStorage.setItem(LIVE_SYNC_KEY,JSON.stringify({scanAt,ids:[...ids].slice(-250),topics}));}catch{}
 }
 
-async function saveLive(evidence:LiveEvidence[],inferredTopics:LiveTopic[],scanObservedAt:number){
+async function saveLive(evidence:LiveEvidence[],inferredTopics:LiveTopic[],socialArbSignals:SocialArbSignal[],scanObservedAt:number){
   const payload={evidence,inferredTopics,scanObservedAt};
   const response=await fetch('/api/browser-evidence',{
     method:'POST',
@@ -147,6 +151,10 @@ async function saveLive(evidence:LiveEvidence[],inferredTopics:LiveTopic[],scanO
       body:JSON.stringify(payload),
     }).catch(()=>null);
   }
+  if(socialArbSignals.length){
+    const socialResponse=await fetch('/api/social-arb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({signals:socialArbSignals,scanObservedAt})});
+    if(!socialResponse.ok){const socialData=await socialResponse.json().catch(()=>({})) as {error?:string};throw new Error(socialData.error||'Could not sync Social Arb findings.');}
+  }
   return data;
 }
 
@@ -160,6 +168,7 @@ export default function FrontLiveShell(){
   const [expanded,setExpanded]=useState(false);
   const [filter,setFilter]=useState<LiveFilter>('all');
   const [selectedTopic,setSelectedTopic]=useState('');
+  const [workspace,setWorkspace]=useState<Workspace>('crypto');
   const syncedIds=useRef(new Set<string>());
   const lastTopics=useRef('');
   const syncing=useRef(false);
@@ -229,14 +238,14 @@ export default function FrontLiveShell(){
           setExpanded(true);
         }
 
-        const fingerprint=topicFingerprint(next.inferredTopics||[]);
+        const fingerprint=topicFingerprint(next.inferredTopics||[])+'|social-arb:'+socialArbFingerprint(next.socialArbSignals||[]);
         const ready=(next.evidence||[]).filter((row)=>{const video=row.platform==='TikTok'||/video/i.test(String(row.mediaType||''));return !video||(['captioned','transcribed','no-speech'].includes(String(row.transcriptStatus||''))&&row.videoMeaningStatus==='modeled');});
         const fresh=ready.filter((row)=>row?.id&&!syncedIds.current.has(row.id)).slice(0,120);
         const topicsChanged=Boolean(fingerprint&&fingerprint!==lastTopics.current);
         if(scanAt&&(fresh.length||topicsChanged)&&!syncing.current){
           syncing.current=true;
           try{
-            await saveLive(fresh,next.inferredTopics||[],scanAt);
+            await saveLive(fresh,next.inferredTopics||[],next.socialArbSignals||[],scanAt);
             for(const row of fresh)syncedIds.current.add(row.id);
             if(fresh.length)setSyncedEvidenceIds(new Set(syncedIds.current));
             if(fingerprint)lastTopics.current=fingerprint;
@@ -288,7 +297,7 @@ export default function FrontLiveShell(){
         const needle=topicName(topic).toLowerCase();
         return needle.length>1&&row.content.toLowerCase().includes(needle);
       }
-      if(filter==='X'||filter==='TikTok')return row.platform===filter;
+      if(filter==='X'||filter==='TikTok'||filter==='Instagram')return row.platform===filter;
       if(filter==='synced')return syncedEvidenceIds.has(row.id);
       if(filter==='early')return evidenceMatchesTopics(row,earlyTopics);
       if(filter==='qualified')return evidenceMatchesTopics(row,qualifiedTopics);
@@ -330,6 +339,7 @@ export default function FrontLiveShell(){
       <div className={styles.platforms}>
         <button data-selected={filter==='X'&&!selectedTopic||undefined} onClick={()=>chooseFilter('X')}>X {xCount}</button>
         <button data-selected={filter==='TikTok'&&!selectedTopic||undefined} onClick={()=>chooseFilter('TikTok')}>TikTok {tiktokCount}</button>
+        <button data-selected={filter==='Instagram'&&!selectedTopic||undefined} onClick={()=>chooseFilter('Instagram')}>Instagram {Number(live?.platformCounts?.Instagram||0)}</button>
         <button className={styles.allFilter} data-selected={filter==='all'&&!selectedTopic||undefined} onClick={()=>chooseFilter('all')}><Filter size={11}/>All</button>
         <span className={styles.pulse}>{live.active?`${panelStatus} · live counters updating every 3s`:'last scan stays visible until the next scan'}</span>
       </div>
@@ -353,6 +363,12 @@ export default function FrontLiveShell(){
       </div>}
       {syncError&&<div className={styles.liveError}>{syncError}</div>}
     </section>}
-    <FrontDesk key={refreshKey} viewCount={viewCount}/>
+    <div style={{display:'flex',justifyContent:'center',gap:8,padding:'16px 16px 4px',background:'#090b0f'}}>
+      <button onClick={()=>setWorkspace('crypto')} aria-pressed={workspace==='crypto'} style={{border:'1px solid #ffffff18',borderRadius:999,padding:'9px 14px',fontWeight:800,cursor:'pointer',background:workspace==='crypto'?'#d5ff48':'#12161d',color:workspace==='crypto'?'#111':'#e9edf5'}}>Crypto Radar</button>
+      <button onClick={()=>setWorkspace('social-arb')} aria-pressed={workspace==='social-arb'} style={{border:'1px solid #ffffff18',borderRadius:999,padding:'9px 14px',fontWeight:800,cursor:'pointer',background:workspace==='social-arb'?'#d5ff48':'#12161d',color:workspace==='social-arb'?'#111':'#e9edf5'}}>Social Arb{(live?.socialArbSignals?.length||0)?` · ${live?.socialArbSignals?.length||0}`:''}</button>
+    </div>
+    {workspace==='social-arb'
+      ?<SocialArbPanel liveSignals={live?.socialArbSignals||[]} refreshKey={refreshKey} onScanComplete={()=>setRefreshKey((value)=>value+1)}/>
+      :<FrontDesk key={refreshKey} viewCount={viewCount}/>}
   </>;
 }

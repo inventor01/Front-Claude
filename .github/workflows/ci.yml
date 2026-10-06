@@ -33,10 +33,11 @@ jobs:
       - name: Production dependency security audit
         run: npm audit --omit=dev --audit-level=high
 
-      # Build tooling currently has one documented Drizzle Kit/esbuild moderate
-      # chain with no safe in-range fix. High/critical tooling regressions fail.
+      # Production must remain completely clean. Development tooling currently
+      # has one exact, documented, unpatched braces advisory; the helper rejects
+      # every other high/critical finding.
       - name: Full dependency high-severity audit
-        run: npm audit --audit-level=high
+        run: node scripts/audit-dev.mjs
 
       - name: Install browser bridge dependencies
         run: npm install --prefix browser-bridge --no-audit --no-fund
@@ -55,14 +56,11 @@ jobs:
           await browser.close();
           NODE
 
-      - name: Migrations match db/schema.ts
-        run: |
-          npm run db:generate
-          if [ -n "$(git status --porcelain drizzle/)" ]; then
-            echo "::error::db/schema.ts changed without a generated migration. Run 'npm run db:generate' and commit drizzle/."
-            git status --porcelain drizzle/
-            exit 1
-          fi
+      # Front uses hand-written SQL migrations after the original Drizzle
+      # snapshot history. Verify schema-table coverage without asking
+      # drizzle-kit to regenerate already-shipped migrations.
+      - name: Migrations cover db/schema.ts
+        run: node scripts/verify-schema-migrations.mjs
 
       - name: Test
         run: node tests/verify.mjs

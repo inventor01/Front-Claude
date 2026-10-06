@@ -11,7 +11,7 @@ const scanLedger=fs.readFileSync(new URL('../browser-bridge/src/scan-ledger-v26.
 test('scan UI shows display-only emerging signals without weakening dashboard promotion',()=>{
   assert.match(shell,/buildEmergingSignals\(live\?\.evidence\|\|\[\],live\?\.inferredTopics\|\|\[\],24\)/);
   assert.match(shell,/<EmergingTrends topics=\{topics\}/);
-  assert.match(shell,/saveLive\(fresh,next\.inferredTopics\|\|\[\],scanAt\)/);
+  assert.match(shell,/saveLive\(fresh,next\.inferredTopics\|\|\[\],next\.socialArbSignals\|\|\[\],scanAt\)/);
   assert.doesNotMatch(shell,/saveLive\(fresh,topics/);
   assert.match(evidenceRoute,/if\(evidenceCount<2\|\|authorCount<2\)continue/);
   assert.match(evidenceRoute,/if\(tier==='candidate'&&row\.corroborated!==true\)continue/);

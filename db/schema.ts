@@ -35,3 +35,26 @@ export const bridgeAgents=sqliteTable('bridge_agents',{
   owner:text('owner').notNull(),id:text('id').notNull(),label:text('label').notNull(),status:text('status').notNull(),
   lastSeen:integer('last_seen').notNull(),capabilities:text('capabilities').notNull().default('{}'),created:integer('created').notNull()
 },t=>[primaryKey({columns:[t.owner,t.id]})]);
+
+
+export const socialArbObservations=sqliteTable('social_arb_observations',{
+  owner:text('owner').notNull(),signalKey:text('signal_key').notNull(),observed:integer('observed').notNull(),title:text('title').notNull(),
+  product:text('product'),brand:text('brand'),companyName:text('company_name'),ticker:text('ticker'),relation:text('relation'),direction:text('direction').notNull().default('unknown'),
+  materiality:text('materiality'),mappingStatus:text('mapping_status').notNull().default('unmapped'),tickerVerified:integer('ticker_verified').notNull().default(0),
+  score:real('score').notNull().default(0),status:text('status').notNull().default('WATCH'),authorCount:integer('author_count').notNull().default(0),
+  evidenceCount:integer('evidence_count').notNull().default(0),platforms:text('platforms').notNull().default('[]'),behaviors:text('behaviors').notNull().default('{}'),
+  changeJson:text('change_json').notNull().default('{}'),thesis:text('thesis'),data:text('data').notNull().default('{}')
+},t=>[
+  primaryKey({columns:[t.owner,t.signalKey,t.observed]}),
+  index('social_arb_observations_owner_observed_idx').on(t.owner,t.observed),
+  index('social_arb_observations_owner_score_idx').on(t.owner,t.score,t.observed)
+]);
+
+export const socialArbCompanyMappings=sqliteTable('social_arb_company_mappings',{
+  owner:text('owner').notNull(),signalKey:text('signal_key').notNull(),ticker:text('ticker'),companyName:text('company_name'),brand:text('brand'),relation:text('relation'),
+  mappingStatus:text('mapping_status').notNull().default('unmapped'),tickerVerified:integer('ticker_verified').notNull().default(0),ownershipVerified:integer('ownership_verified').notNull().default(0),
+  confidence:real('confidence').notNull().default(0),source:text('source').notNull().default('social-arb-engine'),updated:integer('updated').notNull()
+},t=>[
+  primaryKey({columns:[t.owner,t.signalKey]}),
+  index('social_arb_company_mappings_owner_ticker_idx').on(t.owner,t.ticker)
+]);

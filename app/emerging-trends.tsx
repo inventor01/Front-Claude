@@ -5,7 +5,7 @@ import styles from './front-live-shell.module.css';
 
 export type ScanEvidence = {
   id:string;
-  platform:'X'|'TikTok';
+  platform:'X'|'TikTok'|'Instagram';
   author:string;
   content:string;
   transcript?:string|null;

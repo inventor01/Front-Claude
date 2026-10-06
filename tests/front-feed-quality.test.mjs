@@ -30,7 +30,7 @@ test('undated-post velocity comes from two stored metric observations',()=>{
 test('scan can expose emerging signals without weakening the canonical dashboard gate',()=>{
   assert.match(shell,/buildEmergingSignals\(live\?\.evidence\|\|\[\],live\?\.inferredTopics\|\|\[\],24\)/);
   assert.match(shell,/<EmergingTrends topics=\{topics\}/);
-  assert.match(shell,/saveLive\(fresh,next\.inferredTopics\|\|\[\],scanAt\)/);
+  assert.match(shell,/saveLive\(fresh,next\.inferredTopics\|\|\[\],next\.socialArbSignals\|\|\[\],scanAt\)/);
   assert.doesNotMatch(shell,/saveLive\(fresh,topics/);
   assert.match(evidenceRoute,/if\(evidenceCount<2\|\|authorCount<2\)continue/);
   assert.match(evidenceRoute,/if\(tier==='candidate'&&row\.corroborated!==true\)continue/);
