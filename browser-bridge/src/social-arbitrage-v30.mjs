@@ -103,7 +103,7 @@ function baselineFor(history, key) {
   const rows = Array.isArray(history?.[key]) ? history[key].filter((row) => Date.now() - Number(row.at || 0) <= HISTORY_TTL_MS) : [];
   return {
     samples: rows.length,
-    evidence: median(rows.map((row) => Number(row.evidenceCount || 0))),
+    evidence: median(rows.map((row) => Number(row.postEvidenceCount ?? row.evidenceCount ?? 0))),
     authors: median(rows.map((row) => Number(row.authorCount || 0))),
     behaviors: median(rows.map((row) => Number(row.behaviorCount || 0))),
     comments: median(rows.map((row) => Number(row.commenterCount || 0))),
@@ -157,11 +157,13 @@ export function deriveSocialArbCandidates(rows = [], { history = {}, now = Date.
         parentUrl: row.parentUrl ? clean(row.parentUrl, 2048) : null,
       });
     }
+    const postEvidenceCount = evidence.filter((item) => item.evidenceType !== 'comment').length;
+    const commentEvidenceCount = evidence.length - postEvidenceCount;
     const behaviorCount = Object.values(group.behaviorCounts).reduce((sum, value) => sum + Number(value || 0), 0);
     const positive = [...POSITIVE].reduce((sum, key) => sum + Number(group.behaviorCounts[key] || 0), 0);
     const negative = [...NEGATIVE].reduce((sum, key) => sum + Number(group.behaviorCounts[key] || 0), 0);
     const baseline = baselineFor(history, group.key);
-    const current = evidence.length;
+    const current = postEvidenceCount;
     const growthMultiple = baseline.samples && baseline.evidence > 0 ? current / baseline.evidence : null;
     const authorMultiple = baseline.samples && baseline.authors > 0 ? authors.size / baseline.authors : null;
     const commentMultiple = baseline.samples && baseline.comments > 0 ? commenters.size / baseline.comments : null;
@@ -188,6 +190,8 @@ export function deriveSocialArbCandidates(rows = [], { history = {}, now = Date.
       behaviors: group.behaviorCounts,
       behaviorCount,
       evidenceCount: evidence.length,
+      postEvidenceCount,
+      commentEvidenceCount,
       authorCount: authors.size,
       commenterCount: commenters.size,
       independentVoiceCount: authors.size + commenters.size,
@@ -375,7 +379,7 @@ export class SocialArbitrageEngineV30 {
   updateHistory(candidates, at) {
     for (const candidate of candidates) {
       const prior = Array.isArray(this.history[candidate.key]) ? this.history[candidate.key] : [];
-      prior.push({ at, evidenceCount: candidate.evidenceCount, authorCount: candidate.authorCount, commenterCount: candidate.commenterCount || 0, behaviorCount: candidate.behaviorCount, score: candidate.score });
+      prior.push({ at, evidenceCount: candidate.evidenceCount, postEvidenceCount: candidate.postEvidenceCount ?? candidate.evidenceCount, commentEvidenceCount: candidate.commentEvidenceCount || 0, authorCount: candidate.authorCount, commenterCount: candidate.commenterCount || 0, behaviorCount: candidate.behaviorCount, score: candidate.score });
       this.history[candidate.key] = prior.filter((row) => at - Number(row.at || 0) <= HISTORY_TTL_MS).slice(-120);
     }
     writeJson(this.historyPath, this.history);
