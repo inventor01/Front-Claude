@@ -23,12 +23,15 @@ test('research uses downstream SEC filings and financial-media evidence',()=>{
  assert.match(research,/news\.google\.com\/rss\/search/);
  assert.match(research,/earnings revenue sales stock investor analyst/);
  assert.match(research,/social_arb_research_runs/);
+ assert.match(research,/x-front-bridge-key/);
+ assert.match(research,/candidates\.length<4/);
 });
 
 test('24-7 autoscan has backpressure and world-first rotating discovery',()=>{
  assert.match(scheduler,/activeCount/);
  assert.match(scheduler,/social-arb-auto-/);
  assert.match(scheduler,/Observe ordinary consumer and cultural behavior before stock discussion/);
+ assert.match(scheduler,/caller:'FRONT_SOCIAL_ARB'/);
  assert.match(scheduler,/platforms:\['X','TikTok','Instagram'\]/);
  assert.match(scheduler,/b%4===0/);
 });
@@ -38,6 +41,8 @@ test('remote bridge persists Social Arb results through bridge auth',()=>{
  assert.match(social,/requireBridge/);
  assert.match(cloud,/syncSocialArb/);
  assert.match(cloud,/scanObservedAt/);
+ assert.match(cloud,/researchCandidates/);
+ assert.match(cloud,/\/api\/social-arb\/research/);
  assert.match(cloud,/socialArbSummary/);
 });
 
