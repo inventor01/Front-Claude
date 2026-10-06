@@ -31,6 +31,7 @@ export async function POST(request:Request){
     const raw=await bodyJson<any>(request);
     const requestId=clean(raw.requestId,180);
     if(!requestId)return noStore({error:'requestId is required.'},400);
+    const caller=raw.caller==='FRONT_SOCIAL_ARB'?'FRONT_SOCIAL_ARB':'AI_EMPLOYEE_OS';
     const platforms=[...new Set((Array.isArray(raw.platforms)?raw.platforms:[]).map(String).filter((x:string)=>ALLOWED.has(x)))];
     if(!platforms.length)return noStore({error:'At least one supported platform is required.'},400);
     const keywords=[...new Set((Array.isArray(raw.keywords)?raw.keywords:[]).map((x:any)=>clean(x,100)).filter((x:string)=>x.length>=2))].slice(0,30);
@@ -50,16 +51,26 @@ export async function POST(request:Request){
       }
     };
     const now=Date.now(),id=crypto.randomUUID();
-    const existing=await db().prepare('SELECT id,status,created FROM agent_scroll_jobs WHERE owner=? AND caller=? AND request_id=? LIMIT 1').bind(owner,'AI_EMPLOYEE_OS',requestId).first<any>();
+    const existing=await db().prepare('SELECT id,status,created FROM agent_scroll_jobs WHERE owner=? AND caller=? AND request_id=? LIMIT 1').bind(owner,caller,requestId).first<any>();
     if(existing)return noStore({id:existing.id,status:existing.status,deduplicated:true,created:existing.created});
     try{
       await db().prepare(`INSERT INTO agent_scroll_jobs(owner,id,caller,request_id,status,phase,request_json,created)
-        VALUES(?,?,?,?,?,?,?,?)`).bind(owner,id,'AI_EMPLOYEE_OS',requestId,'QUEUED','QUEUED',JSON.stringify(normalized),now).run();
+        VALUES(?,?,?,?,?,?,?,?)`).bind(owner,id,caller,requestId,'QUEUED','QUEUED',JSON.stringify(normalized),now).run();
     }catch(error){
-      const raced=await db().prepare('SELECT id,status,created FROM agent_scroll_jobs WHERE owner=? AND caller=? AND request_id=? LIMIT 1').bind(owner,'AI_EMPLOYEE_OS',requestId).first<any>();
+      const raced=await db().prepare('SELECT id,status,created FROM agent_scroll_jobs WHERE owner=? AND caller=? AND request_id=? LIMIT 1').bind(owner,caller,requestId).first<any>();
       if(raced)return noStore({id:raced.id,status:raced.status,deduplicated:true,created:raced.created});
       throw error;
     }
     return noStore({id,status:'QUEUED',deduplicated:false,created:now},201);
+  }catch(error){if(error instanceof Response)return error;return noStore({error:(error as Error).message},500);}
+}
+
+export async function GET(request:Request){
+  try{
+    const owner=requireService(request);
+    const rows=await db().prepare(`SELECT id,status,phase,request_id,created,started,heartbeat FROM agent_scroll_jobs
+      WHERE owner=? AND status IN ('QUEUED','CLAIMED','SCROLLING','ANALYZING','UPLOADING')
+      ORDER BY created ASC LIMIT 20`).bind(owner).all<any>();
+    return noStore({active:rows.results,activeCount:rows.results.length,at:Date.now()});
   }catch(error){if(error instanceof Response)return error;return noStore({error:(error as Error).message},500);}
 }

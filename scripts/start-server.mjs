@@ -126,6 +126,20 @@ const server = spawn(process.execPath, args, {
   env: process.env,
 });
 
+let autoscan;
+if (/^(1|true|yes|on)$/i.test(String(process.env.FRONT_SOCIAL_ARB_AUTOSCAN || ''))) {
+  autoscan = spawn(process.execPath, [path.join(projectRoot, "scripts/social-arb-scheduler.mjs")], {
+    cwd: projectRoot,
+    stdio: "inherit",
+    env: process.env,
+  });
+  autoscan.on("exit", (code, signal) => {
+    if (code && !signal) console.warn(`[front] Social Arb autoscan scheduler exited with code ${code}`);
+  });
+} else {
+  console.log("[front] Social Arb autoscan scheduler disabled.");
+}
+
 let watcher;
 if (process.env.FRONT_SETTINGS_KEY && process.env.FRONT_STANDALONE_USER_ID) {
   watcher = spawn(process.execPath, [path.join(projectRoot, "scripts/pumpportal-watcher.mjs")], {
@@ -145,6 +159,7 @@ function stop(signal = "SIGTERM") {
   if (stopping) return;
   stopping = true;
   try { watcher?.kill(signal); } catch {}
+  try { autoscan?.kill(signal); } catch {}
   try { server.kill(signal); } catch {}
   setTimeout(() => process.exit(0), 2000).unref();
 }

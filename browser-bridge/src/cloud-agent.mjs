@@ -68,7 +68,9 @@ function compactResult(scan,live){
     inferredTopics:Array.isArray(scan?.inferredTopics)?scan.inferredTopics.slice(0,50):Array.isArray(live?.inferredTopics)?live.inferredTopics.slice(0,50):[],
     errors:Array.isArray(scan?.errors)?scan.errors.slice(-30):Array.isArray(live?.errors)?live.errors.slice(-30):[],
     audit:scan?.audit||null,transcription:scan?.transcription||null,contentUnderstanding:scan?.contentUnderstanding||null,
-    videoMeaning:scan?.videoMeaning||null,postUnderstanding:scan?.postUnderstanding||null,at:Date.now()
+    videoMeaning:scan?.videoMeaning||null,postUnderstanding:scan?.postUnderstanding||null,
+    socialArbSummary:{count:Array.isArray(scan?.socialArbSignals)?scan.socialArbSignals.length:0,sync:scan?.socialArbSync||null},
+    at:Date.now()
   };
 }
 function safeEvidence(row){
@@ -80,6 +82,29 @@ function safeEvidence(row){
     provenance:clean(row.provenance,240),published:number(row.published),views:number(row.views),
     likes:number(row.likes),comments:number(row.comments)};
 }
+async function syncSocialArb(scan){
+  const signals=Array.isArray(scan?.socialArbSignals)?scan.socialArbSignals.slice(0,80):[];
+  if(!signals.length)return {ok:true,accepted:0,reason:'no-signals',research:[]};
+  const synced=await cloud('/api/social-arb',{
+    method:'POST',
+    body:JSON.stringify({signals,scanObservedAt:Number(scan?.at)||Date.now()})
+  },30000);
+  const keys=Array.isArray(synced?.researchCandidates)?synced.researchCandidates.slice(0,3):[];
+  const research=[];
+  for(const signalKey of keys){
+    try{
+      const result=await cloud('/api/social-arb/research',{
+        method:'POST',
+        body:JSON.stringify({signalKey})
+      },45000);
+      research.push({signalKey,ok:true,informationGapState:result?.informationGap?.state||null,awarenessStatus:result?.awareness?.status||null,materialityStatus:result?.materiality?.status||null});
+    }catch(error){
+      research.push({signalKey,ok:false,error:clean(error?.message||error,300)});
+    }
+  }
+  return {...synced,research};
+}
+
 async function uploadEvidence(job,rows,seen){
   const fresh=(Array.isArray(rows)?rows:[]).map(safeEvidence).filter(row=>row&&!seen.has(row.id));
   for(let i=0;i<fresh.length;i+=12){
@@ -116,6 +141,10 @@ async function runJob(job){
   await scanPromise;
   try{live=await local('/live',{},8000);}catch{}
   try{await uploadEvidence(job,scanResult?.evidence||live?.evidence,seen);}catch{}
+  if(scanResult&&Array.isArray(scanResult.socialArbSignals)&&scanResult.socialArbSignals.length){
+    try{scanResult.socialArbSync=await syncSocialArb(scanResult);}
+    catch(error){scanResult.socialArbSync={ok:false,error:clean(error?.message||error)};}
+  }
   const localStatus=String(live?.status||'');
   const status=cancelled||localStatus==='stopped'?'CANCELLED':scanError||localStatus==='failed'?'FAILED':'COMPLETED';
   const limitations=[];
