@@ -1,3 +1,18 @@
+## 2026-10-06 — Rolling-deploy persistence idempotence (v37)
+
+### Root cause
+Railway rolling deployments briefly run the old and new Front containers against the same persistent volume. The startup prep script deleted and recreated the already-correct `v3/observability` symlink on every boot. During handoff, that unnecessary shared-path mutation could race with the old runtime and produce `EEXIST`, while `start-server.mjs` merely warned and continued.
+
+### Permanent fixes
+- Persistence prep now leaves an already-correct observability symlink untouched.
+- Legacy directory/file state is still repaired when necessary.
+- A concurrent repair that results in the same verified target is accepted safely.
+- Genuine persistence-preparation failure is now fail-closed; Front refuses to start in an unverified persistent-state configuration.
+- Added regression tests proving repeated starts reuse the same symlink inode and legacy directories are repaired.
+
+### Production proof needed
+Merge/deploy remain blocked until the full Front CI suite passes. After deployment, Railway startup logs must show the idempotent reuse path without the previous `EEXIST` warning.
+
 ## 2026-10-06 — Social Arb bridge readiness visibility (v36)
 
 ### Root cause
