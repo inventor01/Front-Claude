@@ -35,6 +35,7 @@ test('Front scroll queue HTTP contract', {timeout:120000},async()=>{
    assert.equal((await api('/api/agent/capabilities','GET',null,'none')).status,401);
    const payload={requestId:'ci-research',objective:'hoodie patterns',
      mode:'scout',platforms:['Instagram'],keywords:['hoodie'],
+     seedUrls:['https://x.com/example/status/2107202162770030877?s=12','https://www.instagram.com/reel/CiAbc123/?utm_source=unit'],
      targetUniqueFeedItems:12,maxSeconds:40};
    const first=await api('/api/agent/scroll-jobs','POST',payload);
    const again=await api('/api/agent/scroll-jobs','POST',payload);
@@ -45,6 +46,10 @@ test('Front scroll queue HTTP contract', {timeout:120000},async()=>{
      capabilities:{supportedPlatforms:['Instagram'],chromeReady:true}};
    const claim=await api('/api/agent/bridge/claim','POST',heartbeat,'bridge');
    assert.equal(claim.data.job?.id,first.data.id);
+   assert.deepEqual(claim.data.job?.request?.seedUrls,[
+     'https://x.com/example/status/2107202162770030877',
+     'https://www.instagram.com/reel/CiAbc123/'
+   ]);
    assert.equal((await api('/api/agent/bridge/claim','POST',heartbeat,'bridge')).data.job,null);
    const leaseId=claim.data.job.leaseId,id=first.data.id;
    const result=await api('/api/agent/bridge/jobs/'+id+'/heartbeat','POST',{
