@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- encrypted provider metadata is normalized at the storage boundary. */
 import { env } from 'cloudflare:workers';
 import { db } from '@/lib/front-agent-auth';
 
