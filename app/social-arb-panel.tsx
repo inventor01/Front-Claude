@@ -260,15 +260,7 @@ export default function SocialArbPanel({liveSignals=[],refreshKey=0,onScanComple
     </div>
     {outcome?<div className={styles.outcome}>
      <div><span>Point-in-time journal</span><b>{outcome.status.replaceAll('-',' ')}</b></div>
-     <div><span>Baseline</span><b>{outcome.baselinePrice?'
-    {researchRow&&(researchRow.awareness?.filings?.evidence?.length||researchRow.awareness?.financialNews?.evidence?.length)?<div className={styles.researchEvidence}>
-     {(researchRow.awareness?.filings?.evidence||[]).slice(0,3).map((item,index)=><a href={item.url} target="_blank" rel="noreferrer" key={'sec-'+index}>SEC {item.form||'filing'} {item.filed||''}<ExternalLink size={10}/></a>)}
-     {(researchRow.awareness?.financialNews?.evidence||[]).slice(0,3).map((item,index)=><a href={item.url} target="_blank" rel="noreferrer" key={'news-'+index}>{item.source||'Financial media'} · {item.title}<ExternalLink size={10}/></a>)}
-    </div>:null}
-   </article>;
-  })}</div>:<div className={styles.empty}><b>No Social Arb baseline yet.</b>Run a broad scan. Front needs ordinary consumer/culture evidence before it can detect changes relative to its own history.</div>}
- </section>;
-}+outcome.baselinePrice.toFixed(2):'awaiting provider'}</b><small>{outcome.baselineKind?outcome.baselineKind.replaceAll('-',' '):''}</small></div>
+     <div><span>Baseline</span><b>{outcome.baselinePrice?'$'+outcome.baselinePrice.toFixed(2):'awaiting provider'}</b><small>{outcome.baselineKind?outcome.baselineKind.replaceAll('-',' '):''}</small></div>
      {['1','5','20','60'].map((horizon)=>{
       const row=outcome.horizons?.[horizon];
       const measured=row?.status==='measured'&&Number.isFinite(Number(row.return));
