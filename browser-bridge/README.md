@@ -29,6 +29,25 @@ chmod +x browser-bridge/start.command
 
 After it starts, open Front → **Settings**, click **Open X + TikTok + Instagram login**, and sign in normally in the regular Chrome window Front opens. Leave that Front Chrome session available while scanning. Front's scan tabs themselves run in the background.
 
+### Keep Front running automatically on macOS
+
+After a normal manual start works and the social accounts are signed in, install the user LaunchAgent once:
+
+```bash
+chmod +x browser-bridge/install-autostart.command browser-bridge/uninstall-autostart.command
+./browser-bridge/install-autostart.command
+```
+
+The LaunchAgent contains only local file paths—no API keys, cookies, or social credentials. It starts Front when you sign in to the Mac and restarts the bridge if the parent process exits. Inside the bridge, a separate cloud-agent watchdog restarts Railway polling if that child process crashes while the local scanner remains healthy.
+
+Runtime logs are written under `~/.front-browser-bridge/launchd.stdout.log` and `launchd.stderr.log`. Removing autostart does not delete the dedicated Chrome profile, logins, settings, evidence history, or local model configuration:
+
+```bash
+./browser-bridge/uninstall-autostart.command
+```
+
+A LaunchAgent cannot scan while the Mac is powered off, asleep, or logged out, and it does not bypass platform login challenges. For true continuous collection the Mac must remain awake with the dedicated Front Chrome session usable.
+
 If X or TikTok has temporarily limited login, do not repeatedly retry. Complete the platform's normal verification/recovery flow or wait for the restriction to clear, then use the same Front Chrome profile again.
 
 ## Stop an active scan
